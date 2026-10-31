@@ -65,7 +65,7 @@ function GlobeContent({
 }) {
   const reducedMotion = usePrefersReducedMotion();
   const [chunkTimedOut, setChunkTimedOut] = useState(false);
-  const fallback = <GlobeFallback label={copy.globeStaticLabel} />;
+  const fallback = <GlobeFallback label={copy.globeStaticLabel} lang={lang} />;
 
   useEffect(() => {
     if (reducedMotion) {

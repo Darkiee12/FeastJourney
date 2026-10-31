@@ -168,12 +168,15 @@ function AppLayout() {
 
       <div className="flex min-h-dvh flex-col">
         <header className="site-header sticky top-0 z-50 border-b border-white/10 bg-space-deep">
-          <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 sm:px-6">
+          {/* Compact single-row app bar: never wraps, even on 320px phones.
+              Public links collapse into a Menu entry below 480px; account and
+              language controls stay reachable but shrink-proof. */}
+          <div className="mx-auto flex max-w-7xl flex-nowrap items-center gap-x-1 px-3 py-2.5 min-[480px]:gap-x-2 min-[480px]:px-4 sm:px-6">
             <Link
               to="/"
               search={{ lang }}
               aria-label={copy.homeLabel}
-              className="font-display mr-auto flex items-center gap-3 text-2xl leading-none tracking-wide text-white no-underline md:text-3xl"
+              className="font-display mr-auto flex min-w-0 flex-none items-center gap-2 text-xl leading-none tracking-wide text-white no-underline min-[480px]:gap-3 min-[480px]:text-2xl md:text-3xl"
             >
               <img
                 src="/applogo.png"
@@ -181,14 +184,14 @@ function AppLayout() {
                 width={64}
                 height={64}
                 fetchPriority="high"
-                className="block h-8 w-auto object-contain md:h-10"
+                className="block h-7 w-auto flex-none object-contain min-[480px]:h-8 md:h-10"
               />
-              FeastJourney
+              <span className="truncate">FeastJourney</span>
             </Link>
 
             <nav
               aria-label={adminMode ? copy.adminNavSectionsLabel : "FeastJourney"}
-              className="flex flex-wrap items-center gap-1"
+              className="flex flex-none items-center gap-1"
             >
               {adminMode ? (
                 <>
@@ -250,7 +253,7 @@ function AppLayout() {
                     search={{ lang }}
                     hash="discover"
                     resetScroll={false}
-                    className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white"
+                    className="hidden min-h-11 flex-none items-center rounded-full px-3 text-sm font-semibold whitespace-nowrap text-white/85 no-underline hover:bg-white/10 hover:text-white min-[480px]:inline-flex"
                   >
                     {copy.navDiscover}
                   </Link>
@@ -259,15 +262,42 @@ function AppLayout() {
                     search={{ lang }}
                     hash="recommend"
                     resetScroll={false}
-                    className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold text-white/85 no-underline hover:bg-white/10 hover:text-white"
+                    className="hidden min-h-11 flex-none items-center rounded-full px-3 text-sm font-semibold whitespace-nowrap text-white/85 no-underline hover:bg-white/10 hover:text-white min-[480px]:inline-flex"
                   >
                     {copy.ctaRecommend}
                   </Link>
+                  <DropdownMenu modal={false}>
+                    <DropdownMenuTrigger className="inline-flex min-h-11 flex-none items-center rounded-full px-3 text-sm font-semibold text-white/85 hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-white min-[480px]:hidden">
+                      Menu
+                      <svg aria-hidden="true" viewBox="0 0 16 16" className="h-4 w-4">
+                        <path
+                          d="M4 6l4 4 4-4"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuItem asChild>
+                        <Link to="/" search={{ lang }} hash="discover" resetScroll={false}>
+                          {copy.navDiscover}
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link to="/" search={{ lang }} hash="recommend" resetScroll={false}>
+                          {copy.ctaRecommend}
+                        </Link>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </>
               )}
             </nav>
 
-            <div className="flex items-center gap-1">
+            <div className="flex flex-none items-center gap-0.5 min-[480px]:gap-1">
               <AccountMenu />
               <LanguageMenu />
             </div>

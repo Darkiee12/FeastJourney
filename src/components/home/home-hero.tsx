@@ -46,14 +46,9 @@ function SparkleIcon() {
 }
 
 function surprise() {
-  const globeLive = document.querySelector(".hero-globe canvas") !== null;
-
-  if (!globeLive) {
-    document.getElementById("discover")?.scrollIntoView();
-
-    return;
-  }
-
+  // Contextual globe control only: spotlight another featured dish through
+  // the globe scheduler. Never navigate or scroll as a fallback — when the
+  // WebGL globe is absent the static preview owns its own rotation.
   window.dispatchEvent(new CustomEvent(SURPRISE_DISH_EVENT));
 }
 
@@ -65,53 +60,55 @@ export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
     >
       <div aria-hidden="true" className="hero-stars" />
 
-      <div className="relative z-[2] mx-auto w-full max-w-3xl px-5 pt-[clamp(2rem,7vh,4rem)] text-center">
-        <h1 className="font-display mb-4 text-[clamp(2.9rem,9vw,5.25rem)] leading-[1.02] tracking-[0.015em] text-balance text-white text-shadow-hero">
+      <div
+        data-hero-copy
+        className="relative z-[2] mx-auto w-full max-w-3xl px-5 pt-[clamp(2rem,7vh,4rem)] text-center"
+      >
+        <h1 className="font-display mb-4 text-[clamp(2.9rem,9vw,5.25rem)] leading-[1.02] tracking-[0.015em] text-balance text-white uppercase text-shadow-hero">
           {copy.heroHeading}
         </h1>
 
-        <p className="mb-2 text-[clamp(1.1rem,2.6vw,1.35rem)] font-semibold text-balance text-white">
-          {copy.heroSub}
-        </p>
-
-        <p className="mb-6 text-[clamp(0.95rem,2.2vw,1.05rem)] text-balance text-muted-on-dark">
+        <p className="mb-6 text-[clamp(1.1rem,2.6vw,1.35rem)] font-semibold text-balance text-white">
           {copy.heroSubExtra}
         </p>
 
-        <div className="flex flex-wrap justify-center gap-3">
-          <Link
-            to="/"
-            search={{ lang }}
-            hash="discover"
-            resetScroll={false}
-            className="inline-flex min-h-12 items-center gap-2 rounded-full bg-food-orange-strong px-6 text-base font-bold text-white no-underline shadow-[0_10px_28px_rgba(194,65,12,0.45)] transition hover:-translate-y-px hover:bg-food-orange-dark active:translate-y-0 sm:min-h-13 sm:px-8 sm:text-lg"
-          >
-            <CompassIcon />
-            {copy.ctaExplore}
-          </Link>
-
-          <button
-            id="surprise-dish-button"
-            type="button"
-            onClick={surprise}
-            className="inline-flex min-h-12 cursor-pointer items-center gap-2 rounded-full border-2 border-white/40 bg-transparent px-6 text-base font-bold text-white transition hover:border-white/65 hover:bg-white/10 sm:min-h-13 sm:px-8 sm:text-lg"
-          >
-            <SparkleIcon />
-            {copy.ctaSurprise}
-          </button>
-
+        <div className="mx-auto flex w-full max-w-xs flex-col items-stretch gap-3 sm:max-w-none sm:flex-row sm:items-center sm:justify-center">
           <Link
             to="/"
             search={{ lang }}
             hash="recommend"
             resetScroll={false}
-            className="inline-flex min-h-12 items-center gap-2 rounded-full border-2 border-mango bg-transparent px-6 text-base font-bold text-mango transition hover:bg-mango/10 sm:min-h-13 sm:px-8 sm:text-lg"
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-food-orange-strong px-6 text-base font-bold text-white no-underline shadow-[0_10px_28px_rgba(194,65,12,0.45)] transition hover:-translate-y-px hover:bg-food-orange-dark active:translate-y-0 sm:min-h-13 sm:px-8 sm:text-lg"
           >
             <UtensilsIcon />
             {copy.ctaRecommend}
           </Link>
+
+          <Link
+            to="/"
+            search={{ lang }}
+            hash="discover"
+            resetScroll={false}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full border-2 border-mango bg-transparent px-6 text-base font-bold text-mango transition hover:bg-mango/10 sm:min-h-13 sm:px-8 sm:text-lg"
+          >
+            <CompassIcon />
+            {copy.ctaExplore}
+          </Link>
         </div>
       </div>
+
+      {/* Contextual globe control: a small floating action at a safe edge of
+          the globe — deliberately quieter than the hero CTAs. It spotlights
+          another featured dish without scrolling or opening the wizard. */}
+      <button
+        id="surprise-dish-button"
+        type="button"
+        onClick={surprise}
+        className="absolute right-4 bottom-[max(1.25rem,env(safe-area-inset-bottom))] z-[3] inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-white/40 bg-space-deep/80 px-4 text-sm font-bold text-white shadow-[0_8px_24px_rgba(3,10,30,0.45)] backdrop-blur transition hover:border-white/70 hover:bg-space-deep sm:right-8"
+      >
+        <SparkleIcon />
+        {copy.previewShowAnother}
+      </button>
 
       <GlobeCanvas copy={copy} lang={lang} />
     </section>

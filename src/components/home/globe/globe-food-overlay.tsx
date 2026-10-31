@@ -144,14 +144,14 @@ export function GlobeFoodOverlay({
       {preview ? (
         <div
           ref={setNode}
-          className="pointer-events-none absolute top-0 left-0 flex -translate-x-1/2 -translate-y-full flex-col items-center"
+          className="pointer-events-none absolute top-0 left-0 flex -translate-x-1/2 -translate-y-full flex-col items-center max-sm:fixed max-sm:top-auto max-sm:right-4 max-sm:bottom-[max(5rem,calc(env(safe-area-inset-bottom)+5rem))] max-sm:left-4 max-sm:translate-x-0 max-sm:translate-y-0"
         >
           <dialog
             open
             aria-labelledby="food-preview-name"
             className="static m-0 max-w-none border-0 bg-transparent p-0"
           >
-            <div className="pointer-events-auto w-[min(19rem,78vw)] origin-bottom rounded-2xl border border-border-soft bg-white p-4 text-left text-ink shadow-[0_20px_48px_rgba(3,10,30,0.5)] motion-safe:animate-popup-enter">
+            <div className="pointer-events-auto w-[min(19rem,78vw)] origin-bottom rounded-2xl border border-border-soft bg-white p-4 text-left text-ink shadow-[0_20px_48px_rgba(3,10,30,0.5)] motion-safe:animate-popup-enter max-sm:w-full">
               <div className="mb-2 flex items-center gap-3">
                 <span aria-hidden="true" className="text-3xl leading-none">
                   {preview.emoji}
