@@ -53,19 +53,44 @@ export interface SidebarPrefsProps {
  * YOUR PICKS card: submitted values with per-step edit chips. Standalone
  * export so the results layout can interleave it with the carousel on
  * mobile; ResultsSidebar composes it with the AI and prefs cards.
+ * The optional served scope keeps the region chip honest: when the server
+ * fell back from a city to a wider pool, the chip names the pool actually
+ * served instead of the requested city.
  */
 export function YourPicksCard({
   copy,
   countryOptions,
   onEditStep,
   submitted,
+  servedScope,
 }: {
   readonly copy: Messages;
   readonly countryOptions: ReadonlyArray<CountryOption>;
   readonly onEditStep: (step: number) => void;
   readonly submitted: RecommendPayload;
+  readonly servedScope?: "city" | "country" | "nearby" | "worldwide" | undefined;
 }) {
   const picks = toYourPicksProps(submitted);
+
+  const summaryLocation = (() => {
+    if (picks.location?.kind !== "city") {
+      return picks.location;
+    }
+
+    if (servedScope === undefined || servedScope === "city") {
+      return picks.location;
+    }
+
+    if (servedScope === "country" && picks.location.country !== undefined) {
+      return { kind: "destination", country: picks.location.country } as const;
+    }
+
+    if (servedScope === "worldwide") {
+      return { kind: "worldwide" } as const;
+    }
+
+    return picks.location;
+  })();
 
   return (
     <QuizSummary
@@ -77,7 +102,7 @@ export function YourPicksCard({
       mood={picks.mood}
       onEditStep={onEditStep}
       submittedCountry={picks.country}
-      submittedLocation={picks.location}
+      submittedLocation={summaryLocation}
     />
   );
 }

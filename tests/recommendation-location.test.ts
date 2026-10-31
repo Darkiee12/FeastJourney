@@ -370,6 +370,7 @@ describe("recommendation location (phase 1 geography)", () => {
       }),
       {
         Precise: (scope) => scope,
+        City: () => null,
         Country: () => null,
         Worldwide: () => null,
       },
@@ -377,6 +378,18 @@ describe("recommendation location (phase 1 geography)", () => {
 
     expect(checked?.latitude).toBeCloseTo(21.0278, 6);
     expect(checked?.accuracy).toBe(40);
+
+    const city = resolveLocationScope({
+      location: { kind: "city", placeId: "264", country: "IN" },
+    });
+
+    expect(city._tag).toBe("City");
+    expect(
+      scopeCountryOf({ location: { kind: "city", placeId: "264", country: "IN" } }),
+    ).toBeNull();
+    expect(locationLogFields({ location: { kind: "city", placeId: "264" } })).toEqual({
+      locationKind: "city",
+    });
 
     expect(nearbyRadiiM()).toEqual([NEARBY_START_M, 200_000, NEARBY_MAX_M]);
     expect(NEARBY_START_M).toBe(50_000);
@@ -449,9 +462,21 @@ describe("recommendation location (phase 1 geography)", () => {
         copyEn,
         options,
       ),
-    ).toBe(
-      `${copyEn.recWhereUsingLocation} · ${copyEn.recWhereAccuracyNote.replace("{meters}", "40")}`,
-    );
+    ).toBe(copyEn.recWhereNearYou);
+    expect(
+      scopeLabelFor(
+        {
+          location: {
+            kind: "city",
+            placeId: "42",
+            country: "IN",
+            label: "Bengaluru, Karnataka, India",
+          },
+        },
+        copyEn,
+        options,
+      ),
+    ).toBe("Exploring Bengaluru, Karnataka, India");
     expect(scopeLabelFor({ location: { kind: "worldwide" } }, copyEn, options)).toBe(
       copyEn.recWhereAnywhere,
     );
@@ -476,7 +501,7 @@ describe("recommendation location (phase 1 geography)", () => {
         copyVi,
         options,
       ),
-    ).toBe(copyVi.recWhereUsingLocation);
+    ).toBe(copyVi.recWhereNearYou);
     expect(scopeLabelFor({ location: { kind: "worldwide" } }, copyVi, options)).toBe(
       copyVi.recWhereAnywhere,
     );

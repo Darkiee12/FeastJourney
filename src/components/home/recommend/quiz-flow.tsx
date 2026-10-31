@@ -8,9 +8,11 @@ import {
   buildRecommendPayload,
   buildSurprisePayload,
   clearJourneySnapshot,
+  draftCountryMirror,
   draftLocation,
   EMPTY_DRAFT,
   formatTemplate,
+  isCityPlaceId,
   isExplicitRegionChoice,
   persistPrefs,
   PREFS_STORAGE_KEY,
@@ -350,7 +352,14 @@ export function RecommendSection() {
 
   const startSearch = (payload: RecommendPayload, remember: boolean): void => {
     const transport = toTransportPayload(payload);
-    persistPrefs(remember, transport.avoid, transport.country);
+    persistPrefs(
+      remember,
+      transport.avoid,
+      transport.country,
+      draft.cityId !== null && isCityPlaceId(draft.cityId)
+        ? { placeId: draft.cityId, label: draft.cityLabel, country: draft.cityCountry }
+        : undefined,
+    );
     setHasSaved(remember);
     setSubmitted(payload);
     setStepError(null);
@@ -375,7 +384,13 @@ export function RecommendSection() {
    */
   const tryAdvance = (): void => {
     if (stepIndex === 0) {
-      const regionError = validateRegion(draft.regionMode, draft.country, copy, draft.precise);
+      const regionError = validateRegion(
+        draft.regionMode,
+        draft.country,
+        copy,
+        draft.precise,
+        draft.cityId,
+      );
 
       if (regionError !== null) {
         setStepError(regionError);
@@ -402,7 +417,13 @@ export function RecommendSection() {
       return;
     }
 
-    const regionError = validateRegion(draft.regionMode, draft.country, copy, draft.precise);
+    const regionError = validateRegion(
+      draft.regionMode,
+      draft.country,
+      copy,
+      draft.precise,
+      draft.cityId,
+    );
 
     if (regionError !== null) {
       setStepError(regionError);
@@ -416,7 +437,13 @@ export function RecommendSection() {
   };
 
   const skipExclusions = (): void => {
-    const regionError = validateRegion(draft.regionMode, draft.country, copy, draft.precise);
+    const regionError = validateRegion(
+      draft.regionMode,
+      draft.country,
+      copy,
+      draft.precise,
+      draft.cityId,
+    );
 
     if (regionError !== null) {
       setStepError(regionError);
@@ -431,7 +458,7 @@ export function RecommendSection() {
         meal,
         avoid: [],
         allergies: [],
-        country: draft.regionMode === "country" ? draft.country.trim().toUpperCase() : undefined,
+        country: draftCountryMirror(draft),
         location: draftLocation(draft),
         mood,
         locale: lang,
@@ -441,13 +468,16 @@ export function RecommendSection() {
     );
   };
 
-  /** Empty-state fallback for sparse precise coverage: search worldwide instead. */
+  /** Empty-state fallback for sparse city/precise coverage: search worldwide instead. */
   const searchWorldwide = (): void => {
     const next: QuizDraft = {
       ...draft,
       regionMode: "anywhere",
       country: "",
       countrySource: null,
+      cityId: null,
+      cityLabel: null,
+      cityCountry: null,
       precise: null,
     };
 
@@ -545,6 +575,7 @@ export function RecommendSection() {
   const regionOrigin: AnswerOrigin = regionOriginFor({
     draft,
     savedCountry: savedInitial?.country ?? null,
+    savedCityId: savedInitial?.city?.placeId ?? null,
     touched: regionTouched,
   });
 
@@ -579,6 +610,9 @@ export function RecommendSection() {
           submitted.locale,
           submitted.country ?? "",
           submitted.location?.kind ?? "",
+          submitted.location !== undefined && submitted.location.kind === "city"
+            ? submitted.location.placeId
+            : "",
           submitted.avoid.join("|"),
           submitted.allergies.join("|"),
         ].join(":");
@@ -687,6 +721,11 @@ export function RecommendSection() {
                 countryOptions={countryOptions}
                 onEditStep={editStep}
                 submitted={submitted}
+                servedScope={
+                  outcome !== null && (outcome.mode === "ai" || outcome.mode === "deterministic")
+                    ? outcome.servedScope
+                    : undefined
+                }
               />
             </div>
           ) : null}
@@ -775,6 +814,7 @@ export function RecommendSection() {
                         void countries.refetch();
                       }}
                       origin={regionOrigin}
+                      lang={lang}
                       precise={{
                         fix: precise.fix,
                         request: precise.request,
@@ -886,7 +926,8 @@ export function RecommendSection() {
             ranking={outcome.ranking}
             reasons={outcome.reasons}
           />
-          {outcome.mode === "empty" && submitted?.location?.kind === "precise" ? (
+          {outcome.mode === "empty" &&
+          (submitted?.location?.kind === "precise" || submitted?.location?.kind === "city") ? (
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"

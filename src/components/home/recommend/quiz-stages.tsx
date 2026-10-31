@@ -1,10 +1,20 @@
-import { Globe2Icon, LocateFixedIcon, MapPinIcon, PlaneIcon } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  Globe2Icon,
+  LocateFixedIcon,
+  MapPinIcon,
+  PlaneIcon,
+  SearchIcon,
+  XIcon,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   DEFAULT_PROVENANCE_LABELS,
   didPreciseFixArrive,
   formatTemplate,
+  isCityPlaceId,
+  pickDestinationCity,
   pickDestinationCountry,
   pickRegionChoice,
   regionChoiceFor,
@@ -17,15 +27,15 @@ import {
   type RegionChoice,
 } from "@/components/home/recommend/quiz-model";
 import {
-  accuracyLabelFor,
   fallbackOptionsFor,
   type PreciseStatus,
 } from "@/components/home/recommend/use-precise-location";
+import { searchCitiesFn } from "@/modules/food-discovery/food.functions";
 import {
   type MealOccasion,
   type RecommendationMood,
 } from "@/modules/food-discovery/recommendation.constants";
-import type { Messages } from "@/shared/i18n";
+import type { Locale, Messages } from "@/shared/i18n";
 
 export interface CountryOption {
   readonly code: string;
@@ -151,19 +161,181 @@ const choiceLabelFor = (
   return copy.recWhereAnywhere;
 };
 
+export interface CityOption {
+  readonly placeId: string;
+  readonly name: string;
+  readonly context: string | null;
+  readonly country: string | null;
+}
+
+/** Display label for a chosen city: name plus administrative context. */
+export const cityDisplayLabel = (city: Pick<CityOption, "name" | "context">): string =>
+  city.context === null || city.context === "" ? city.name : `${city.name}, ${city.context}`;
+
+/**
+ * City search combobox for the destination lane. Queries the canonical
+ * place registry (name and alias matching — "Bangalore" finds Bengaluru)
+ * and shows administrative context so identical names disambiguate. A pick
+ * commits a canonical place id, never free text; clearing reopens the lane.
+ */
+function CitySearchInput({
+  lang,
+  onMarkPointer,
+  onPick,
+  selected,
+}: {
+  readonly lang: Locale;
+  readonly onMarkPointer: () => void;
+  readonly onPick: (city: CityOption | null) => void;
+  readonly selected: CityOption | null;
+}) {
+  const [text, setText] = useState("");
+  const [debounced, setDebounced] = useState("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebounced(text);
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [text]);
+
+  const trimmed = debounced.trim();
+
+  const cities = useQuery({
+    queryKey: ["catalog", "cities", lang, trimmed],
+    queryFn: () => searchCitiesFn({ data: { q: trimmed, locale: lang, limit: 8 } }),
+    enabled: trimmed.length >= 2,
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+
+  if (selected !== null) {
+    return (
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <output className="inline-flex min-h-11 items-center gap-2 rounded-full border-2 border-ink bg-ink px-4 text-sm font-bold text-white">
+          <MapPinIcon aria-hidden="true" className="size-4 flex-none" />
+          {cityDisplayLabel(selected)}
+        </output>
+        <button
+          type="button"
+          onClick={() => {
+            setText("");
+            setDebounced("");
+            onPick(null);
+          }}
+          aria-label={lang === "vi" ? "Xóa thành phố" : "Clear city"}
+          className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-3 text-sm font-bold text-ink transition hover:border-ink"
+        >
+          <XIcon aria-hidden="true" className="size-4" />
+        </button>
+      </div>
+    );
+  }
+
+  const results = cities.data ?? [];
+
+  return (
+    <div className="mt-3">
+      <label htmlFor="rec-city" className="mb-2 block text-sm font-bold text-ink">
+        {lang === "vi" ? "Thành phố (không bắt buộc)" : "City (optional)"}
+      </label>
+      <div className="relative">
+        <SearchIcon
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted"
+        />
+        <input
+          id="rec-city"
+          type="text"
+          autoComplete="off"
+          value={text}
+          placeholder={
+            lang === "vi" ? "Tìm thành phố… ví dụ Bangalore" : "Search a city… e.g. Bangalore"
+          }
+          onChange={(event) => {
+            setText(event.target.value);
+          }}
+          className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream py-3 pr-4 pl-11 text-base text-ink placeholder:text-muted focus:border-brand-blue"
+        />
+      </div>
+      {cities.isPending && trimmed.length >= 2 ? (
+        <output className="mt-2 block text-sm font-semibold text-muted">
+          {lang === "vi" ? "Đang tìm thành phố…" : "Searching cities…"}
+        </output>
+      ) : null}
+      {cities.isError ? (
+        <p className="mt-2 text-sm font-bold text-danger" role="alert">
+          {lang === "vi"
+            ? "Không tìm được thành phố. Thử lại."
+            : "Could not search cities. Try again."}
+        </p>
+      ) : null}
+      {trimmed.length >= 2 && !cities.isPending && results.length === 0 && !cities.isError ? (
+        <output className="mt-2 block text-sm text-muted">
+          {lang === "vi"
+            ? "Không có thành phố nào khớp — hãy chọn quốc gia bên dưới."
+            : "No matching city — choose a country below instead."}
+        </output>
+      ) : null}
+      {results.length > 0 ? (
+        <div className="mt-2">
+          <label htmlFor="rec-city-results" className="mb-2 block text-sm font-bold text-ink">
+            {lang === "vi" ? "Thành phố khớp" : "Matching cities"}
+          </label>
+          <select
+            id="rec-city-results"
+            value=""
+            onPointerDown={onMarkPointer}
+            onChange={(event) => {
+              const entry = results.find((candidate) => candidate.id === event.target.value);
+
+              if (entry !== undefined) {
+                onPick({
+                  placeId: entry.id,
+                  name: entry.name ?? entry.id,
+                  context: entry.context,
+                  country: entry.country,
+                });
+              }
+            }}
+            className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-white px-4 py-3 text-base text-ink focus:border-brand-blue"
+          >
+            <option value="">{lang === "vi" ? "Chọn một thành phố…" : "Choose a city…"}</option>
+            {results.map((entry) => {
+              const name = entry.name ?? entry.id;
+              const context = entry.context;
+
+              return (
+                <option key={entry.id} value={entry.id}>
+                  {context === null || context === "" ? name : `${name} — ${context}`}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * Step 1 — "Where should we explore?" Four ordered choices: the trusted home
  * region (when network-region detection knows it), an explicit
- * precise-location lane, another destination from the country catalog, or
- * worldwide. Pointer taps advance only on explicitly complete answers:
- * Anywhere and the detected country advance at once; the destination lane
- * reveals its selector and advances once a valid country is chosen;
- * Near-you geolocates only on an explicit tap and advances when the fix
- * lands (never while pending); denied/unavailable stay put with inline
- * alternatives. Untouched defaults, saved prefs, and async detection never
- * flow through the commit site, so they never advance. Keyboard and
- * assistive-tech users advance explicitly via Continue. Coordinates are
- * never displayed raw — success shows an accuracy label at most.
+ * precise-location lane, another destination from the country and city
+ * catalogs, or worldwide. Pointer taps advance only on explicitly complete
+ * answers: Anywhere and the detected country advance at once; the
+ * destination lane reveals its selectors and advances once a valid country
+ * or city is chosen; Near-you geolocates only on an explicit tap and
+ * advances when the fix lands (never while pending); denied/unavailable stay
+ * put with inline alternatives. Untouched defaults, saved prefs, and async
+ * detection never flow through the commit site, so they never advance.
+ * Keyboard and assistive-tech users advance explicitly via Continue.
+ * Coordinates are never displayed — success shows the honest nearby scope,
+ * never meters; the city search resolves typed names against the canonical
+ * registry and never invents places.
  */
 export function WhereStep({
   copy,
@@ -177,6 +349,7 @@ export function WhereStep({
   origin,
   precise,
   provenanceLabels = DEFAULT_PROVENANCE_LABELS,
+  lang,
 }: {
   readonly copy: Messages;
   readonly countriesError: boolean;
@@ -189,6 +362,7 @@ export function WhereStep({
   readonly origin: AnswerOrigin;
   readonly precise: PreciseControl;
   readonly provenanceLabels?: ProvenanceLabels;
+  readonly lang: Locale;
 }) {
   const { clearPointer, consumePointer, markPointer } = usePointerAdvance();
 
@@ -241,6 +415,22 @@ export function WhereStep({
 
   const pickDestination = (country: string): void => {
     commit(pickDestinationCountry(draft, country));
+  };
+
+  const pickCity = (city: CityOption | null): void => {
+    if (city === null) {
+      onDraft({ ...draft, cityId: null, cityLabel: null, cityCountry: null });
+
+      return;
+    }
+
+    commit(
+      pickDestinationCity(draft, {
+        placeId: city.placeId,
+        label: cityDisplayLabel(city),
+        country: city.country,
+      }),
+    );
   };
 
   /**
@@ -373,9 +563,7 @@ export function WhereStep({
           ) : null}
           {precise.status === "success" && precise.fix !== null ? (
             <div className="flex flex-wrap items-center gap-3">
-              <output className="block text-sm font-bold text-ink">
-                {accuracyLabelFor(precise.fix) ?? copy.recWhereNearYou}
-              </output>
+              <output className="block text-sm font-bold text-ink">{copy.recWhereNearYou}</output>
               <button
                 type="button"
                 onClick={precise.request}
@@ -435,7 +623,27 @@ export function WhereStep({
 
       {choice === "destination" ? (
         <div className="mt-5">
-          <label htmlFor="rec-country" className="mb-2 block text-sm font-bold text-ink">
+          <CitySearchInput
+            lang={lang}
+            onMarkPointer={markPointer}
+            onPick={pickCity}
+            selected={
+              draft.cityId !== null && isCityPlaceId(draft.cityId)
+                ? {
+                    placeId: draft.cityId,
+                    name: draft.cityLabel ?? draft.cityId,
+                    context: null,
+                    country: draft.cityCountry,
+                  }
+                : null
+            }
+          />
+          <p className="mt-2 text-sm text-muted">
+            {lang === "vi"
+              ? "Chọn thành phố để xem món gắn với nơi đó, hoặc chọn quốc gia bên dưới."
+              : "Pick a city for dishes tied to it, or choose a country below."}
+          </p>
+          <label htmlFor="rec-country" className="mt-4 mb-2 block text-sm font-bold text-ink">
             {copy.recWhereCountryLabel}
           </label>
           {countriesError ? (

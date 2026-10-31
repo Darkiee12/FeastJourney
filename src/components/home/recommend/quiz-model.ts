@@ -60,6 +60,15 @@ export interface QuizDraft {
   readonly countrySource: CountrySource | null;
   readonly precise: PreciseFix | null;
   readonly remember: boolean;
+  /**
+   * Explicitly chosen canonical city (place registry id) with its display
+   * label and nearest country ISO hint for the honest wider-pool fallback.
+   * Set only through the city chooser; never overwritten by async
+   * geolocation. Null means no city choice.
+   */
+  readonly cityId: string | null;
+  readonly cityLabel: string | null;
+  readonly cityCountry: string | null;
 }
 
 export interface RecommendAnswers {
@@ -157,7 +166,9 @@ export const toTransportPayload = (payload: RecommendPayload): RecommendPayload 
 /**
  * Derive the discriminated location for a draft. Home region and chosen
  * destination both filter by country (provenance differs for labels only);
- * precise needs a live fix; anywhere is explicitly worldwide.
+ * an explicitly chosen city filters by its canonical place id with the
+ * country hint for fallback; precise needs a live fix; anywhere is
+ * explicitly worldwide.
  */
 export const draftLocation = (draft: QuizDraft): RecommendationLocation | undefined => {
   if (draft.regionMode === "precise") {
@@ -176,6 +187,24 @@ export const draftLocation = (draft: QuizDraft): RecommendationLocation | undefi
   }
 
   if (draft.regionMode === "country") {
+    if (draft.cityId !== null && isCityPlaceId(draft.cityId)) {
+      const hint = sanitizeCountryCode(draft.cityCountry ?? "");
+
+      if (hint === null) {
+        if (draft.cityLabel === null) {
+          return { kind: "city", placeId: draft.cityId };
+        }
+
+        return { kind: "city", placeId: draft.cityId, label: draft.cityLabel };
+      }
+
+      if (draft.cityLabel === null) {
+        return { kind: "city", placeId: draft.cityId, country: hint };
+      }
+
+      return { kind: "city", placeId: draft.cityId, country: hint, label: draft.cityLabel };
+    }
+
     const normalized = draft.country.trim().toUpperCase();
     const parsed = recCountrySchema.safeParse(normalized);
 
@@ -204,12 +233,19 @@ export const buildSurprisePayload = (inputs: SurpriseInputs): RecommendPayload =
     meal: inputs.meal,
     avoid: parseCommaList(inputs.draft.avoidRaw),
     allergies: parseCommaList(inputs.draft.allergiesRaw),
-    country: resolveCountry(inputs.draft.regionMode, inputs.draft.country),
+    country: draftCountryMirror(inputs.draft),
     location: draftLocation(inputs.draft),
     mood: inputs.mood,
     locale: inputs.locale,
     surpriseSeed: inputs.surpriseSeed,
   });
+
+/**
+ * Canonical city place id shape: a decimal id string from the place
+ * registry. Client-side twin of the server dbId check so drafts fail
+ * closed before transport.
+ */
+export const isCityPlaceId = (value: string): boolean => /^[0-9]+$/.test(value);
 
 /** Validate the region step, returning a localized error or null when it passes. */
 export const validateRegion = (
@@ -217,8 +253,13 @@ export const validateRegion = (
   country: string,
   copy: Messages,
   precise: PreciseFix | null = null,
+  cityId: string | null = null,
 ): string | null => {
   if (mode === "country") {
+    if (cityId !== null && isCityPlaceId(cityId)) {
+      return null;
+    }
+
     return isRegionComplete({ ...EMPTY_DRAFT, regionMode: mode, country })
       ? null
       : copy.recCountryError;
@@ -274,9 +315,20 @@ export const regionOriginFor = (input: {
   readonly touched: boolean;
   readonly draft: QuizDraft;
   readonly savedCountry: string | null;
+  readonly savedCityId?: string | null | undefined;
 }): AnswerOrigin => {
   if (input.touched) {
     return "explicit";
+  }
+
+  if (
+    input.draft.regionMode === "country" &&
+    input.draft.cityId !== null &&
+    input.savedCityId !== null &&
+    input.savedCityId !== undefined &&
+    input.draft.cityId === input.savedCityId
+  ) {
+    return "restored";
   }
 
   if (
@@ -320,12 +372,17 @@ export const textOriginFor = (input: {
 
 /**
  * Copy-free completeness check for one draft snapshot. Home and worldwide
- * are complete by construction; a destination needs a valid ISO country;
- * precise needs a live fix. Used by the single auto-advance commit site so
- * pointer taps advance only on explicitly complete answers.
+ * are complete by construction; a destination needs a valid ISO country or
+ * an explicitly chosen canonical city; precise needs a live fix. Used by the
+ * single auto-advance commit site so pointer taps advance only on explicitly
+ * complete answers.
  */
 export const isRegionComplete = (draft: QuizDraft): boolean => {
   if (draft.regionMode === "country") {
+    if (draft.cityId !== null && isCityPlaceId(draft.cityId)) {
+      return true;
+    }
+
     return recCountrySchema.safeParse(draft.country.trim().toUpperCase()).success;
   }
 
@@ -336,21 +393,23 @@ export const isRegionComplete = (draft: QuizDraft): boolean => {
   return true;
 };
 
-/** True when two drafts select the same Step-1 lane and country. */
+/** True when two drafts select the same Step-1 lane, country, and city. */
 export const sameRegion = (left: QuizDraft, right: QuizDraft): boolean =>
   left.regionMode === right.regionMode &&
   left.country.toUpperCase() === right.country.toUpperCase() &&
-  left.countrySource === right.countrySource;
+  left.countrySource === right.countrySource &&
+  left.cityId === right.cityId;
 
 /**
  * Pure Step-1 lane transition for a radio tap. Home pins the trusted
  * detection (worldwide fallback when detection vanished); precise opens
  * the locator lane with no fix yet (never complete, so never advances);
  * destination opens the catalog selector empty (incomplete until a valid
- * country is chosen); worldwide clears everything (complete at once).
- * The caller commits the returned candidate and advances only when it is
- * complete, so async detection and saved prefs — which never flow through
- * here — can never trigger advancement.
+ * country or city is chosen — any previous city choice is cleared so a
+ * stale city can never ride along); worldwide clears everything (complete
+ * at once). The caller commits the returned candidate and advances only
+ * when it is complete, so async detection and saved prefs — which never
+ * flow through here — can never trigger advancement.
  */
 export const pickRegionChoice = (
   draft: QuizDraft,
@@ -362,31 +421,90 @@ export const pickRegionChoice = (
       ...draft,
       country: detected,
       countrySource: "detected",
+      cityId: null,
+      cityLabel: null,
+      cityCountry: null,
       precise: null,
       regionMode: "country",
     };
   }
 
   if (choice === "precise") {
-    return { ...draft, country: "", countrySource: null, precise: null, regionMode: "precise" };
+    return {
+      ...draft,
+      country: "",
+      countrySource: null,
+      cityId: null,
+      cityLabel: null,
+      cityCountry: null,
+      precise: null,
+      regionMode: "precise",
+    };
   }
 
   if (choice === "destination") {
-    return { ...draft, country: "", countrySource: null, precise: null, regionMode: "country" };
+    return {
+      ...draft,
+      country: "",
+      countrySource: null,
+      cityId: null,
+      cityLabel: null,
+      cityCountry: null,
+      precise: null,
+      regionMode: "country",
+    };
   }
 
-  return { ...draft, country: "", countrySource: null, precise: null, regionMode: "anywhere" };
+  return {
+    ...draft,
+    country: "",
+    countrySource: null,
+    cityId: null,
+    cityLabel: null,
+    cityCountry: null,
+    precise: null,
+    regionMode: "anywhere",
+  };
 };
 
 /**
  * Pure destination-selector transition: a valid pick is a chosen country
  * (complete, advances on pointer); clearing back to the placeholder keeps
  * the lane open but incomplete (reveals the selector, never advances).
+ * Choosing a country clears any city choice — the two never combine.
  */
 export const pickDestinationCountry = (draft: QuizDraft, country: string): QuizDraft => ({
   ...draft,
   country,
   countrySource: country === "" ? null : "chosen",
+  cityId: null,
+  cityLabel: null,
+  cityCountry: null,
+  precise: null,
+  regionMode: "country",
+});
+
+/**
+ * Pure city-selector transition: a chosen canonical city (complete,
+ * advances on pointer) with its display label and country hint. Clearing
+ * (null id) keeps the lane open but incomplete. A city choice clears any
+ * country choice — the served scope is the city, with the hint only for
+ * the honest wider-pool fallback.
+ */
+export const pickDestinationCity = (
+  draft: QuizDraft,
+  city: {
+    readonly placeId: string;
+    readonly label: string | null;
+    readonly country: string | null;
+  },
+): QuizDraft => ({
+  ...draft,
+  country: "",
+  countrySource: null,
+  cityId: city.placeId,
+  cityLabel: city.label,
+  cityCountry: city.country,
   precise: null,
   regionMode: "country",
 });
@@ -462,13 +580,12 @@ export const formatAccuracyM = (accuracy: number): string =>
 
 /**
  * Result-scope label for the summary chips, composed from existing copy plus
- * catalog country names: approximate home regions explore by name, precise
- * fixes lead with the using-location note plus accuracy as secondary detail,
- * destinations show the plain country name, worldwide stays unlabeled.
- * The precise wording never claims food within X meters: it names association
- * use (dishes matched with your area in play) plus fix accuracy, and stays
- * silent on restaurant availability, which the places lookup answers
- * separately. Never claims city precision.
+ * catalog names: approximate home regions explore by name, city choices show
+ * the chosen city label, precise fixes show the honest "Near you" scope
+ * (never GPS accuracy meters), destinations show the plain country name,
+ * worldwide stays unlabeled. City cultural discovery never claims
+ * restaurant availability, which the places lookup answers separately.
+ * Never claims city precision without a resolved city.
  */
 export const scopeLabelFor = (
   input: {
@@ -487,12 +604,18 @@ export const scopeLabelFor = (
     switch (location.kind) {
       case "approx":
         return formatTemplate(copy.recWhereExploring, nameOf(location.country));
-      case "precise":
-        if (location.accuracy === null || location.accuracy === undefined) {
-          return copy.recWhereUsingLocation;
+      case "city":
+        if (location.label !== undefined && location.label.trim() !== "") {
+          return formatTemplate(copy.recWhereExploring, location.label);
         }
 
-        return `${copy.recWhereUsingLocation} · ${copy.recWhereAccuracyNote.replace("{meters}", Math.round(location.accuracy).toString())}`;
+        if (location.country !== undefined) {
+          return formatTemplate(copy.recWhereExploring, nameOf(location.country));
+        }
+
+        return copy.recWhereAnywhere;
+      case "precise":
+        return copy.recWhereNearYou;
       case "destination":
         return nameOf(location.country);
       case "worldwide":
@@ -523,14 +646,45 @@ const resolveCountry = (mode: RecRegionMode, country: string): string | undefine
 };
 
 /**
+ * Legacy country mirror for a draft: the explicitly chosen country, or the
+ * city choice's country hint (kept for restore display alongside the city
+ * location). The discriminated city location remains the scoping source;
+ * this mirror is coarse display context only.
+ */
+export const draftCountryMirror = (
+  draft: Pick<QuizDraft, "regionMode" | "country" | "cityCountry">,
+): string | undefined => {
+  const direct = resolveCountry(draft.regionMode, draft.country);
+
+  if (direct !== undefined) {
+    return direct;
+  }
+
+  if (draft.regionMode !== "country") {
+    return undefined;
+  }
+
+  return sanitizeCountryCode(draft.cityCountry ?? "") ?? undefined;
+};
+
+/**
  * Saved preferences deliberately exclude allergies: dislikes and the
  * destination persist only with explicit opt-in, while allergy text stays in
- * memory for the current visit and is never written to storage.
+ * memory for the current visit and is never written to storage. The city
+ * choice persists as a canonical place id plus its display label and country
+ * hint — never raw coordinates.
  */
 const savedPrefsSchema = z.object({
   remember: z.literal(true),
   avoid: z.array(z.string()).default([]),
   country: recCountrySchema.optional(),
+  city: z
+    .object({
+      placeId: z.string().regex(/^[0-9]+$/),
+      label: z.string().max(200).optional(),
+      country: recCountrySchema.optional(),
+    })
+    .optional(),
 });
 
 export type SavedRecommendPrefs = z.infer<typeof savedPrefsSchema>;
@@ -548,6 +702,9 @@ export const EMPTY_DRAFT: QuizDraft = {
   countrySource: null,
   precise: null,
   remember: false,
+  cityId: null,
+  cityLabel: null,
+  cityCountry: null,
 };
 
 /** Parse one raw storage value; any corruption or schema drift restores nothing. */
@@ -598,6 +755,9 @@ const journeySnapshotSchema = z.object({
     regionMode: z.enum(["anywhere", "country", "precise"]).default("anywhere"),
     country: z.string().max(12).default(""),
     countrySource: z.enum(["detected", "chosen"]).nullable().default(null),
+    cityId: z.string().max(24).nullable().default(null),
+    cityLabel: z.string().max(200).nullable().default(null),
+    cityCountry: z.string().max(12).nullable().default(null),
     remember: z.boolean().default(false),
   }),
   stepIndex: z.number().int().min(0).max(2).default(0),
@@ -607,6 +767,14 @@ const journeySnapshotSchema = z.object({
       avoid: z.array(z.string().max(100)).max(20),
       allergies: z.array(z.string().max(100)).max(20),
       country: recCountrySchema.optional(),
+      location: z
+        .object({
+          kind: z.literal("city"),
+          placeId: z.string().regex(/^[0-9]+$/),
+          country: recCountrySchema.optional(),
+          label: z.string().max(200).optional(),
+        })
+        .optional(),
       mood: z.enum(RECOMMENDATION_MOODS),
       locale: z.string().max(12),
       surpriseSeed: z.number().int().min(0).default(0),
@@ -642,7 +810,8 @@ export const writeJourneySnapshot = (snapshot: JourneySnapshot): void => {
 
   // Coarse context only: precise coordinates never enter the journey cache,
   // even though it is memory-only. Restoring a precise choice keeps the mode
-  // so the visitor can re-locate with one explicit tap.
+  // so the visitor can re-locate with one explicit tap. A chosen city keeps
+  // its canonical place id (coarse registry identity, safe to restore).
   journeyCache = {
     ...snapshot,
     draft: {
@@ -652,6 +821,12 @@ export const writeJourneySnapshot = (snapshot: JourneySnapshot): void => {
       country: country ?? "",
       countrySource: snapshot.draft.countrySource,
       remember: snapshot.draft.remember,
+      cityId:
+        snapshot.draft.cityId !== null && isCityPlaceId(snapshot.draft.cityId)
+          ? snapshot.draft.cityId
+          : null,
+      cityLabel: snapshot.draft.cityLabel,
+      cityCountry: sanitizeCountryCode(snapshot.draft.cityCountry ?? "") ?? null,
     },
   };
 };
@@ -677,21 +852,27 @@ export interface JourneyWriteModel {
  * visitor re-locates with one explicit tap); precise results are dropped
  * instead of re-running a stale fix on return, landing back on the quiz.
  * Submitted payloads keep the legacy country mirror for restore display and
- * re-runs, never the discriminated location.
+ * re-runs, plus the city location (canonical place id, coarse and safe to
+ * re-run) — never precise fixes.
  */
 export const toCoarseSnapshot = (model: JourneyWriteModel): JourneySnapshot => {
+  const draft = {
+    avoidRaw: model.draft.avoidRaw,
+    allergiesRaw: model.draft.allergiesRaw,
+    regionMode: model.draft.regionMode,
+    country: model.draft.country,
+    countrySource: model.draft.countrySource,
+    remember: model.draft.remember,
+    cityId: model.draft.cityId,
+    cityLabel: model.draft.cityLabel,
+    cityCountry: model.draft.cityCountry,
+  };
+
   if (model.submitted !== null && model.submitted.location?.kind === "precise") {
     return {
       meal: model.meal,
       mood: model.mood,
-      draft: {
-        avoidRaw: model.draft.avoidRaw,
-        allergiesRaw: model.draft.allergiesRaw,
-        regionMode: model.draft.regionMode,
-        country: model.draft.country,
-        countrySource: model.draft.countrySource,
-        remember: model.draft.remember,
-      },
+      draft,
       stepIndex: model.stepIndex,
       submitted: null,
       showResults: false,
@@ -699,32 +880,44 @@ export const toCoarseSnapshot = (model: JourneyWriteModel): JourneySnapshot => {
     };
   }
 
+  const submittedLocation =
+    model.submitted?.location?.kind === "city" ? model.submitted.location : undefined;
+
+  if (model.submitted === null) {
+    return {
+      meal: model.meal,
+      mood: model.mood,
+      draft,
+      stepIndex: model.stepIndex,
+      submitted: null,
+      showResults: model.showResults,
+      surpriseSeed: model.surpriseSeed,
+    };
+  }
+
+  const submittedBase = {
+    meal: model.submitted.meal,
+    avoid: model.submitted.avoid,
+    allergies: model.submitted.allergies,
+    country: model.submitted.country,
+    mood: model.submitted.mood,
+    locale: model.submitted.locale,
+    surpriseSeed: model.submitted.surpriseSeed,
+  };
+
   return {
     meal: model.meal,
     mood: model.mood,
-    draft: {
-      avoidRaw: model.draft.avoidRaw,
-      allergiesRaw: model.draft.allergiesRaw,
-      regionMode: model.draft.regionMode,
-      country: model.draft.country,
-      countrySource: model.draft.countrySource,
-      remember: model.draft.remember,
-    },
+    draft,
     stepIndex: model.stepIndex,
-    // Field-by-field: the snapshot never carries the discriminated location,
-    // only the legacy country mirror for coarse restore display and re-runs.
+    // Field-by-field: the snapshot never carries precise fixes, only the
+    // legacy country mirror plus the coarse city location for restore
+    // display and re-runs. The location key is absent unless a city was
+    // submitted, so country/worldwide restores keep their legacy shape.
     submitted:
-      model.submitted === null
-        ? null
-        : {
-            meal: model.submitted.meal,
-            avoid: model.submitted.avoid,
-            allergies: model.submitted.allergies,
-            country: model.submitted.country,
-            mood: model.submitted.mood,
-            locale: model.submitted.locale,
-            surpriseSeed: model.submitted.surpriseSeed,
-          },
+      submittedLocation === undefined
+        ? submittedBase
+        : { ...submittedBase, location: submittedLocation },
     showResults: model.showResults,
     surpriseSeed: model.surpriseSeed,
   };
@@ -734,10 +927,27 @@ export const toCoarseSnapshot = (model: JourneyWriteModel): JourneySnapshot => {
  * Pure draft initializer from parsed prefs: only dislikes and the
  * destination restore, and only with prior consent. Allergies never restore
  * from storage. Meal and mood are per-visit and always start at defaults.
+ * A saved canonical city restores with its label and hint, taking
+ * precedence over a saved country.
  */
 export const draftFromSavedPrefs = (saved: SavedRecommendPrefs | null): QuizDraft => {
   if (saved === null) {
     return EMPTY_DRAFT;
+  }
+
+  if (saved.city !== undefined) {
+    return {
+      avoidRaw: saved.avoid.join(", "),
+      allergiesRaw: "",
+      regionMode: "country",
+      country: "",
+      countrySource: "chosen",
+      cityId: saved.city.placeId,
+      cityLabel: saved.city.label ?? null,
+      cityCountry: saved.city.country ?? null,
+      precise: null,
+      remember: true,
+    };
   }
 
   return {
@@ -746,6 +956,9 @@ export const draftFromSavedPrefs = (saved: SavedRecommendPrefs | null): QuizDraf
     regionMode: saved.country === undefined ? "anywhere" : "country",
     country: saved.country ?? "",
     countrySource: saved.country === undefined ? null : "chosen",
+    cityId: null,
+    cityLabel: null,
+    cityCountry: null,
     precise: null,
     remember: true,
   };
@@ -764,6 +977,11 @@ export const persistPrefs = (
   remember: boolean,
   avoid: ReadonlyArray<string>,
   country: string | undefined,
+  city?: {
+    readonly placeId: string;
+    readonly label: string | null;
+    readonly country: string | null;
+  },
 ): void => {
   if (typeof window === "undefined") {
     return;
@@ -780,6 +998,20 @@ export const persistPrefs = (
     avoid: [...avoid],
     country,
   };
+
+  if (city !== undefined) {
+    if (city.label === null) {
+      if (city.country === null) {
+        prefs.city = { placeId: city.placeId };
+      } else {
+        prefs.city = { placeId: city.placeId, country: city.country };
+      }
+    } else if (city.country === null) {
+      prefs.city = { placeId: city.placeId, label: city.label };
+    } else {
+      prefs.city = { placeId: city.placeId, label: city.label, country: city.country };
+    }
+  }
 
   window.localStorage.setItem(PREFS_KEY, serializePrefs(prefs));
 };

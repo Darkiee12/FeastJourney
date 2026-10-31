@@ -115,7 +115,7 @@ describe("results summary chips", () => {
     expect(html).toContain(`${copyEn.recAllergiesLabel}: 2`);
   });
 
-  test("precise scope shows the nearby label with accuracy, never city precision", () => {
+  test("precise scope shows the nearby label without meters, never city precision", () => {
     const html = renderToStaticMarkup(
       QuizSummary({
         ...summaryBase,
@@ -128,8 +128,8 @@ describe("results summary chips", () => {
       }),
     );
 
-    expect(html).toContain(copyEn.recWhereUsingLocation);
-    expect(html).toContain("25 m");
+    expect(html).toContain(copyEn.recWhereNearYou);
+    expect(html).not.toContain("25 m");
     expect(html).not.toContain("Hanoi");
   });
 

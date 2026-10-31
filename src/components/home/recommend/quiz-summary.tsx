@@ -21,13 +21,15 @@ export interface SummaryChips {
 
 /**
  * Sidebar YOUR PICKS card: compact editable summary of the last submitted
- * request (e.g. "Exploring Vietnam · Dinner · No pork"). Each chip returns
- * to its step so the visitor adjusts one thing instead of restarting. Allergies do not render here as editable
- * text — they stay a session-only safety input. The region chip names the
- * scope honestly: approximate home regions explore by country name, precise
- * fixes lead with the using-location note plus accuracy as secondary detail,
- * destinations show the plain country, worldwide stays unlabeled. Never
- * claims food is physically near or that a city is proven.
+ * request (e.g. "Exploring Bengaluru, Karnataka, India · Dinner · No pork").
+ * Each chip returns to its step so the visitor adjusts one thing instead of
+ * restarting. Allergies do not render here as editable text — they stay a
+ * session-only safety input. The region chip names the scope honestly:
+ * approximate home regions explore by country name, chosen cities show the
+ * city label (falling back to the wider pool actually served when the
+ * server reports one), precise fixes show the nearby scope without accuracy
+ * meters, destinations show the plain country, worldwide stays unlabeled.
+ * Never claims food is physically near or that a city is proven.
  */
 export function QuizSummary({
   allergies,

@@ -126,7 +126,7 @@ describe("result scope labels stay honest", () => {
     ).toBe("Vietnam");
   });
 
-  test("precise fixes show usage plus accuracy, never food-within-meters", () => {
+  test("precise fixes show the honest nearby scope, never meters", () => {
     expect(
       scopeLabelFor(
         {
@@ -135,9 +135,24 @@ describe("result scope labels stay honest", () => {
         copyEn,
         countryOptions,
       ),
-    ).toBe(
-      `${copyEn.recWhereUsingLocation} · ${copyEn.recWhereAccuracyNote.replace("{meters}", "25")}`,
-    );
+    ).toBe(copyEn.recWhereNearYou);
+  });
+
+  test("chosen cities show the city label", () => {
+    expect(
+      scopeLabelFor(
+        {
+          location: {
+            kind: "city",
+            placeId: "42",
+            country: "IN",
+            label: "Bengaluru, Karnataka, India",
+          },
+        },
+        copyEn,
+        countryOptions,
+      ),
+    ).toBe("Exploring Bengaluru, Karnataka, India");
   });
 
   test("worldwide and missing scopes never invent a place", () => {

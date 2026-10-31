@@ -673,6 +673,7 @@ describe("recommendation wire mapping", () => {
           dishes: [dish("1")],
           ranking: RankingProvenance.LiveMuse(),
           warnings: ["w"],
+          servedScope: "country",
         }),
       ),
     ).toEqual({
@@ -681,6 +682,7 @@ describe("recommendation wire mapping", () => {
       ranking: RankingProvenance.LiveMuse(),
       reasons: [],
       warnings: ["w"],
+      servedScope: "country",
     });
   });
 
@@ -691,6 +693,7 @@ describe("recommendation wire mapping", () => {
           dishes: [dish("1")],
           ranking: RankingProvenance.DeterministicCatalog(),
           warnings: ["w"],
+          servedScope: "city",
         }),
       ),
     ).toEqual({
@@ -699,6 +702,7 @@ describe("recommendation wire mapping", () => {
       ranking: RankingProvenance.DeterministicCatalog(),
       reasons: [],
       warnings: ["w"],
+      servedScope: "city",
     });
   });
 
