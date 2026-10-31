@@ -386,20 +386,35 @@ const splitList = (value: string): Array<string> =>
 
 const PLACE_ASSOCIATIONS: ReadonlySet<string> = new Set(["origin", "associated", "popular"]);
 
-/** One parsed `places` cell entry: an ISO code plus its place association. */
+/**
+ * One parsed `places` cell entry: either an ISO code or an internal registry
+ * place id, plus its place association. Exactly one of `iso`/`place_id` is
+ * set; validation resolves the reference downstream and reports unknown
+ * ids/isos as review issues.
+ */
 interface CsvPlaceEntry {
-  readonly iso: string;
+  readonly iso?: string;
+  readonly place_id?: string;
   readonly association: string;
 }
 
+const PLACE_ID_PREFIX = "place:";
+
 /**
- * One `places` cell entry: `ISO[:association]`. A bare ISO code claims no
- * origin — it defaults to `associated`; only an explicit `:origin` suffix
- * records an origin claim. The association match is case-insensitive and
- * surrounding whitespace is ignored. `sheetRow` is the 1-based spreadsheet
- * row (header is row 1) so errors point at the offending line.
+ * One `places` cell entry: `ISO[:association]` or `place:<id>[:association]`.
+ * A bare ISO code or bare `place:<id>` claims no origin — both default to
+ * `associated`; only an explicit `:origin` suffix records an origin claim.
+ * City-level links always use the `place:<id>` form with the registry id;
+ * free-text city names never match. The association match is
+ * case-insensitive and surrounding whitespace is ignored. `sheetRow` is the
+ * 1-based spreadsheet row (header is row 1) so errors point at the offending
+ * line.
  */
 const parsePlaceEntry = (entry: string, sheetRow: number): CsvPlaceEntry => {
+  if (entry.trim().toLowerCase().startsWith(PLACE_ID_PREFIX)) {
+    return parsePlaceIdEntry(entry, sheetRow);
+  }
+
   const separator = entry.indexOf(":");
 
   if (separator === -1) {
@@ -422,13 +437,51 @@ const parsePlaceEntry = (entry: string, sheetRow: number): CsvPlaceEntry => {
 };
 
 /**
+ * `place:<decimal id>[:association]` entries: registry-id references for
+ * city-level (or any sub-country) links. The id must be a non-empty decimal
+ * string and at most one association suffix may follow; anything else
+ * (empty id, non-numeric id, extra segments) is rejected at parse time so
+ * the curator fixes the cell instead of shipping a dangling link. Unknown
+ * numeric ids are still reported later by validation as review issues.
+ */
+const parsePlaceIdEntry = (entry: string, sheetRow: number): CsvPlaceEntry => {
+  const withoutPrefix = entry.trim().slice(PLACE_ID_PREFIX.length);
+  const segments = withoutPrefix.split(":");
+
+  if (segments.length > 2) {
+    throw new Error(`row ${sheetRow}: invalid place entry "${entry}"`);
+  }
+
+  const rawId = (segments[0] ?? "").trim();
+
+  if (!/^[0-9]+$/.test(rawId)) {
+    throw new Error(`row ${sheetRow}: invalid place id "${rawId}" in "${entry}"`);
+  }
+
+  if (segments.length === 1) {
+    return { place_id: rawId, association: "associated" };
+  }
+
+  const rawAssociation = (segments[1] ?? "").trim();
+  const association = rawAssociation.toLowerCase();
+
+  if (!PLACE_ASSOCIATIONS.has(association)) {
+    throw new Error(`row ${sheetRow}: unsupported place association "${rawAssociation}"`);
+  }
+
+  return { place_id: rawId, association };
+};
+
+/**
  * Documented CSV shape: one row per dish, one name per dish.
  * Columns: slug,status,parent_slug,name,language_tag,name_kind,
  * description,ingredients,places,cuisines,categories,editorial_note.
  * Multi-value cells use `;` separators (ingredient names, place entries,
- * cuisine/category slugs). Each `places` entry is `ISO[:association]`
- * where association is one of `origin`, `associated`, or `popular`;
- * a bare ISO code means `associated`, never `origin`.
+ * cuisine/category slugs). Each `places` entry is `ISO[:association]` or
+ * `place:<id>[:association]` where association is one of `origin`,
+ * `associated`, or `popular`; a bare ISO code or bare `place:<id>` means
+ * `associated`, never `origin`. City-level links must use the `place:<id>`
+ * form with the registry id — free-text city names never match.
  * Unknown ingredients, places, cuisines, or
  * categories are reported as review issues by validation, not silently
  * dropped.

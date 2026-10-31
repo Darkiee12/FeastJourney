@@ -216,7 +216,7 @@ const english = {
   adminPublishConfirm: "Publish this dish? It will become publicly visible.",
   adminStatusUpdateFailed: "Could not update status.",
   adminImportPlacesFormat:
-    "Places use ISO codes with an optional association, for example VN, VN:origin, FR:popular. A bare code means associated; only an explicit :origin claims origin.",
+    "Places use ISO codes or place ids with an optional association, for example VN, VN:origin, place:42:associated. A bare code means associated; only an explicit :origin claims origin. City-level links use place:<id>; free-text city names never match.",
   adminImportsNewTitle: "New dataset import",
   adminImportStagesLabel: "Import stages",
   adminStageUpload: "Upload",
@@ -765,7 +765,7 @@ const vietnamese: Messages = {
   adminPublishConfirm: "Xuất bản món này? Món sẽ hiển thị công khai.",
   adminStatusUpdateFailed: "Không thể cập nhật trạng thái.",
   adminImportPlacesFormat:
-    "Địa điểm dùng mã ISO kèm liên kết tùy chọn, ví dụ VN, VN:origin, FR:popular. Mã trần nghĩa là associated; chỉ :origin tường minh mới xác nhận xuất xứ.",
+    "Địa điểm dùng mã ISO hoặc id địa điểm kèm liên kết tùy chọn, ví dụ VN, VN:origin, place:42:associated. Mã trần nghĩa là associated; chỉ :origin tường minh mới xác nhận xuất xứ. Liên kết cấp thành phố dùng place:<id>; tên thành phố tự do không bao giờ khớp.",
   adminImportsNewTitle: "Nhập tập dữ liệu mới",
   adminImportStagesLabel: "Các bước nhập",
   adminStageUpload: "Tải lên",
@@ -1317,7 +1317,7 @@ const hindi: Messages = {
   adminPublishConfirm: "Publish this dish? It will become publicly visible.",
   adminStatusUpdateFailed: "Could not update status.",
   adminImportPlacesFormat:
-    "Places use ISO codes with an optional association, for example VN, VN:origin, FR:popular. A bare code means associated; only an explicit :origin claims origin.",
+    "Places use ISO codes or place ids with an optional association, for example VN, VN:origin, place:42:associated. A bare code means associated; only an explicit :origin claims origin. City-level links use place:<id>; free-text city names never match.",
   adminImportsNewTitle: "New dataset import",
   adminImportStagesLabel: "Import stages",
   adminStageUpload: "Upload",
@@ -1871,7 +1871,7 @@ const spanish: Messages = {
   adminPublishConfirm: "Publish this dish? It will become publicly visible.",
   adminStatusUpdateFailed: "Could not update status.",
   adminImportPlacesFormat:
-    "Places use ISO codes with an optional association, for example VN, VN:origin, FR:popular. A bare code means associated; only an explicit :origin claims origin.",
+    "Places use ISO codes or place ids with an optional association, for example VN, VN:origin, place:42:associated. A bare code means associated; only an explicit :origin claims origin. City-level links use place:<id>; free-text city names never match.",
   adminImportsNewTitle: "New dataset import",
   adminImportStagesLabel: "Import stages",
   adminStageUpload: "Upload",
@@ -2424,7 +2424,7 @@ const chinese: Messages = {
   adminPublishConfirm: "Publish this dish? It will become publicly visible.",
   adminStatusUpdateFailed: "Could not update status.",
   adminImportPlacesFormat:
-    "Places use ISO codes with an optional association, for example VN, VN:origin, FR:popular. A bare code means associated; only an explicit :origin claims origin.",
+    "Places use ISO codes or place ids with an optional association, for example VN, VN:origin, place:42:associated. A bare code means associated; only an explicit :origin claims origin. City-level links use place:<id>; free-text city names never match.",
   adminImportsNewTitle: "New dataset import",
   adminImportStagesLabel: "Import stages",
   adminStageUpload: "Upload",
