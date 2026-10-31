@@ -53,56 +53,38 @@ export interface SidebarPrefsProps {
  * YOUR PICKS card: submitted values with per-step edit chips. Standalone
  * export so the results layout can interleave it with the carousel on
  * mobile; ResultsSidebar composes it with the AI and prefs cards.
- * The optional served scope keeps the region chip honest: when the server
- * fell back from a city to a wider pool, the chip names the pool actually
- * served instead of the requested city.
+ * The region chip always names the requested scope (e.g. the chosen city);
+ * when the server fell back to a wider pool, the outcome warnings rendered
+ * alongside explain exactly what was served — the chip never silently
+ * rewrites the visitor's choice to something they did not pick.
  */
 export function YourPicksCard({
+  compact = false,
   copy,
   countryOptions,
   onEditStep,
   submitted,
-  servedScope,
 }: {
+  readonly compact?: boolean;
   readonly copy: Messages;
   readonly countryOptions: ReadonlyArray<CountryOption>;
   readonly onEditStep: (step: number) => void;
   readonly submitted: RecommendPayload;
-  readonly servedScope?: "city" | "country" | "nearby" | "worldwide" | undefined;
 }) {
   const picks = toYourPicksProps(submitted);
-
-  const summaryLocation = (() => {
-    if (picks.location?.kind !== "city") {
-      return picks.location;
-    }
-
-    if (servedScope === undefined || servedScope === "city") {
-      return picks.location;
-    }
-
-    if (servedScope === "country" && picks.location.country !== undefined) {
-      return { kind: "destination", country: picks.location.country } as const;
-    }
-
-    if (servedScope === "worldwide") {
-      return { kind: "worldwide" } as const;
-    }
-
-    return picks.location;
-  })();
 
   return (
     <QuizSummary
       allergies={picks.allergies}
       avoid={picks.avoid}
+      compact={compact}
       copy={copy}
       countryOptions={countryOptions}
       meal={picks.meal}
       mood={picks.mood}
       onEditStep={onEditStep}
       submittedCountry={picks.country}
-      submittedLocation={summaryLocation}
+      submittedLocation={picks.location}
     />
   );
 }
@@ -112,15 +94,18 @@ export function YourPicksCard({
  * behavior stays entirely inside RememberPrefs.
  */
 export function SidebarPrefsCard({
+  compact = false,
   copy,
   prefs,
 }: {
+  readonly compact?: boolean;
   readonly copy: Messages;
   readonly prefs: SidebarPrefsProps;
 }) {
   return (
     <RememberPrefs
       checked={prefs.checked}
+      compact={compact}
       copy={copy}
       hasSaved={prefs.hasSaved}
       onChange={prefs.onChange}
@@ -142,6 +127,7 @@ export function SidebarPrefsCard({
  */
 export function ResultsSidebar({
   aiCard,
+  compact = false,
   copy,
   countryOptions,
   onEditStep,
@@ -149,6 +135,7 @@ export function ResultsSidebar({
   submitted,
 }: {
   readonly aiCard?: ReactNode | undefined;
+  readonly compact?: boolean;
   readonly copy: Messages;
   readonly countryOptions: ReadonlyArray<CountryOption>;
   readonly onEditStep: (step: number) => void;
@@ -156,15 +143,16 @@ export function ResultsSidebar({
   readonly submitted: RecommendPayload;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-4">
+    <div className={compact ? "flex min-w-0 flex-col gap-3" : "flex min-w-0 flex-col gap-4"}>
       <YourPicksCard
+        compact={compact}
         copy={copy}
         countryOptions={countryOptions}
         onEditStep={onEditStep}
         submitted={submitted}
       />
       {aiCard}
-      <SidebarPrefsCard copy={copy} prefs={prefs} />
+      <SidebarPrefsCard compact={compact} copy={copy} prefs={prefs} />
     </div>
   );
 }

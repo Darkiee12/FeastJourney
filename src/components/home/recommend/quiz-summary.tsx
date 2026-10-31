@@ -34,6 +34,7 @@ export interface SummaryChips {
 export function QuizSummary({
   allergies,
   avoid,
+  compact = false,
   copy,
   countryOptions,
   meal,
@@ -44,6 +45,7 @@ export function QuizSummary({
 }: {
   readonly allergies: ReadonlyArray<string>;
   readonly avoid: ReadonlyArray<string>;
+  readonly compact?: boolean;
   readonly copy: Messages;
   readonly countryOptions: ReadonlyArray<CountryOption>;
   readonly meal: MealOccasion;
@@ -79,8 +81,23 @@ export function QuizSummary({
   ];
 
   return (
-    <div className="rounded-2xl border-2 border-border-soft bg-cream px-4 py-3">
-      <p className="flex items-center gap-2 font-display text-xl tracking-wide text-ink">
+    <div
+      className={
+        compact
+          ? "rounded-2xl border-2 border-border-soft bg-cream px-3 py-2"
+          : "rounded-2xl border-2 border-border-soft bg-cream px-4 py-3"
+      }
+    >
+      {/* In compact (drawer) mode the drawer header already names the
+          section — keep the card label screen-reader-only so the visible
+          heading never repeats. */}
+      <p
+        className={
+          compact
+            ? "sr-only"
+            : "flex items-center gap-2 font-display text-xl tracking-wide text-ink"
+        }
+      >
         <PencilIcon aria-hidden="true" className="size-4 shrink-0" />
         {copy.recSummaryLabel}
       </p>
@@ -114,6 +131,7 @@ export function QuizSummary({
  */
 export function RememberPrefs({
   checked,
+  compact = false,
   copy,
   hasSaved,
   onChange,
@@ -123,6 +141,7 @@ export function RememberPrefs({
   showConfirmClear,
 }: {
   readonly checked: boolean;
+  readonly compact?: boolean;
   readonly copy: Messages;
   readonly hasSaved: boolean;
   readonly onChange: (next: boolean) => void;
@@ -132,7 +151,13 @@ export function RememberPrefs({
   readonly showConfirmClear: boolean;
 }) {
   return (
-    <div className="mt-4 rounded-2xl border border-border-soft bg-white px-4 py-3">
+    <div
+      className={
+        compact
+          ? "rounded-2xl border border-border-soft bg-white px-3 py-2"
+          : "mt-4 rounded-2xl border border-border-soft bg-white px-4 py-3"
+      }
+    >
       <label className="flex cursor-pointer items-start gap-3 text-sm font-bold text-ink">
         <input
           type="checkbox"

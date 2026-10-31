@@ -56,20 +56,22 @@ export interface DetectedRegion {
  * "approximate" indicator; untouched defaults render exactly like
  * unselected rows so a default never poses as an answer.
  */
-const optionClass = (checked: boolean, origin: AnswerOrigin): string => {
+const optionClass = (checked: boolean, origin: AnswerOrigin, compact = false): string => {
+  const density = compact ? "min-h-11 px-3 py-2 text-sm" : "min-h-11 px-4 py-3 text-sm";
+
   if (checked && origin === "explicit") {
-    return "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-sm font-bold transition border-ink bg-ink text-white";
+    return `flex cursor-pointer items-center gap-3 rounded-2xl border-2 font-bold transition border-ink bg-ink text-white ${density}`;
   }
 
   if (checked && origin === "restored") {
-    return "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-sm font-bold transition border-ink bg-cream text-ink";
+    return `flex cursor-pointer items-center gap-3 rounded-2xl border-2 font-bold transition border-ink bg-cream text-ink ${density}`;
   }
 
   if (checked && origin === "suggested") {
-    return "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-sm font-bold transition border-ink bg-white text-ink";
+    return `flex cursor-pointer items-center gap-3 rounded-2xl border-2 font-bold transition border-ink bg-white text-ink ${density}`;
   }
 
-  return "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-sm font-bold transition border-border-soft bg-white text-ink hover:border-food-orange";
+  return `flex cursor-pointer items-center gap-3 rounded-2xl border-2 font-bold transition border-border-soft bg-white text-ink hover:border-food-orange ${density}`;
 };
 
 export interface PointerAdvance {
@@ -179,11 +181,13 @@ export const cityDisplayLabel = (city: Pick<CityOption, "name" | "context">): st
  * commits a canonical place id, never free text; clearing reopens the lane.
  */
 function CitySearchInput({
+  compact = false,
   lang,
   onMarkPointer,
   onPick,
   selected,
 }: {
+  readonly compact?: boolean;
   readonly lang: Locale;
   readonly onMarkPointer: () => void;
   readonly onPick: (city: CityOption | null) => void;
@@ -238,7 +242,7 @@ function CitySearchInput({
   const results = cities.data ?? [];
 
   return (
-    <div className="mt-3">
+    <div className={compact ? "mt-2" : "mt-3"}>
       <label htmlFor="rec-city" className="mb-2 block text-sm font-bold text-ink">
         {lang === "vi" ? "Thành phố (không bắt buộc)" : "City (optional)"}
       </label>
@@ -338,6 +342,7 @@ function CitySearchInput({
  * registry and never invents places.
  */
 export function WhereStep({
+  compact = false,
   copy,
   countriesError,
   countryOptions,
@@ -351,6 +356,7 @@ export function WhereStep({
   provenanceLabels = DEFAULT_PROVENANCE_LABELS,
   lang,
 }: {
+  readonly compact?: boolean;
   readonly copy: Messages;
   readonly countriesError: boolean;
   readonly countryOptions: ReadonlyArray<CountryOption>;
@@ -479,14 +485,35 @@ export function WhereStep({
 
   return (
     <fieldset className="min-w-0">
-      <legend className="font-display px-2 text-2xl tracking-wide">{copy.recWhereLegend}</legend>
-      <p className="mb-4 text-sm text-muted">{copy.recWhereHint}</p>
+      <legend
+        className={
+          compact
+            ? "font-display px-2 text-xl tracking-wide"
+            : "font-display px-2 text-2xl tracking-wide"
+        }
+      >
+        {copy.recWhereLegend}
+      </legend>
+      <p className={compact ? "mb-2 text-xs text-muted" : "mb-4 text-sm text-muted"}>
+        {copy.recWhereHint}
+      </p>
       {detected.locating ? (
-        <p className="mb-4 text-sm font-semibold text-muted">{copy.recWhereLocating}</p>
+        <p
+          className={
+            compact
+              ? "mb-2 text-xs font-semibold text-muted"
+              : "mb-4 text-sm font-semibold text-muted"
+          }
+        >
+          {copy.recWhereLocating}
+        </p>
       ) : null}
-      <div className="flex flex-col gap-3">
+      <div className={compact ? "flex flex-col gap-2" : "flex flex-col gap-3"}>
         {detected.country !== null && detectedName !== null ? (
-          <label className={optionClass(choice === "home", origin)} onPointerDown={markPointer}>
+          <label
+            className={optionClass(choice === "home", origin, compact)}
+            onPointerDown={markPointer}
+          >
             <input
               type="radio"
               name="rec-where"
@@ -501,7 +528,10 @@ export function WhereStep({
             {choiceLabelFor("home", copy, detectedName)}
           </label>
         ) : null}
-        <label className={optionClass(choice === "precise", origin)} onPointerDown={markPointer}>
+        <label
+          className={optionClass(choice === "precise", origin, compact)}
+          onPointerDown={markPointer}
+        >
           <input
             type="radio"
             name="rec-where"
@@ -514,7 +544,7 @@ export function WhereStep({
           {choiceLabelFor("precise", copy, null)}
         </label>
         <label
-          className={optionClass(choice === "destination", origin)}
+          className={optionClass(choice === "destination", origin, compact)}
           onPointerDown={markPointer}
         >
           <input
@@ -530,7 +560,10 @@ export function WhereStep({
           <PlaneIcon aria-hidden="true" className="size-5 flex-none" />
           {choiceLabelFor("destination", copy, null)}
         </label>
-        <label className={optionClass(choice === "worldwide", origin)} onPointerDown={markPointer}>
+        <label
+          className={optionClass(choice === "worldwide", origin, compact)}
+          onPointerDown={markPointer}
+        >
           <input
             type="radio"
             name="rec-where"
@@ -557,7 +590,7 @@ export function WhereStep({
       ) : null}
 
       {choice === "precise" ? (
-        <div aria-live="polite" className="mt-5 min-h-6">
+        <div aria-live="polite" className={compact ? "mt-3 min-h-6" : "mt-5 min-h-6"}>
           {precise.status === "locating" ? (
             <p className="text-sm font-semibold text-muted">{copy.recWhereLocating}</p>
           ) : null}
@@ -622,8 +655,9 @@ export function WhereStep({
       ) : null}
 
       {choice === "destination" ? (
-        <div className="mt-5">
+        <div className={compact ? "mt-3" : "mt-5"}>
           <CitySearchInput
+            compact={compact}
             lang={lang}
             onMarkPointer={markPointer}
             onPick={pickCity}
@@ -643,7 +677,14 @@ export function WhereStep({
               ? "Chọn thành phố để xem món gắn với nơi đó, hoặc chọn quốc gia bên dưới."
               : "Pick a city for dishes tied to it, or choose a country below."}
           </p>
-          <label htmlFor="rec-country" className="mt-4 mb-2 block text-sm font-bold text-ink">
+          <label
+            htmlFor="rec-country"
+            className={
+              compact
+                ? "mt-3 mb-2 block text-sm font-bold text-ink"
+                : "mt-4 mb-2 block text-sm font-bold text-ink"
+            }
+          >
             {copy.recWhereCountryLabel}
           </label>
           {countriesError ? (
@@ -699,12 +740,14 @@ export function WhereStep({
  * next step alongside the exclusions.
  */
 export function CravingStep({
+  compact = false,
   copy,
   meal,
   onAdvance,
   onMeal,
   touched,
 }: {
+  readonly compact?: boolean;
   readonly copy: Messages;
   readonly meal: MealOccasion;
   readonly onAdvance: () => void;
@@ -715,13 +758,27 @@ export function CravingStep({
 
   return (
     <fieldset className="min-w-0">
-      <legend className="font-display px-2 text-2xl tracking-wide">{copy.recCravingLegend}</legend>
-      <p className="mb-4 text-sm text-muted">{copy.recCravingHint}</p>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <legend
+        className={
+          compact
+            ? "font-display px-2 text-xl tracking-wide"
+            : "font-display px-2 text-2xl tracking-wide"
+        }
+      >
+        {copy.recCravingLegend}
+      </legend>
+      <p className={compact ? "mb-2 text-xs text-muted" : "mb-4 text-sm text-muted"}>
+        {copy.recCravingHint}
+      </p>
+      <div className={compact ? "grid grid-cols-2 gap-2" : "grid grid-cols-2 gap-3 sm:grid-cols-3"}>
         {mealOptions(copy).map((option) => (
           <label
             key={option.value}
-            className={optionClass(meal === option.value, touched ? "explicit" : "untouched")}
+            className={optionClass(
+              meal === option.value,
+              touched ? "explicit" : "untouched",
+              compact,
+            )}
             onPointerDown={markPointer}
           >
             <input
@@ -759,6 +816,7 @@ export function CravingStep({
  */
 export function AvoidStep({
   avoidOrigin,
+  compact = false,
   copy,
   draft,
   mood,
@@ -768,6 +826,7 @@ export function AvoidStep({
   provenanceLabels = DEFAULT_PROVENANCE_LABELS,
 }: {
   readonly avoidOrigin: AnswerOrigin;
+  readonly compact?: boolean;
   readonly copy: Messages;
   readonly draft: QuizDraft;
   readonly mood: RecommendationMood;
@@ -778,10 +837,20 @@ export function AvoidStep({
 }) {
   return (
     <fieldset className="min-w-0">
-      <legend className="font-display px-2 text-2xl tracking-wide">{copy.recAvoidTitle}</legend>
-      <p className="mb-4 text-sm text-muted">{copy.recAvoidHint}</p>
+      <legend
+        className={
+          compact
+            ? "font-display px-2 text-xl tracking-wide"
+            : "font-display px-2 text-2xl tracking-wide"
+        }
+      >
+        {copy.recAvoidTitle}
+      </legend>
+      <p className={compact ? "mb-2 text-xs text-muted" : "mb-4 text-sm text-muted"}>
+        {copy.recAvoidHint}
+      </p>
       <p className="mb-3 text-sm font-bold text-ink">{copy.recMoodRefine}</p>
-      <div className="mb-6 flex flex-wrap gap-2">
+      <div className={compact ? "mb-4 flex flex-wrap gap-2" : "mb-6 flex flex-wrap gap-2"}>
         {moodOptions(copy).map((option) => {
           const selected = mood === option.value;
 
@@ -804,7 +873,7 @@ export function AvoidStep({
           );
         })}
       </div>
-      <div className="flex flex-col gap-5">
+      <div className={compact ? "flex flex-col gap-3" : "flex flex-col gap-5"}>
         <div>
           <label htmlFor="rec-avoid" className="mb-2 block text-sm font-bold text-ink">
             {copy.recAvoidLabel}

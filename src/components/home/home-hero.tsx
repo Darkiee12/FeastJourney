@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 
 import { SURPRISE_DISH_EVENT } from "@/components/home/globe/food-locations";
 import { GlobeCanvas } from "@/components/home/globe/globe-canvas";
+import { openQuizDrawer } from "@/components/home/recommend/quiz-drawer";
 import type { Locale, Messages } from "@/shared/i18n";
 
 function CompassIcon() {
@@ -73,16 +74,26 @@ export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
         </p>
 
         <div className="mx-auto flex w-full max-w-xs flex-col items-stretch gap-3 sm:max-w-none sm:flex-row sm:items-center sm:justify-center">
+          {/* Desktop keeps the scroll-to-#recommend link; phones open the
+              quiz drawer sliding over the globe instead of scrolling away. */}
           <Link
             to="/"
             search={{ lang }}
             hash="recommend"
             resetScroll={false}
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-food-orange-strong px-6 text-base font-bold text-white no-underline shadow-[0_10px_28px_rgba(194,65,12,0.45)] transition hover:-translate-y-px hover:bg-food-orange-dark active:translate-y-0 sm:min-h-13 sm:px-8 sm:text-lg"
+            className="hidden min-h-12 items-center justify-center gap-2 rounded-full bg-food-orange-strong px-6 text-base font-bold text-white no-underline shadow-[0_10px_28px_rgba(194,65,12,0.45)] transition hover:-translate-y-px hover:bg-food-orange-dark active:translate-y-0 sm:min-h-13 sm:px-8 sm:text-lg md:inline-flex"
           >
             <UtensilsIcon />
             {copy.ctaRecommend}
           </Link>
+          <button
+            type="button"
+            onClick={openQuizDrawer}
+            className="inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-full bg-food-orange-strong px-6 text-base font-bold text-white shadow-[0_10px_28px_rgba(194,65,12,0.45)] transition hover:bg-food-orange-dark sm:min-h-13 sm:px-8 sm:text-lg md:hidden"
+          >
+            <UtensilsIcon />
+            {copy.ctaRecommend}
+          </button>
 
           <Link
             to="/"

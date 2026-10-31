@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useReducer } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { z } from "zod";
 
 import {
@@ -321,6 +322,141 @@ export const statusForDish = (query: FavoriteStatusQuery, dishId: string): SaveB
   updatedAt: query.dataUpdatedAt,
 });
 
+/**
+ * Mobile guest entry: the phone button opens a bottom sheet with sign-in /
+ * create-account actions instead of navigating straight away. Desktop keeps
+ * the direct sign-in navigation. Both actions preserve `returnTo` verbatim
+ * so auth lands back on the dish; nothing fabricates auth state.
+ */
+function GuestSaveSheetButton({
+  dishLabel,
+  lang,
+  returnTo,
+}: {
+  readonly dishLabel: string;
+  readonly lang: Locale;
+  readonly returnTo: string;
+}) {
+  const navigate = useNavigate();
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const panelRef = useRef<HTMLDialogElement | null>(null);
+  const previouslyFocusedRef = useRef<Element | null>(null);
+
+  useEffect(() => {
+    if (!sheetOpen) {
+      return undefined;
+    }
+
+    previouslyFocusedRef.current = document.activeElement;
+
+    const scrollY = window.scrollY;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setSheetOpen(false);
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    panelRef.current?.querySelector<HTMLElement>("[data-sheet-focus]")?.focus({
+      preventScroll: true,
+    });
+
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      window.scrollTo({ top: scrollY, behavior: "auto" });
+
+      const previous = previouslyFocusedRef.current;
+
+      if (previous instanceof HTMLElement) {
+        previous.focus({ preventScroll: true });
+      }
+    };
+  }, [sheetOpen]);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          setSheetOpen(true);
+        }}
+        className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white md:hidden"
+      >
+        {dishLabel}
+      </button>
+      {sheetOpen
+        ? createPortal(
+            <div className="fixed inset-0 z-50 flex items-end justify-center md:hidden">
+              <dialog
+                ref={panelRef}
+                open
+                aria-modal="true"
+                aria-label={lang === "vi" ? "Lưu món ăn" : "Save dish"}
+                lang={lang}
+                className="pointer-events-auto m-0 flex max-h-[46dvh] w-full max-w-none flex-col overflow-hidden rounded-t-3xl border-2 border-b-0 border-border-soft bg-cream p-0 shadow-[0_-12px_32px_rgba(3,10,30,0.35)] motion-safe:animate-rec-step-enter motion-reduce:animate-none"
+              >
+                <div className="mx-auto mt-2 h-1.5 w-12 flex-none rounded-full bg-border-soft" />
+                <div className="flex flex-none items-start justify-between gap-2 px-4 pt-2">
+                  <h2
+                    data-sheet-focus
+                    tabIndex={-1}
+                    className="font-display text-xl tracking-wide text-ink outline-none"
+                  >
+                    {lang === "vi" ? "Lưu món này để xem lại sau?" : "Save this dish for later?"}
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSheetOpen(false);
+                    }}
+                    aria-label={lang === "vi" ? "Đóng" : "Close"}
+                    className="inline-flex min-h-11 min-w-11 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-3 text-sm font-bold text-ink transition hover:border-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
+                  <p className="text-sm font-semibold text-ink">
+                    {lang === "vi"
+                      ? "Đăng nhập để lưu các món bạn thích. Sau khi xong, bạn sẽ quay lại đúng món này."
+                      : "Sign in to save dishes you love. You'll come right back to this dish afterwards."}
+                  </p>
+                </div>
+                <div className="flex-none border-t-2 border-border-soft bg-cream px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigate({ to: "/sign-in", search: { returnTo, lang } });
+                      }}
+                      className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-full bg-ink px-5 text-sm font-bold text-white transition hover:opacity-90"
+                    >
+                      {lang === "vi" ? "Đăng nhập" : "Sign in"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigate({ to: "/sign-up", search: { returnTo, lang } });
+                      }}
+                      className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
+                    >
+                      {lang === "vi" ? "Tạo tài khoản" : "Create account"}
+                    </button>
+                  </div>
+                </div>
+              </dialog>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
+  );
+}
+
 export function SaveDishButton({
   dishId,
   lang,
@@ -414,15 +550,18 @@ export function SaveDishButton({
 
   if (session.status !== "signed-in") {
     return (
-      <button
-        type="button"
-        onClick={() => {
-          void navigate({ to: "/sign-in", search: { returnTo, lang } });
-        }}
-        className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
-      >
-        {copy.saveDishSave}
-      </button>
+      <>
+        <button
+          type="button"
+          onClick={() => {
+            void navigate({ to: "/sign-in", search: { returnTo, lang } });
+          }}
+          className="hidden min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white md:inline-flex"
+        >
+          {copy.saveDishSave}
+        </button>
+        <GuestSaveSheetButton dishLabel={copy.saveDishSave} lang={lang} returnTo={returnTo} />
+      </>
     );
   }
 

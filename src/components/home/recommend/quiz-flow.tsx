@@ -1,9 +1,14 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { SparklesIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { MapPinIcon, SparklesIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { DishCarousel } from "@/components/dish/dish-carousel";
+import {
+  QUIZ_DRAWER_OPEN_EVENT,
+  QuizDrawer,
+  useIsMaxMd,
+} from "@/components/home/recommend/quiz-drawer";
 import {
   buildRecommendPayload,
   buildSurprisePayload,
@@ -175,10 +180,13 @@ export function RecommendSection() {
   const [submitted, setSubmitted] = useState<RecommendPayload | null>(journey?.submitted ?? null);
   const [confirmClear, setConfirmClear] = useState<boolean>(false);
   const [surpriseSeed, setSurpriseSeed] = useState<number>(journey?.surpriseSeed ?? 0);
+  const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
+  const isMobile = useIsMaxMd();
 
   const [hasSaved, setHasSaved] = useState<boolean>(() => savedInitial !== null);
 
   const stepHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const drawerHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const skipInitialFocusRef = useRef(true);
 
   const regionQuery = useQuery({
@@ -337,6 +345,34 @@ export function RecommendSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.regionMode, precise.status]);
 
+  // Mobile drawer trigger: the hero CTA (a sibling section with no shared
+  // parent this phase owns) dispatches QUIZ_DRAWER_OPEN_EVENT. Opening or
+  // closing the drawer only flips its open flag — the draft, answers, rail
+  // index, and journey snapshot are untouched.
+  useEffect(() => {
+    const onOpen = (): void => {
+      setDrawerOpen(true);
+    };
+
+    window.addEventListener(QUIZ_DRAWER_OPEN_EVENT, onOpen);
+
+    return () => {
+      window.removeEventListener(QUIZ_DRAWER_OPEN_EVENT, onOpen);
+    };
+  }, []);
+
+  // Deep-link entry: landing directly on #recommend on a phone opens the
+  // drawer instead of leaving the visitor at a slim anchor section.
+  useEffect(() => {
+    if (
+      typeof window !== "undefined" &&
+      window.location.hash === "#recommend" &&
+      window.matchMedia("(max-width: 767.98px)").matches
+    ) {
+      setDrawerOpen(true);
+    }
+  }, []);
+
   // Predictable focus: each step and the results heading receive focus on
   // entry (without scrolling), so keyboard and screen-reader users land on
   // the question. The initial mount keeps natural focus.
@@ -349,6 +385,15 @@ export function RecommendSection() {
 
     stepHeadingRef.current?.focus({ preventScroll: true });
   }, [stepIndex, showResults]);
+
+  // Drawer mirror of the desktop focus move: the drawer owns its own
+  // heading (the desktop one is unmounted on mobile), focused without
+  // scrolling the page behind the sheet.
+  useEffect(() => {
+    if (drawerOpen && isMobile) {
+      drawerHeadingRef.current?.focus({ preventScroll: true });
+    }
+  }, [stepIndex, showResults, drawerOpen, isMobile]);
 
   const startSearch = (payload: RecommendPayload, remember: boolean): void => {
     const transport = toTransportPayload(payload);
@@ -641,6 +686,284 @@ export function RecommendSection() {
     [copy],
   );
 
+  /**
+   * Shared stage renderer for the desktop card and the mobile drawer. One
+   * question per view in both; the drawer passes compact for the tighter
+   * option presentation. State and handlers are shared, so answers survive
+   * overlay round-trips.
+   */
+  const renderStages = (compact: boolean): ReactNode => (
+    <div key={stepIndex} className="motion-safe:animate-rec-step-enter">
+      {stepIndex === 0 ? (
+        <WhereStep
+          compact={compact}
+          copy={copy}
+          countriesError={countries.isError}
+          countryOptions={countryOptions}
+          detected={{ country: detectedCountry, locating: regionQuery.isPending }}
+          draft={draft}
+          onAdvance={tryAdvance}
+          onDraft={updateRegionDraft}
+          onRetryCountries={() => {
+            void countries.refetch();
+          }}
+          origin={regionOrigin}
+          lang={lang}
+          precise={{
+            fix: precise.fix,
+            request: precise.request,
+            status: precise.status,
+          }}
+          provenanceLabels={provenanceLabels}
+        />
+      ) : null}
+
+      {stepIndex === 1 ? (
+        <CravingStep
+          compact={compact}
+          copy={copy}
+          meal={meal}
+          onAdvance={tryAdvance}
+          onMeal={pickMeal}
+          touched={mealTouched}
+        />
+      ) : null}
+
+      {stepIndex === 2 ? (
+        <AvoidStep
+          avoidOrigin={avoidOrigin}
+          compact={compact}
+          copy={copy}
+          draft={draft}
+          mood={mood}
+          moodTouched={moodTouched}
+          onDraft={updateExclusionsDraft}
+          onMood={pickMood}
+          provenanceLabels={provenanceLabels}
+        />
+      ) : null}
+    </div>
+  );
+
+  /**
+   * Sticky drawer footer: the single primary action per view, always a
+   * min-44px target. Mirrors the desktop card actions exactly — same
+   * handlers, same validation — only the layout is bottom-docked.
+   */
+  const renderDrawerFooter = (): ReactNode => {
+    if (showResults) {
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={backToQuiz}
+            className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-full bg-ink px-5 text-sm font-bold text-white transition hover:opacity-90"
+          >
+            {copy.recAdjust}
+          </button>
+          <button
+            type="button"
+            onClick={startOver}
+            className="inline-flex min-h-11 cursor-pointer items-center rounded-full px-4 text-sm font-bold text-muted underline decoration-2 underline-offset-4 transition hover:text-ink"
+          >
+            {copy.recStartOver}
+          </button>
+        </div>
+      );
+    }
+
+    if (stepIndex < QUIZ_STEPS - 1) {
+      return (
+        <div className="flex items-center gap-2">
+          {stepIndex > 0 ? (
+            <button
+              type="button"
+              onClick={goBack}
+              className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
+            >
+              {copy.recBack}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={tryAdvance}
+            className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
+          >
+            {copy.recContinue}
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={goBack}
+          className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold text-ink transition hover:border-ink"
+        >
+          {copy.recBack}
+        </button>
+        <button
+          type="button"
+          onClick={skipExclusions}
+          disabled={recommend.isPending}
+          className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold text-ink transition hover:border-ink disabled:cursor-wait disabled:opacity-70"
+        >
+          {copy.recSkip}
+        </button>
+        <button
+          type="button"
+          onClick={findDishes}
+          disabled={recommend.isPending}
+          className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-full bg-food-orange-strong px-4 text-sm font-bold text-white shadow-[0_10px_28px_rgba(194,65,12,0.35)] transition hover:bg-food-orange-dark disabled:cursor-wait disabled:opacity-70"
+        >
+          {copy.recFindMine}
+        </button>
+      </div>
+    );
+  };
+
+  if (isMobile) {
+    let entryLabel: string = copy.ctaRecommend;
+
+    if (showResults) {
+      entryLabel = lang === "vi" ? "Xem gợi ý của bạn" : "See your picks";
+    }
+
+    return (
+      <>
+        <section
+          id="recommend"
+          aria-labelledby="recommend-heading"
+          className="mx-auto w-full scroll-mt-20 px-5 pt-10 md:hidden"
+          style={{ paddingBottom: "max(4rem, env(safe-area-inset-bottom))" }}
+        >
+          <h1
+            id="recommend-heading"
+            className="font-display text-[clamp(2.25rem,7vw,3.5rem)] leading-none tracking-wide text-balance"
+          >
+            {copy.recTitle}
+          </h1>
+          <p className="mt-3 max-w-[60ch] text-lg text-muted">
+            {showResults && outcome !== null ? copy.recResultsIntro : copy.recIntro}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setDrawerOpen(true);
+            }}
+            className="mt-4 inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-full bg-food-orange-strong px-6 text-base font-bold text-white shadow-[0_10px_28px_rgba(194,65,12,0.35)] transition hover:bg-food-orange-dark"
+          >
+            {entryLabel}
+          </button>
+        </section>
+        <QuizDrawer
+          cityChip={
+            draft.cityId !== null && draft.cityLabel !== null ? (
+              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border-2 border-ink bg-ink px-3 py-1 text-xs font-bold text-white">
+                <MapPinIcon aria-hidden="true" className="size-3.5 flex-none" />
+                <span className="truncate">{draft.cityLabel}</span>
+              </span>
+            ) : null
+          }
+          closeLabel={lang === "vi" ? "Đóng" : "Close"}
+          footer={renderDrawerFooter()}
+          headingId="quiz-drawer-progress"
+          label={showResults ? copy.recResultsHeading : stepQuestion(stepIndex, copy)}
+          lang={lang}
+          onClose={() => {
+            setDrawerOpen(false);
+          }}
+          open={drawerOpen}
+          progress={
+            showResults ? null : (
+              <div>
+                <p
+                  aria-live="polite"
+                  className="text-xs font-bold tracking-wide text-muted uppercase"
+                >
+                  {stepLabel}
+                </p>
+                <div aria-hidden="true" className="mt-1 flex gap-1.5">
+                  {[0, 1, 2].map((dot) => (
+                    <span
+                      key={dot}
+                      className={`h-2 w-8 rounded-full ${dot <= stepIndex ? "bg-food-orange-strong" : "bg-border-soft"}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )
+          }
+        >
+          <h2 ref={drawerHeadingRef} tabIndex={-1} className="sr-only">
+            {showResults
+              ? copy.recResultsHeading
+              : `${stepLabel}: ${stepQuestion(stepIndex, copy)}`}
+          </h2>
+          {showResults && submitted !== null ? (
+            <div>
+              <YourPicksCard
+                compact
+                copy={copy}
+                countryOptions={countryOptions}
+                onEditStep={editStep}
+                submitted={submitted}
+              />
+              {outcome !== null && (outcome.mode === "ai" || outcome.mode === "deterministic") ? (
+                <div className="mt-3">
+                  <AiExplanationCard copy={copy} mode={outcome.mode} ranking={outcome.ranking} />
+                </div>
+              ) : null}
+              {recommend.isPending && outcome === null ? (
+                <div className="mt-3">
+                  <ResultsExplanationSkeleton />
+                </div>
+              ) : null}
+              <div className="mt-3">
+                <SidebarPrefsCard
+                  compact
+                  copy={copy}
+                  prefs={{
+                    checked: draft.remember,
+                    hasSaved,
+                    onChange: (next) => {
+                      setDraft({ ...draft, remember: next });
+                    },
+                    onClear: () => {
+                      setConfirmClear(true);
+                    },
+                    onConfirmClear: clearSaved,
+                    onDismissClear: () => {
+                      setConfirmClear(false);
+                    },
+                    showConfirmClear: confirmClear,
+                  }}
+                />
+              </div>
+              <div aria-live="polite" aria-busy={recommend.isPending} className="mt-3">
+                {renderOutcome(copy)}
+              </div>
+            </div>
+          ) : (
+            <div>
+              {renderStages(true)}
+              {stepError !== null ? (
+                <p
+                  role="alert"
+                  className="mt-3 rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
+                >
+                  {stepError}
+                </p>
+              ) : null}
+            </div>
+          )}
+        </QuizDrawer>
+      </>
+    );
+  }
+
   return (
     <section
       id="recommend"
@@ -721,11 +1044,6 @@ export function RecommendSection() {
                 countryOptions={countryOptions}
                 onEditStep={editStep}
                 submitted={submitted}
-                servedScope={
-                  outcome !== null && (outcome.mode === "ai" || outcome.mode === "deterministic")
-                    ? outcome.servedScope
-                    : undefined
-                }
               />
             </div>
           ) : null}
@@ -800,53 +1118,7 @@ export function RecommendSection() {
                   </div>
                 </div>
 
-                <div key={stepIndex} className="motion-safe:animate-rec-step-enter">
-                  {stepIndex === 0 ? (
-                    <WhereStep
-                      copy={copy}
-                      countriesError={countries.isError}
-                      countryOptions={countryOptions}
-                      detected={{ country: detectedCountry, locating: regionQuery.isPending }}
-                      draft={draft}
-                      onAdvance={tryAdvance}
-                      onDraft={updateRegionDraft}
-                      onRetryCountries={() => {
-                        void countries.refetch();
-                      }}
-                      origin={regionOrigin}
-                      lang={lang}
-                      precise={{
-                        fix: precise.fix,
-                        request: precise.request,
-                        status: precise.status,
-                      }}
-                      provenanceLabels={provenanceLabels}
-                    />
-                  ) : null}
-
-                  {stepIndex === 1 ? (
-                    <CravingStep
-                      copy={copy}
-                      meal={meal}
-                      onAdvance={tryAdvance}
-                      onMeal={pickMeal}
-                      touched={mealTouched}
-                    />
-                  ) : null}
-
-                  {stepIndex === 2 ? (
-                    <AvoidStep
-                      avoidOrigin={avoidOrigin}
-                      copy={copy}
-                      draft={draft}
-                      mood={mood}
-                      moodTouched={moodTouched}
-                      onDraft={updateExclusionsDraft}
-                      onMood={pickMood}
-                      provenanceLabels={provenanceLabels}
-                    />
-                  ) : null}
-                </div>
+                {renderStages(false)}
 
                 {stepError !== null ? (
                   <p
