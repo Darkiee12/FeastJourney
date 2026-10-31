@@ -53,6 +53,13 @@ export const carouselQuerySchema = z
       .string()
       .regex(/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/, "country must be an ISO 3166 code")
       .optional(),
+    /**
+     * Canonical city scope: a decimal place id from the place registry
+     * (locality or broader). Serves the place subtree, falling back to the
+     * country hint and then worldwide. Mutually exclusive with every other
+     * scope, exactly like worldwide.
+     */
+    place: dbIdSchema.optional(),
     worldwide: z.boolean().optional(),
     locale: localeSchema,
     limit: z.coerce.number().int().min(1).max(20).default(5),
@@ -68,17 +75,31 @@ export const carouselQuerySchema = z
     const hasLatitude = value.latitude !== undefined;
     const hasLongitude = value.longitude !== undefined;
     const hasCountry = value.country !== undefined;
+    const hasPlace = value.place !== undefined;
     const worldwide = value.worldwide === true;
 
     // Exactly one scope per call: a worldwide request must never carry
-    // coordinates or a country, otherwise the service could silently run a
+    // coordinates, a country, or a city; a city request must never carry
+    // coordinates or a country. Otherwise the service could silently run a
     // precise search for it.
     if (worldwide) {
+      if (hasLatitude || hasLongitude || hasCountry || hasPlace) {
+        context.addIssue({
+          code: "custom",
+          message: "worldwide must not carry coordinates, country, or city; send one scope only",
+          path: ["worldwide"],
+        });
+      }
+
+      return;
+    }
+
+    if (hasPlace) {
       if (hasLatitude || hasLongitude || hasCountry) {
         context.addIssue({
           code: "custom",
-          message: "worldwide must not carry coordinates or country; send one scope only",
-          path: ["worldwide"],
+          message: "city place must not carry coordinates or country; send one scope only",
+          path: ["place"],
         });
       }
 
@@ -103,7 +124,7 @@ export const carouselQuerySchema = z
 
     context.addIssue({
       code: "custom",
-      message: "send exactly one scope: country, nearby coordinates, or worldwide",
+      message: "send exactly one scope: country, city place, nearby coordinates, or worldwide",
       path: ["worldwide"],
     });
   });
@@ -157,12 +178,16 @@ const isoCountrySchema = z
   .regex(/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/, "country must be an ISO 3166 code");
 
 /**
- * Where the recommendation should look. The four variants are mutually
- * exclusive by construction: an approximate network-region country, precise
- * visitor coordinates, an explicitly chosen destination country, or the whole
- * world. Coordinates stay ephemeral on the client and are never persisted;
- * the server never logs them and never forwards them to the ranking model.
- * Accuracy is meters as reported by the geolocation API (null when unknown).
+ * Where the recommendation should look. The variants are mutually exclusive
+ * by construction: an approximate network-region country, precise visitor
+ * coordinates, an explicitly chosen destination country, an explicitly
+ * chosen canonical city (place id, resolved against the place registry —
+ * never a free-text name), or the whole world. Coordinates stay ephemeral
+ * on the client and are never persisted; the server never logs them and
+ * never forwards them to the ranking model. Accuracy is meters as reported
+ * by the geolocation API (null when unknown). The city variant carries an
+ * optional country hint used only for the honest wider-pool fallback when
+ * the city subtree holds no dishes.
  */
 export const recommendationLocationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("approx"), country: isoCountrySchema }),
@@ -173,6 +198,17 @@ export const recommendationLocationSchema = z.discriminatedUnion("kind", [
     accuracy: z.number().finite().positive().max(100_000).nullish(),
   }),
   z.object({ kind: z.literal("destination"), country: isoCountrySchema }),
+  z.object({
+    kind: z.literal("city"),
+    placeId: dbIdSchema,
+    country: isoCountrySchema.optional(),
+    /**
+     * Client display label ("Bengaluru, Karnataka, India"). Display-only:
+     * the server scopes by placeId and ignores this. Never a substitute
+     * for registry resolution.
+     */
+    label: z.string().max(200).optional(),
+  }),
   z.object({ kind: z.literal("worldwide") }),
 ]);
 

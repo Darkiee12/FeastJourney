@@ -15,7 +15,11 @@ nearby_places AS (
     ) AS dist_m
   FROM feastjourney.places AS p
   CROSS JOIN input
+  -- Locality-only: city-scale placements count as nearby. Country, region,
+  -- and continent centroids NEVER qualify — a country centroid hundreds of
+  -- kilometers away must not relabel another region's dishes as local.
   WHERE p.display_latitude IS NOT NULL AND p.display_longitude IS NOT NULL
+    AND p.kind = 'locality'
     AND ST_DWithin(
       ST_MakePoint(p.display_longitude, p.display_latitude)::geography,
       ST_MakePoint(input.lon, input.lat)::geography,

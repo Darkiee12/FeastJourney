@@ -2,6 +2,7 @@ import { Context, Effect, Layer } from "effect";
 
 import placeCoordsAll from "@/modules/food-discovery/server/repository/sql/place-coords-all.sql";
 import placeCountriesWithNames from "@/modules/food-discovery/server/repository/sql/place-countries-with-names.sql";
+import placeFindAncestors from "@/modules/food-discovery/server/repository/sql/place-find-ancestors.sql";
 import placeFindById from "@/modules/food-discovery/server/repository/sql/place-find-by-id.sql";
 import placeFindByIso from "@/modules/food-discovery/server/repository/sql/place-find-by-iso.sql";
 import placeFindDescendants from "@/modules/food-discovery/server/repository/sql/place-find-descendants.sql";
@@ -14,6 +15,8 @@ import type { Database } from "@/server/database/client";
 import { type DatabaseError, runQuery } from "@/server/database/query";
 
 export type PlaceRow = (typeof placeFindById)["~reylo"]["element"];
+
+export type PlaceAncestorRow = (typeof placeFindAncestors)["~reylo"]["element"];
 
 export type PlaceNameRow = (typeof placeNamesByPlaceIds)["~reylo"]["element"];
 
@@ -45,6 +48,14 @@ export class PlaceRepository extends Context.Service<
     readonly descendantIds: (
       id: bigint,
     ) => Effect.Effect<ReadonlyArray<bigint>, DatabaseError, Database>;
+    /**
+     * Ancestor chain of one place: the place itself plus every parent up to
+     * the root, nearest first. Powers city fallback (city -> state ->
+     * country) and honest scope labels. Empty when the place is unknown.
+     */
+    readonly ancestors: (
+      id: bigint,
+    ) => Effect.Effect<ReadonlyArray<PlaceAncestorRow>, DatabaseError, Database>;
     readonly coordsAll: () => Effect.Effect<ReadonlyArray<PlaceCoordsRow>, DatabaseError, Database>;
     readonly dishIdsByPlace: (input: {
       readonly placeId: bigint;
@@ -111,6 +122,10 @@ export const PlaceRepositoryLive = Layer.succeed(PlaceRepository, {
       );
 
       return rows.map((row) => row.id);
+    }),
+  ancestors: (id) =>
+    Effect.gen(function* () {
+      return yield* runQuery("place/ancestors", (sql) => placeFindAncestors.run(sql, { id }));
     }),
   coordsAll: () =>
     Effect.gen(function* () {

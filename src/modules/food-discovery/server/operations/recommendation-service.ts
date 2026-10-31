@@ -35,8 +35,10 @@ import dishIngredientsByDishIds from "@/modules/food-discovery/server/repository
 import dishMediaPublishedByDishIds from "@/modules/food-discovery/server/repository/sql/dish-media-published-by-dish-ids.sql";
 import dishNamesByDishIds from "@/modules/food-discovery/server/repository/sql/dish-names-by-dish-ids.sql";
 import dishPlacesByDishIds from "@/modules/food-discovery/server/repository/sql/dish-places-by-dish-ids.sql";
+import dishRecommendationCandidatesPlace from "@/modules/food-discovery/server/repository/sql/dish-recommendation-candidates-place.sql";
 import dishRecommendationCandidates from "@/modules/food-discovery/server/repository/sql/dish-recommendation-candidates.sql";
 import ingredientNamesByIngredientIds from "@/modules/food-discovery/server/repository/sql/ingredient-names-by-ingredient-ids.sql";
+import placeFindByIso from "@/modules/food-discovery/server/repository/sql/place-find-by-iso.sql";
 import placeNamesByPlaceIds from "@/modules/food-discovery/server/repository/sql/place-names-by-place-ids.sql";
 import { Actor } from "@/server/auth/actor";
 import { CurrentActor } from "@/server/auth/current-actor";
@@ -60,16 +62,24 @@ import {
 
 export type RecommendationCandidateRow = (typeof dishRecommendationCandidates)["~reylo"]["element"];
 
+export type CityRecommendationCandidateRow =
+  (typeof dishRecommendationCandidatesPlace)["~reylo"]["element"];
+
+/** Which pool actually served a ready result — the honest scope for labels. */
+export type RecommendationServedScope = "city" | "country" | "nearby" | "worldwide";
+
 export type RecommendationOutcome = Data.TaggedEnum<{
   ReadyMuse: {
     readonly dishes: ReadonlyArray<DishSummary>;
     readonly warnings: ReadonlyArray<string>;
     readonly ranking: RankingProvenance;
+    readonly servedScope: RecommendationServedScope;
   };
   ReadyDeterministic: {
     readonly dishes: ReadonlyArray<DishSummary>;
     readonly warnings: ReadonlyArray<string>;
     readonly ranking: RankingProvenance;
+    readonly servedScope: RecommendationServedScope;
   };
   Uncertain: { readonly reasons: ReadonlyArray<string> };
   Empty: { readonly reasons: ReadonlyArray<string> };
@@ -129,24 +139,32 @@ export interface RecommendationWireOutcome {
   readonly warnings: Array<string>;
   readonly reasons: Array<string>;
   readonly ranking: RankingProvenance;
+  /**
+   * Which pool actually served a ready result ("city", "country", "nearby",
+   * or "worldwide"). Absent for zero-dish outcomes. The client labels the
+   * summary from this, never from what it asked for.
+   */
+  readonly servedScope?: RecommendationServedScope | undefined;
 }
 
 /** Exhaustive outcome-to-wire mapping; the transport handler delegates here. */
 export const toWireOutcome = (outcome: RecommendationOutcome): RecommendationWireOutcome =>
   RecommendationOutcome.$match(outcome, {
-    ReadyMuse: ({ dishes, warnings, ranking }) => ({
+    ReadyMuse: ({ dishes, warnings, ranking, servedScope }) => ({
       mode: "ai" as const,
       dishes: [...dishes],
       warnings: [...warnings],
       reasons: [],
       ranking,
+      servedScope,
     }),
-    ReadyDeterministic: ({ dishes, warnings, ranking }) => ({
+    ReadyDeterministic: ({ dishes, warnings, ranking, servedScope }) => ({
       mode: "deterministic" as const,
       dishes: [...dishes],
       warnings: [...warnings],
       reasons: [],
       ranking,
+      servedScope,
     }),
     // No ranking was performed for zero-dish outcomes; the catalog basis is
     // the honest provenance (no AI attempt, nothing to degrade from).
@@ -184,9 +202,12 @@ export interface RecommendDishesInput {
  * legacy country-only payloads resolve to the country scope, and no scope
  * at all means worldwide. Coordinates never leave this scope object: ranking
  * input, logs, and wire output only ever see the coarse derivations below.
+ * A city resolves to its canonical place id with an optional country hint
+ * for the honest wider-pool fallback.
  */
 export type LocationScope = Data.TaggedEnum<{
   Country: { readonly country: string };
+  City: { readonly placeId: string; readonly countryHint: string | null };
   Precise: {
     readonly latitude: number;
     readonly longitude: number;
@@ -214,6 +235,13 @@ export const resolveLocationScope = (
     return LocationScope.Country({ country: location.country });
   }
 
+  if (location.kind === "city") {
+    return LocationScope.City({
+      placeId: location.placeId,
+      countryHint: location.country ?? null,
+    });
+  }
+
   if (location.kind === "precise") {
     return LocationScope.Precise({
       accuracy: location.accuracy ?? null,
@@ -225,12 +253,13 @@ export const resolveLocationScope = (
   return LocationScope.Worldwide();
 };
 
-/** Country filter implied by a scope, if any. Precise and worldwide imply none. */
+/** Country filter implied by a scope, if any. City, precise, and worldwide imply none. */
 export const scopeCountryOf = (
   input: Pick<RecommendDishesInput, "country" | "location">,
 ): string | null =>
   LocationScope.$match(resolveLocationScope(input), {
     Country: ({ country }) => country,
+    City: () => null,
     Precise: () => null,
     Worldwide: () => null,
   });
@@ -246,6 +275,7 @@ export const locationLogFields = (
 ): Record<string, string | number> =>
   LocationScope.$match(resolveLocationScope(input), {
     Country: ({ country }) => ({ locationKind: "country", country }),
+    City: () => ({ locationKind: "city" }),
     Precise: () => ({ locationKind: "precise", searchRadiusMaxM: NEARBY_MAX_M }),
     Worldwide: () => ({ locationKind: "worldwide" }),
   });
@@ -822,6 +852,7 @@ const finishRecommendations = (
   limits: RankingLimits,
   muse: MuseRankingConfig | null,
   guestGated: boolean,
+  servedScope: RecommendationServedScope,
 ): Effect.Effect<RecommendationOutcome, RecommendationError, Database | MetaClient> =>
   Effect.gen(function* () {
     const deterministicTop = windowForSurprise(sortedAll, input.surpriseSeed, limits.outputLimit);
@@ -851,6 +882,7 @@ const finishRecommendations = (
           dishes,
           warnings: [...warnings, SURPRISE_NOTE],
           ranking: RankingProvenance.DeterministicCatalog(),
+          servedScope,
         });
       }
 
@@ -859,6 +891,7 @@ const finishRecommendations = (
           dishes,
           warnings: [...warnings, GUEST_DETERMINISTIC_NOTE],
           ranking: RankingProvenance.DeterministicCatalog(),
+          servedScope,
         });
       }
 
@@ -866,6 +899,7 @@ const finishRecommendations = (
         dishes,
         warnings: [...warnings, AI_NOT_CONFIGURED_NOTE],
         ranking: RankingProvenance.DeterministicCatalog(),
+        servedScope,
       });
     }
 
@@ -911,12 +945,14 @@ const finishRecommendations = (
           dishes,
           warnings: [...warnings],
           ranking: RankingProvenance.LiveMuse(),
+          servedScope,
         }),
       Degraded: ({ warning, cause }) =>
         RecommendationOutcome.ReadyDeterministic({
           dishes,
           warnings: [...warnings, warning],
           ranking: RankingProvenance.DegradedMuse({ cause }),
+          servedScope,
         }),
     });
   });
@@ -928,6 +964,7 @@ const serveCountryCandidates = (
   limits: RankingLimits,
   muse: MuseRankingConfig | null,
   guestGated: boolean,
+  servedScope: RecommendationServedScope,
 ): Effect.Effect<RecommendationOutcome, RecommendationError, Database | MetaClient> =>
   Effect.gen(function* () {
     const candidates = yield* runQuery("dish/recommendation-candidates", (sql) =>
@@ -954,6 +991,133 @@ const serveCountryCandidates = (
       limits,
       muse,
       guestGated,
+      servedScope,
+    );
+  });
+
+/**
+ * City-scoped recommendation selection: dishes associated with the canonical
+ * city subtree first. When the city pool is empty, fall back honestly — to
+ * the country hint pool when one is known, then to an honest empty outcome
+ * (never a silent worldwide scan, never a guessed city). The served scope
+ * travels with the outcome so the client labels exactly what it got.
+ */
+/**
+ * Display name of a country ISO in the request locale for honest fallback
+ * warnings. Falls back to the raw ISO code when the registry has no name —
+ * the same convention as the client choosers, never invented geography.
+ */
+const countryDisplayName = (
+  country: string,
+  locale: string,
+): Effect.Effect<string, DatabaseError, Database> =>
+  Effect.gen(function* () {
+    const found = yield* runQuery("place/find-by-iso", (sql) =>
+      placeFindByIso.run(sql, { iso: country }),
+    );
+
+    if (found === null) {
+      return country;
+    }
+
+    const names = yield* runQuery("place/names-by-ids", (sql) =>
+      placeNamesByPlaceIds.run(sql, { ids: [found.id] }),
+    );
+
+    const picked = pickDisplayName(names.map(asLocalizedName), locale);
+
+    return picked?.name ?? country;
+  });
+
+const serveCityCandidates = (
+  scope: { readonly placeId: string; readonly countryHint: string | null },
+  input: RecommendDishesInput,
+  warnings: ReadonlyArray<string>,
+  excluded: ReadonlySet<bigint>,
+  limits: RankingLimits,
+  muse: MuseRankingConfig | null,
+  guestGated: boolean,
+): Effect.Effect<RecommendationOutcome, RecommendationError, Database | MetaClient> =>
+  Effect.gen(function* () {
+    if (!isDbIdString(scope.placeId)) {
+      return RecommendationOutcome.Empty({
+        reasons: ["No published dishes match the current filters."],
+      });
+    }
+
+    const candidates: ReadonlyArray<RecommendationCandidateRow> = yield* runQuery(
+      "dish/recommendation-candidates-place",
+      (sql) =>
+        dishRecommendationCandidatesPlace.run(sql, {
+          place_id: BigInt(scope.placeId),
+          cuisine: input.cuisine ?? null,
+          excluded_ids: [...excluded],
+          locale: input.locale,
+          meal: input.meal,
+          limit: limits.candidateLimit,
+        }),
+    );
+
+    if (candidates.length > 0) {
+      return yield* finishRecommendations(
+        input,
+        rankAllDeterministic(candidates, input),
+        warnings,
+        limits,
+        muse,
+        guestGated,
+        "city",
+      );
+    }
+
+    // Empty city pool falls back honestly: first the country hint pool when
+    // one is known, then worldwide. The served scope travels with the
+    // outcome so the client labels exactly what it got — never the city.
+    if (scope.countryHint !== null) {
+      const countryInput = {
+        ...input,
+        location: { kind: "destination", country: scope.countryHint } as const,
+      };
+
+      const countryCandidates: ReadonlyArray<RecommendationCandidateRow> = yield* runQuery(
+        "dish/recommendation-candidates",
+        (sql) =>
+          dishRecommendationCandidates.run(sql, {
+            cuisine: input.cuisine ?? null,
+            country: scope.countryHint,
+            excluded_ids: [...excluded],
+            locale: input.locale,
+            meal: input.meal,
+            limit: limits.candidateLimit,
+          }),
+      );
+
+      if (countryCandidates.length > 0) {
+        const countryName = yield* countryDisplayName(scope.countryHint, input.locale);
+
+        return yield* finishRecommendations(
+          countryInput,
+          rankAllDeterministic(countryCandidates, countryInput),
+          [
+            ...warnings,
+            `No dishes from this city yet — showing dishes from across ${countryName} instead.`,
+          ],
+          limits,
+          muse,
+          guestGated,
+          "country",
+        );
+      }
+    }
+
+    return yield* serveCountryCandidates(
+      { ...input, location: { kind: "worldwide" } },
+      [...warnings, "No dishes from this city or country yet — showing worldwide dishes instead."],
+      excluded,
+      limits,
+      muse,
+      guestGated,
+      "worldwide",
     );
   });
 
@@ -1006,10 +1170,14 @@ const serveRecommendations = (
           limits,
           muse,
           guestGated,
+          "nearby",
         );
       }),
-    Country: () => serveCountryCandidates(input, warnings, excluded, limits, muse, guestGated),
-    Worldwide: () => serveCountryCandidates(input, warnings, excluded, limits, muse, guestGated),
+    City: (city) => serveCityCandidates(city, input, warnings, excluded, limits, muse, guestGated),
+    Country: () =>
+      serveCountryCandidates(input, warnings, excluded, limits, muse, guestGated, "country"),
+    Worldwide: () =>
+      serveCountryCandidates(input, warnings, excluded, limits, muse, guestGated, "worldwide"),
   });
 };
 

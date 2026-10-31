@@ -197,6 +197,31 @@ export const listPlacesFn = createServerFn({ method: "GET" })
   });
 
 /**
+ * City chooser search for Food Discovery: canonical sub-country places
+ * matching a name or alias ("Bangalore" finds Bengaluru), each with the
+ * administrative context needed to disambiguate identical names. Guests
+ * may search; ids are canonical registry identities, never free text.
+ */
+export const searchCitiesFn = createServerFn({ method: "GET" })
+  .validator(nameSearchQuerySchema)
+  .handler(async ({ data }) => {
+    const [effects, _dish, { CatalogService }, { Actor }, { withActor }, { runApp }] =
+      await loadServer();
+
+    return runApp(
+      withActor(
+        Actor.Guest(),
+        effects.Effect.flatMap(CatalogService, (service) =>
+          service.searchCities(data.q, data.locale, data.limit),
+        ),
+      ),
+      "fn/cities/search",
+      15000,
+      "server-fn",
+    );
+  });
+
+/**
  * Country chooser for the recommendation region step. Kind-filtered at the
  * database level with verified ISO identity — every eligible country is
  * reachable regardless of how many other places the catalog holds.
@@ -248,6 +273,7 @@ export const getLocalCarouselFn = createServerFn({ method: "GET" })
 
     const runCarousel = (scope: {
       readonly country?: string | undefined;
+      readonly place?: string | undefined;
       readonly latitude?: number | undefined;
       readonly longitude?: number | undefined;
       readonly worldwide?: boolean | undefined;
@@ -258,6 +284,7 @@ export const getLocalCarouselFn = createServerFn({ method: "GET" })
           effects.Effect.flatMap(DishService, (service) =>
             service.getLocalCarousel({
               country: scope.country,
+              place: scope.place,
               latitude: scope.latitude,
               limit: data.limit,
               locale: data.locale,
@@ -277,6 +304,10 @@ export const getLocalCarouselFn = createServerFn({ method: "GET" })
     try {
       if (data.worldwide === true) {
         return await runWorldwide();
+      }
+
+      if (data.place !== undefined) {
+        return await runCarousel({ place: data.place });
       }
 
       if (data.latitude !== undefined && data.longitude !== undefined) {

@@ -109,6 +109,21 @@ export interface PlaceDetail extends PlaceSummary {
   readonly ancestors: ReadonlyArray<PlaceSummary>;
 }
 
+/**
+ * One city-chooser entry: a canonical sub-country place with the
+ * administrative context needed to disambiguate identical names
+ * ("Bengaluru, Karnataka, India") plus the nearest country ISO used as
+ * the honest wider-pool fallback. Never a free-text name: the id is the
+ * canonical registry identity.
+ */
+export interface CitySummary {
+  readonly id: string;
+  readonly kind: string;
+  readonly name: string | undefined;
+  readonly context: string | null;
+  readonly country: string | null;
+}
+
 export class CatalogService extends Context.Service<
   CatalogService,
   {
@@ -126,6 +141,19 @@ export class CatalogService extends Context.Service<
       locale: string,
       limit: number | undefined,
     ) => Effect.Effect<ReadonlyArray<PlaceSummary>, CatalogServiceError, Database>;
+    /**
+     * City chooser search: canonical sub-country places (localities,
+     * subnational areas, provinces — never countries or continents) matching
+     * a name or alias query ("Bangalore" finds Bengaluru through its alias),
+     * each with administrative context for disambiguation and the nearest
+     * country ISO for fallback. Bounded: the query caps matches and each
+     * match costs one ancestor-chain read.
+     */
+    readonly searchCities: (
+      q: string,
+      locale: string,
+      limit: number | undefined,
+    ) => Effect.Effect<ReadonlyArray<CitySummary>, CatalogServiceError, Database>;
     readonly getPlace: (
       id: string,
       locale: string,
@@ -342,6 +370,138 @@ export const CatalogServiceLive = Layer.effect(
         }
 
         return summaries;
+      });
+
+    /**
+     * City chooser search over canonical sub-country places. Name and alias
+     * matching reuses the place registry search (aliases like "Bangalore"
+     * resolve through place_names); administrative context comes from the
+     * canonical ancestor chain, never from display-name parsing.
+     */
+    const searchCities = (
+      q: string,
+      locale: string,
+      limit: number | undefined,
+    ): Effect.Effect<ReadonlyArray<CitySummary>, CatalogServiceError, Database> =>
+      Effect.gen(function* () {
+        const checkedLocale = yield* checkLocale(locale);
+
+        if (!isSearchableQuery(q)) {
+          return yield* new InvalidSearchFilter({ reason: "q must be 1-200 characters" });
+        }
+
+        const key = normalizeSearchKey(q.trim());
+
+        if (key.length === 0) {
+          return yield* new InvalidSearchFilter({ reason: "q has no searchable text" });
+        }
+
+        const rows = yield* placeRepository.searchIds({
+          q: key,
+          prefix: toPrefixKey(key),
+          contains: toContainsKey(key),
+          limit: clampLimit(limit),
+        });
+
+        const cities: Array<CitySummary> = [];
+
+        for (const row of rows) {
+          if (cities.length >= 8) {
+            break;
+          }
+
+          const record = yield* placeRepository.findById(row.id);
+
+          if (
+            record === null ||
+            (record.kind !== "locality" &&
+              record.kind !== "subnational" &&
+              record.kind !== "province")
+          ) {
+            continue;
+          }
+
+          const chain = yield* placeRepository.ancestors(record.id);
+
+          const ancestorIds = chain
+            .filter((entry) => entry.id !== record.id)
+            .map((entry) => entry.id);
+
+          const ancestorNames =
+            ancestorIds.length === 0 ? [] : yield* placeRepository.namesByPlaceIds(ancestorIds);
+
+          const byAncestor = new Map<string, Array<(typeof ancestorNames)[number]>>();
+
+          for (const entry of ancestorNames) {
+            const ancestorKey = entry.place_id.toString();
+            const existing = byAncestor.get(ancestorKey);
+
+            if (existing === undefined) {
+              byAncestor.set(ancestorKey, [entry]);
+            } else {
+              existing.push(entry);
+            }
+          }
+
+          const contextParts: Array<string> = [];
+          let country: string | null = null;
+          let nearestIso: string | null = null;
+
+          // Ancestors arrive nearest-first; context reads outward
+          // ("Karnataka, India") so identical city names disambiguate.
+          // Regions and continents stay out of the context line — the
+          // province/state plus country is the traveler's frame. The country
+          // hint is the country-kind ISO (India's "IN"), never a
+          // subnational code like "IN-KA", so wider-pool fallbacks and
+          // labels name the country honestly.
+          for (const entry of chain) {
+            if (entry.id === record.id) {
+              continue;
+            }
+
+            if (entry.iso3166 !== null && /^[A-Z]{2}(-[A-Z0-9]{1,3})?$/.test(entry.iso3166)) {
+              if (nearestIso === null) {
+                nearestIso = entry.iso3166;
+              }
+
+              if (country === null && entry.kind === "country") {
+                country = entry.iso3166;
+              }
+            }
+
+            if (
+              entry.kind !== "subnational" &&
+              entry.kind !== "province" &&
+              entry.kind !== "country"
+            ) {
+              continue;
+            }
+
+            const labels = byAncestor.get(entry.id.toString()) ?? [];
+            const picked = pickDisplayName(labels.map(asLocalizedName), checkedLocale);
+
+            if (picked !== undefined && !contextParts.includes(picked.name)) {
+              contextParts.push(picked.name);
+            }
+          }
+
+          if (country === null) {
+            country = nearestIso;
+          }
+
+          const ownNames = yield* placeRepository.namesByPlaceIds([record.id]);
+          const ownPicked = pickDisplayName(ownNames.map(asLocalizedName), checkedLocale);
+
+          cities.push({
+            id: encodeDbId(record.id),
+            kind: record.kind,
+            name: ownPicked?.name,
+            context: contextParts.length > 0 ? contextParts.join(", ") : null,
+            country,
+          });
+        }
+
+        return cities;
       });
 
     const getPlace = (
@@ -571,6 +731,7 @@ export const CatalogServiceLive = Layer.effect(
       searchIngredients,
       getIngredient,
       searchPlaces,
+      searchCities,
       getPlace,
       listPlaces,
       listCountries,
