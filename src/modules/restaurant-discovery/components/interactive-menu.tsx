@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { Fragment, useId, useRef, useState } from "react";
 
 import { ObservedPrice } from "@/modules/restaurant-discovery/components/currency-tools";
 import { menuCopy } from "@/modules/restaurant-discovery/components/menu-copy";
@@ -10,6 +10,9 @@ import type {
 import { isAmount, isCurrency, type ExchangeRate } from "@/shared/money";
 
 type MenuItem = InteractiveMenu["items"][number];
+
+const humanizeSection = (section: string): string =>
+  section.replaceAll("-", " ").replaceAll("_", " ");
 
 function MenuItemCard({
   item,
@@ -286,17 +289,21 @@ export function InteractiveMenuView({
       return next.quantity === 0 ? rest : [...rest, next];
     });
 
+  let notice = copy.reviewedNotice;
+
+  if (menu.provenance === "private_scan") notice = copy.privateNotice;
+
+  if (menu.provenance === "draft") notice = copy.draftNotice;
+
   return (
     <section className="menu-order" aria-labelledby={titleId} lang={locale === "vi" ? "vi" : "en"}>
       <h2 id={titleId} className="font-display text-3xl">
         {copy.menu}
       </h2>
-      <p className="menu-order-notice">
-        {menu.provenance === "private_scan" ? copy.privateNotice : copy.reviewedNotice}
-      </p>
+      <p className="menu-order-notice">{notice}</p>
       {menu.items.length === 0 && <output>{copy.empty}</output>}
       <div className="menu-order-list">
-        {menu.items.map((item) => {
+        {menu.items.map((item, index) => {
           const initial =
             item.variants.find((variant) => variant.id === initialVariant) ?? item.variants[0];
 
@@ -306,32 +313,42 @@ export function InteractiveMenuView({
           const selectedId =
             item.variants.find((variant) => variant.id === activeId)?.id ?? initial.id;
 
+          const previousSection = menu.items[index - 1]?.section;
+
+          const sectionLabel =
+            item.section === null || item.section === previousSection
+              ? null
+              : humanizeSection(item.section);
+
           return (
-            <MenuItemCard
-              key={item.id}
-              item={item}
-              menu={menu}
-              locale={locale}
-              selectedId={selectedId}
-              selection={currentSelections.find((entry) => entry.variantId === selectedId)}
-              reviewed={reviewed.has(selectedId)}
-              photoUrl={photoUrl}
-              rates={rates}
-              onVariant={(id) =>
-                setActiveVariants((previous) => new Map([...previous, [item.id, id]]))
-              }
-              onSelection={changeSelection}
-              onReview={(accepted) =>
-                setReviewed((previous) => {
-                  const next = new Set(previous);
+            <Fragment key={item.id}>
+              {sectionLabel !== null && <h3 className="menu-order-section">{sectionLabel}</h3>}
+              <MenuItemCard
+                key={item.id}
+                item={item}
+                menu={menu}
+                locale={locale}
+                selectedId={selectedId}
+                selection={currentSelections.find((entry) => entry.variantId === selectedId)}
+                reviewed={reviewed.has(selectedId)}
+                photoUrl={photoUrl}
+                rates={rates}
+                onVariant={(id) =>
+                  setActiveVariants((previous) => new Map([...previous, [item.id, id]]))
+                }
+                onSelection={changeSelection}
+                onReview={(accepted) =>
+                  setReviewed((previous) => {
+                    const next = new Set(previous);
 
-                  if (accepted) next.add(selectedId);
-                  else next.delete(selectedId);
+                    if (accepted) next.add(selectedId);
+                    else next.delete(selectedId);
 
-                  return next;
-                })
-              }
-            />
+                    return next;
+                  })
+                }
+              />
+            </Fragment>
           );
         })}
       </div>

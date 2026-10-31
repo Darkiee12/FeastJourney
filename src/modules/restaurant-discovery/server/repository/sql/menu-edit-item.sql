@@ -1,0 +1,1 @@
+SELECT id, menu_id, name, description, status, section_key, translation_language, translated_name, translated_description, explanatory_summary, source_id FROM feastjourney.restaurant_menu_items WHERE id = :id::uuid AND venue_id = :venue::uuid;

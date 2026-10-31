@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getRouteApi } from "@tanstack/react-router";
+import { getRouteApi, Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { menuScanClient } from "@/modules/restaurant-discovery/menu-scan-client";
+import { searchRestaurantsFn } from "@/modules/restaurant-discovery/restaurant.functions";
 import { channelSchema } from "@/modules/restaurant-discovery/restaurant.schema";
 
 const rootRoute = getRouteApi("__root__");
@@ -16,6 +17,133 @@ function toggleIds(ids: ReadonlySet<string>, id: string): ReadonlySet<string> {
   else next.add(id);
 
   return next;
+}
+
+interface VenueChoice {
+  readonly id: string;
+  readonly name: string;
+  readonly address: string;
+  readonly area: string;
+}
+
+/**
+ * Searchable branch selector. Reviewers pick a published restaurant record;
+ * raw branch UUID entry is not accepted, so a typed identifier can never
+ * stand in for a source-backed venue preview.
+ */
+function VenueSelector({
+  requestedVenueId,
+  onVenueId,
+}: {
+  readonly requestedVenueId: string | null;
+  readonly onVenueId: (venueId: string) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState<string | null>(null);
+  const [selected, setSelected] = useState<VenueChoice | null>(null);
+  const { lang } = rootRoute.useSearch();
+
+  const search = useQuery({
+    queryKey: ["menu-contribution-venue-search", appliedSearch],
+    queryFn: () => searchRestaurantsFn({ data: { q: appliedSearch ?? "", limit: 10 } }),
+    enabled: appliedSearch !== null,
+    retry: false,
+  });
+
+  const choose = (entry: VenueChoice): void => {
+    setSelected(entry);
+    onVenueId(entry.id);
+  };
+
+  const clear = (): void => {
+    setSelected(null);
+    onVenueId("");
+  };
+
+  return (
+    <div>
+      <span id="review-venue-label">Confirmed branch</span>
+      {requestedVenueId !== null && (
+        <p className="text-sm">
+          Customer-requested branch {requestedVenueId}. Verify the branch independently; the request
+          alone never establishes identity.
+        </p>
+      )}
+      {selected === null ? (
+        <form
+          className="discovery-search-bar"
+          aria-labelledby="review-venue-label"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setAppliedSearch(draft.trim());
+          }}
+        >
+          <label htmlFor="review-venue-search">Search published branches</label>
+          <input
+            id="review-venue-search"
+            value={draft}
+            maxLength={100}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Branch name or area"
+          />
+          <button type="submit" disabled={search.isFetching}>
+            Search
+          </button>
+        </form>
+      ) : (
+        <div className="discovery-card">
+          <h3>{selected.name}</h3>
+          <p className="text-sm">
+            {selected.address} · {selected.area}
+          </p>
+          <p>
+            <Link
+              to="/restaurants/$venueId"
+              params={{ venueId: selected.id }}
+              search={{
+                lang,
+                channel: "dine_in",
+                variant: undefined,
+                dish: undefined,
+                fromDish: undefined,
+              }}
+            >
+              Inspect branch record
+            </Link>
+          </p>
+          <button type="button" className="secondary" onClick={clear}>
+            Choose another branch
+          </button>
+        </div>
+      )}
+      {selected === null && search.isPending && appliedSearch !== null && (
+        <p aria-live="polite">Searching branches…</p>
+      )}
+      {selected === null && search.isError && (
+        <p className="discovery-message" role="alert">
+          {search.error.message}
+        </p>
+      )}
+      {selected === null && search.data !== undefined && (
+        <>
+          {search.data.items.length === 0 && <p>No published branches match this search.</p>}
+          <ul className="grid gap-3">
+            {search.data.items.map((entry) => (
+              <li key={entry.id}>
+                <button type="button" onClick={() => choose(entry)}>
+                  {entry.name} · {entry.area} · {entry.address}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm">
+            Only published branches are eligible; selection comes from the restaurant record, never
+            from typed text.
+          </p>
+        </>
+      )}
+    </div>
+  );
 }
 
 function ContributionDetail({
@@ -242,15 +370,12 @@ function ContributionDetail({
           <p>
             Checking an item approves its displayed original and translated text and all its variant
             labels. Check each price separately. Ingredient interpretations never establish dietary
-            safety.
+            safety. No canonical dish match is inferred; serving evidence stays a suggestion.
+            Approval never publishes a photograph: facts and photo consent are separate.
           </p>
-          <label htmlFor={`review-venue-${contribution.id}`}>Confirmed branch ID</label>
-          <input
-            id={`review-venue-${contribution.id}`}
-            value={venueId}
-            disabled={review.isPending}
-            maxLength={36}
-            onChange={(event) => setVenueId(event.target.value)}
+          <VenueSelector
+            requestedVenueId={contribution.requested_venue_id}
+            onVenueId={setVenueId}
           />
           <label htmlFor={`review-channel-${contribution.id}`}>Confirmed sales channel</label>
           <select
@@ -306,6 +431,7 @@ function ContributionDetail({
               type="button"
               disabled={
                 review.isPending ||
+                venueId === "" ||
                 itemIds.size === 0 ||
                 channel === "" ||
                 !rightsReviewed ||

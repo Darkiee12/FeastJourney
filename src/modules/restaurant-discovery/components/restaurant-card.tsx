@@ -3,6 +3,11 @@ import { ArrowRight, MapPin } from "lucide-react";
 
 import { ObservedPrice } from "@/modules/restaurant-discovery/components/currency-tools";
 import type { RestaurantCopy } from "@/modules/restaurant-discovery/components/restaurant-copy";
+import type { PhotoRef } from "@/modules/restaurant-discovery/components/restaurant-photos";
+import {
+  RestaurantPhoto,
+  RestaurantPhotoFallback,
+} from "@/modules/restaurant-discovery/components/restaurant-photos-gallery";
 import type { RestaurantSearch } from "@/modules/restaurant-discovery/restaurant.schema";
 import type { Locale } from "@/shared/i18n";
 import type { ExchangeRate } from "@/shared/money";
@@ -27,6 +32,9 @@ export interface RestaurantCardModel {
   readonly address: string;
   readonly distanceKm: string | null;
   readonly dish: RestaurantCardDish | null;
+  /** Published photos in display order. Absent until the search loader
+   *  lands photo wiring; cards fall back to the branded initial tile. */
+  readonly photos?: ReadonlyArray<PhotoRef> | undefined;
   readonly detailSearch: {
     readonly lang: Locale;
     readonly channel: RestaurantSearch["channel"];
@@ -43,16 +51,19 @@ interface CardProps {
   readonly onShowOnMap: (() => void) | null;
 }
 
-/** One restaurant: photo placeholder, name, area, reviewed dish match
- *  with price, and a clear path to the menu. No invented content. */
+/** One restaurant: photo, name, area, reviewed dish match with price,
+ *  and a clear path to the menu. No invented content. */
 export function RestaurantCard({ copy, model, selected, onShowOnMap }: CardProps) {
-  const initial = model.name.charAt(0).toUpperCase() || "•";
+  const photos = model.photos ?? [];
+  const primary = photos.find((photo) => photo.primary) ?? photos[0];
 
   return (
     <article className="res-card" data-selected={selected}>
-      <div className="res-photo" aria-hidden="true">
-        <span>{initial}</span>
-      </div>
+      {primary === undefined ? (
+        <RestaurantPhotoFallback name={model.name} className="res-photo" />
+      ) : (
+        <RestaurantPhoto photo={primary} className="res-photo" />
+      )}
       <div className="res-card-body">
         <p className="res-card-eyebrow">
           {model.area}

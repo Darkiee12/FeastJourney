@@ -12,6 +12,7 @@ const museConfig = RankingConfig.Muse({
   timeoutMs: 5000,
   candidateLimit: 60,
   outputLimit: 10,
+  maxTokens: 4000,
 });
 
 const context = { occasion: "dinner", mood: "comforting", cuisineOrRegion: null } as const;

@@ -15,7 +15,9 @@ import {
   RestaurantInputError,
   RestaurantNotFound,
 } from "@/modules/restaurant-discovery/server/operations/discovery";
+import renameBusiness from "@/modules/restaurant-discovery/server/repository/sql/admin-business-rename.sql";
 import businessQuery from "@/modules/restaurant-discovery/server/repository/sql/admin-business.sql";
+import businessesQuery from "@/modules/restaurant-discovery/server/repository/sql/admin-businesses.sql";
 import clearCuisines from "@/modules/restaurant-discovery/server/repository/sql/admin-cuisines-clear.sql";
 import insertCuisines from "@/modules/restaurant-discovery/server/repository/sql/admin-cuisines.sql";
 import evidenceQuery from "@/modules/restaurant-discovery/server/repository/sql/admin-evidence.sql";
@@ -36,7 +38,10 @@ import variantStatus from "@/modules/restaurant-discovery/server/repository/sql/
 import variantQuery from "@/modules/restaurant-discovery/server/repository/sql/admin-variant.sql";
 import findVenue from "@/modules/restaurant-discovery/server/repository/sql/admin-venue-find.sql";
 import nameQuery from "@/modules/restaurant-discovery/server/repository/sql/admin-venue-name.sql";
+import venueSources from "@/modules/restaurant-discovery/server/repository/sql/admin-venue-sources.sql";
 import venueQuery from "@/modules/restaurant-discovery/server/repository/sql/admin-venue.sql";
+import venuesPage from "@/modules/restaurant-discovery/server/repository/sql/admin-venues-page.sql";
+import venuesStatus from "@/modules/restaurant-discovery/server/repository/sql/admin-venues-status.sql";
 import venuesQuery from "@/modules/restaurant-discovery/server/repository/sql/admin-venues.sql";
 import { Authorization, recordAuditEvent } from "@/modules/user/server/index";
 import { Actor } from "@/server/auth/actor";
@@ -108,6 +113,77 @@ export const restaurantAdminData = Effect.gen(function* () {
   return { venues, queue, canReview };
 });
 
+/** Case-insensitive substring match for admin search. Backslash is the LIKE escape. */
+const toContainsPattern = (value: string): string =>
+  `%${value.toLowerCase().replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+
+const clampPage = (value: number, fallback: number, max: number): number => {
+  if (!Number.isFinite(value)) return fallback;
+
+  return Math.min(Math.max(Math.trunc(value), 1), max);
+};
+
+export const listAdminVenues = Effect.fn("restaurants.listAdminVenues")(function* (input: {
+  readonly q: string;
+  readonly status: string;
+  readonly business: string;
+  readonly limit: number;
+  readonly offset: number;
+}) {
+  yield* authorize("manage");
+
+  const limit = clampPage(input.limit, 20, 100);
+  const offset = Number.isFinite(input.offset) ? Math.max(Math.trunc(input.offset), 0) : 0;
+  const pattern = input.q.trim() === "" ? "" : toContainsPattern(input.q.trim());
+
+  const rows = yield* runQuery("restaurants/admin-venues-page", (sql) =>
+    venuesPage.run(sql, {
+      q: pattern,
+      status: input.status,
+      business: input.business,
+      limit,
+      offset,
+    }),
+  );
+
+  const first = rows[0];
+  const total = first === undefined ? 0 : first.total;
+
+  return { venues: rows, total };
+});
+
+export const listAdminBusinesses = Effect.fn("restaurants.listAdminBusinesses")(function* (input: {
+  readonly q: string;
+  readonly limit: number;
+  readonly offset: number;
+}) {
+  yield* authorize("manage");
+
+  const limit = clampPage(input.limit, 20, 100);
+  const offset = Number.isFinite(input.offset) ? Math.max(Math.trunc(input.offset), 0) : 0;
+  const pattern = input.q.trim() === "" ? "" : toContainsPattern(input.q.trim());
+
+  const rows = yield* runQuery("restaurants/admin-businesses", (sql) =>
+    businessesQuery.run(sql, { q: pattern, limit, offset }),
+  );
+
+  const first = rows[0];
+  const total = first === undefined ? 0 : first.total;
+
+  return { businesses: rows, total };
+});
+
+export const getVenueSources = Effect.fn("restaurants.getVenueSources")(function* (input: {
+  readonly venueId: string;
+  readonly limit: number;
+}) {
+  yield* authorize("manage");
+
+  return yield* runQuery("restaurants/venue-sources", (sql) =>
+    venueSources.run(sql, { venue: input.venueId, limit: clampPage(input.limit, 10, 50) }),
+  );
+});
+
 export const writeVenue = Effect.fn("restaurants.writeVenue")(function* (
   input: z.infer<typeof venueWriteSchema>,
 ) {
@@ -140,6 +216,24 @@ export const writeVenue = Effect.fn("restaurants.writeVenue")(function* (
         }
 
         businessId = existing.business_id;
+
+        if (input.businessName !== existing.business_name) {
+          const renamed = yield* runQuery("restaurants/rename-business", (sql) =>
+            renameBusiness.run(sql, { id: existing.business_id, name: input.businessName }),
+          );
+
+          if (renamed === null) return yield* new RestaurantNotFound();
+
+          yield* recordAuditEvent({
+            actorUserId: actorId,
+            sessionId: null,
+            requestId: crypto.randomUUID(),
+            event: "restaurant.business.renamed",
+            outcome: "succeeded",
+            resource: existing.business_id,
+            metadata: { venue: venueId, name: input.businessName },
+          });
+        }
       }
 
       if (businessId === undefined) {
@@ -477,6 +571,41 @@ export const setOfferingStatus = Effect.fn("restaurants.setOfferingStatus")(func
       });
 
       return result;
+    }),
+  );
+});
+
+export const setVenuesStatus = Effect.fn("restaurants.setVenuesStatus")(function* (input: {
+  readonly ids: ReadonlyArray<string>;
+  readonly status: "draft" | "published" | "archived";
+}) {
+  const actorId = yield* authorize("manage");
+
+  if (input.status === "published") yield* authorize("review");
+
+  if (input.ids.length === 0 || input.ids.length > 100) {
+    return yield* new RestaurantInputError({ reason: "Select between 1 and 100 branches" });
+  }
+
+  return yield* withTransaction(
+    "restaurants/venues-status",
+    Effect.gen(function* () {
+      const rows = yield* runQuery("restaurants/venues-status", (sql) =>
+        venuesStatus.run(sql, { ids: [...input.ids], status: input.status }),
+      );
+
+      for (const row of rows) {
+        yield* recordAuditEvent({
+          actorUserId: actorId,
+          sessionId: null,
+          requestId: crypto.randomUUID(),
+          event: "restaurant.venue.status",
+          outcome: "succeeded",
+          resource: row.id,
+        });
+      }
+
+      return { updated: rows.map((row) => row.id) };
     }),
   );
 });

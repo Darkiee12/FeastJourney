@@ -1,13 +1,27 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { createServerFn } from "@tanstack/react-start";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { z } from "zod";
 
 import { ContributionReview } from "@/modules/restaurant-discovery/components/contribution-review";
 import { DiscoveryError } from "@/modules/restaurant-discovery/components/discovery-error";
 import {
+  RestaurantDashboard,
+  type DashboardVenue,
+  type VenueStatusFilter,
+} from "@/modules/restaurant-discovery/components/restaurant-dashboard";
+import {
+  RestaurantEditor,
+  type EditorBusiness,
+  type EditorSource,
+  type EditorVenue,
+  type VenueWriteInput,
+} from "@/modules/restaurant-discovery/components/restaurant-editor";
+import {
   importMenuFn,
   restaurantAdminFn,
+  restaurantFacetsFn,
   reviewRestaurantFn,
   setMenuStatusFn,
   setOfferingStatusFn,
@@ -17,23 +31,230 @@ import {
   menuImportSchema,
   menuStatusSchema,
   offeringStatusSchema,
-  venueWriteSchema,
 } from "@/modules/restaurant-discovery/restaurant.schema";
 
 export const Route = createFileRoute("/admin/restaurants")({
-  loader: () => restaurantAdminFn(),
+  loader: async () => {
+    const [admin, cuisines] = await Promise.all([restaurantAdminFn(), restaurantFacetsFn()]);
+
+    const initialPage = await venueListFn({
+      data: { q: "", status: "", business: "", limit: PAGE_SIZE, offset: 0 },
+    });
+
+    return { ...admin, cuisines, initialPage };
+  },
   errorComponent: DiscoveryError,
   component: RestaurantAdmin,
 });
 
+const venueListInput = z.object({
+  q: z.string().max(200).default(""),
+  status: z.enum(["", "draft", "published", "archived"]).default(""),
+  business: z.string().max(100).default(""),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+const businessListInput = z.object({
+  q: z.string().max(200).default(""),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+const venueSourcesInput = z.object({
+  venueId: z.uuid(),
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+});
+
+const venuesStatusInput = z.object({
+  ids: z.array(z.uuid()).min(1).max(100),
+  status: z.enum(["draft", "published", "archived"]),
+});
+
+const adminContext = async () => {
+  const { getRequestHeaders } = await import("@tanstack/react-start/server");
+  const { requireAuthenticatedActor } = await import("@/server/auth/session");
+  const { Actor } = await import("@/server/auth/actor");
+  const { withActor } = await import("@/server/auth/current-actor");
+  const { runClientOperation } = await import("@/server/http/run-client-operation");
+  const session = await runClientOperation(requireAuthenticatedActor(getRequestHeaders()), "admin");
+
+  return { actor: Actor.Member({ userId: session.userId }), withActor, runClientOperation };
+};
+
+const venueListFn = createServerFn({ method: "GET" })
+  .validator(venueListInput)
+  .handler(async ({ data }) => {
+    const { listAdminVenues } =
+      await import("@/modules/restaurant-discovery/server/operations/admin");
+
+    const { actor, withActor, runClientOperation } = await adminContext();
+
+    return runClientOperation(withActor(actor, listAdminVenues(data)), null);
+  });
+
+const businessListFn = createServerFn({ method: "GET" })
+  .validator(businessListInput)
+  .handler(async ({ data }) => {
+    const { listAdminBusinesses } =
+      await import("@/modules/restaurant-discovery/server/operations/admin");
+
+    const { actor, withActor, runClientOperation } = await adminContext();
+
+    return runClientOperation(withActor(actor, listAdminBusinesses(data)), null);
+  });
+
+const venueSourcesFn = createServerFn({ method: "GET" })
+  .validator(venueSourcesInput)
+  .handler(async ({ data }) => {
+    const { getVenueSources } =
+      await import("@/modules/restaurant-discovery/server/operations/admin");
+
+    const { actor, withActor, runClientOperation } = await adminContext();
+
+    return runClientOperation(withActor(actor, getVenueSources(data)), null);
+  });
+
+const venuesStatusFn = createServerFn({ method: "POST" })
+  .validator(venuesStatusInput)
+  .handler(async ({ data }) => {
+    const { setVenuesStatus } =
+      await import("@/modules/restaurant-discovery/server/operations/admin");
+
+    const { actor, withActor, runClientOperation } = await adminContext();
+
+    return runClientOperation(withActor(actor, setVenuesStatus(data)), null);
+  });
+
+const PAGE_SIZE = 20;
+
+type VenuePageRow = Awaited<ReturnType<typeof venueListFn>>["venues"][number];
+
+function toDashboardVenue(row: VenuePageRow): DashboardVenue {
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    businessName: row.business_name,
+    name: row.name,
+    address: row.address,
+    area: row.area,
+    countryCode: row.country_code,
+    status: row.status,
+    longitude: row.longitude,
+    latitude: row.latitude,
+    cuisineIds: row.cuisine_ids.filter((id): id is string => id !== null),
+    sourceCount: row.source_count,
+    pendingCount: row.pending_count,
+    pendingEvidence: row.pending_evidence,
+  };
+}
+
+function toEditorVenue(venue: DashboardVenue): EditorVenue {
+  const status =
+    venue.status === "published" || venue.status === "archived" ? venue.status : "draft";
+
+  return {
+    id: venue.id,
+    businessId: venue.businessId,
+    businessName: venue.businessName,
+    name: venue.name,
+    address: venue.address,
+    area: venue.area,
+    countryCode: venue.countryCode,
+    longitude: venue.longitude,
+    latitude: venue.latitude,
+    status,
+    cuisineIds: venue.cuisineIds,
+  };
+}
+
+function describeFailure(cause: unknown): string {
+  if (cause instanceof Error && cause.message !== "") return cause.message;
+
+  return "The action failed. Retry.";
+}
+
 function RestaurantAdmin() {
-  const { venues, queue, canReview } = Route.useLoaderData();
+  const { queue, canReview, cuisines, initialPage } = Route.useLoaderData();
   const router = useRouter();
-  const [selected, setSelected] = useState("");
-  const [message, setMessage] = useState("");
-  const [lastImport, setLastImport] = useState("");
+
+  const cuisinesById = new Map(
+    cuisines.map((row) => [row.id, row.displayName ?? row.slug] as const),
+  );
+
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<VenueStatusFilter>("");
+  const [offset, setOffset] = useState(0);
+
+  const [venues, setVenues] = useState<ReadonlyArray<DashboardVenue>>(() =>
+    initialPage.venues.map(toDashboardVenue),
+  );
+
+  const [total, setTotal] = useState(initialPage.total);
+  const [pageBusy, setPageBusy] = useState(false);
   const [busy, setBusy] = useState(false);
-  const venue = venues.find((entry) => entry.id === selected);
+  const [message, setMessage] = useState("");
+  const [selection, setSelection] = useState<ReadonlyArray<string>>([]);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorKey, setEditorKey] = useState(0);
+  const [editing, setEditing] = useState<EditorVenue | null>(null);
+  const [editorError, setEditorError] = useState("");
+  const [businessQuery, setBusinessQuery] = useState("");
+  const [businesses, setBusinesses] = useState<ReadonlyArray<EditorBusiness>>([]);
+  const [sources, setSources] = useState<ReadonlyArray<EditorSource>>([]);
+  const [menuVenueId, setMenuVenueId] = useState("");
+  const [lastImport, setLastImport] = useState("");
+
+  const queryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (queryTimer.current !== null) clearTimeout(queryTimer.current);
+    },
+    [],
+  );
+
+  const loadPage = useCallback(
+    async (nextQuery: string, nextStatus: VenueStatusFilter, nextOffset: number) => {
+      setPageBusy(true);
+
+      try {
+        const result = await venueListFn({
+          data: {
+            q: nextQuery,
+            status: nextStatus,
+            business: "",
+            limit: PAGE_SIZE,
+            offset: nextOffset,
+          },
+        });
+
+        setVenues(result.venues.map(toDashboardVenue));
+        setTotal(result.total);
+      } catch (error) {
+        setMessage(describeFailure(error));
+      } finally {
+        setPageBusy(false);
+      }
+    },
+    [],
+  );
+
+  const refresh = useCallback(() => {
+    void loadPage(query, status, offset);
+    void router.invalidate();
+  }, [query, status, offset, loadPage, router]);
+
+  const handleQuery = (next: string) => {
+    setQuery(next);
+
+    if (queryTimer.current !== null) clearTimeout(queryTimer.current);
+
+    queryTimer.current = setTimeout(() => {
+      setOffset(0);
+      void loadPage(next, status, 0);
+    }, 250);
+  };
 
   const run = async <A,>(action: () => Promise<A>, success: string): Promise<void> => {
     setBusy(true);
@@ -42,48 +263,117 @@ function RestaurantAdmin() {
     try {
       await action();
       setMessage(success);
-      await router.invalidate();
+      refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "The action failed. Retry.");
+      setMessage(describeFailure(error));
     } finally {
       setBusy(false);
     }
   };
 
-  const saveVenue = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const values = Object.fromEntries(new FormData(event.currentTarget));
-    const cuisines = z.string().safeParse(values.cuisines);
+  const openCreate = () => {
+    setEditing(null);
+    setSources([]);
+    setEditorError("");
+    setBusinessQuery("");
+    setBusinesses([]);
+    setEditorKey((key) => key + 1);
+    setEditorOpen(true);
+  };
 
-    if (!cuisines.success) {
-      setMessage("Cuisine IDs must be text.");
+  const openEdit = (venue: DashboardVenue) => {
+    setEditing(toEditorVenue(venue));
+    setSources([]);
+    setEditorError("");
+    setEditorKey((key) => key + 1);
+    setEditorOpen(true);
 
-      return;
-    }
+    venueSourcesFn({ data: { venueId: venue.id, limit: 10 } })
+      .then((rows) => {
+        setSources(
+          rows.map((row) => ({
+            id: row.id,
+            category: row.category,
+            sourceUrl: row.source_url,
+            observedAt: row.observed_at,
+            validUntil: row.valid_until,
+            eligible: row.eligible,
+            priceCount: row.price_count,
+            pendingPrices: row.pending_prices,
+            pendingEvidence: row.pending_evidence,
+          })),
+        );
+      })
+      .catch(() => {
+        setSources([]);
+      });
+  };
 
-    const parsed = venueWriteSchema.safeParse({
-      ...values,
-      venueId: selected || undefined,
-      businessId: values.businessId || undefined,
-      longitude: Number(values.longitude),
-      latitude: Number(values.latitude),
-      cuisineIds: cuisines.data
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean),
-    });
+  const searchBusinesses = (next: string) => {
+    setBusinessQuery(next);
 
-    if (!parsed.success) {
-      setMessage(parsed.error.issues.map((issue) => issue.message).join(". "));
+    businessListFn({ data: { q: next, limit: 10, offset: 0 } })
+      .then((result) => {
+        setBusinesses(
+          result.businesses.map((row) => ({
+            id: row.id,
+            name: row.name,
+            venueCount: row.venue_count,
+          })),
+        );
+      })
+      .catch(() => {
+        setBusinesses([]);
+      });
+  };
 
-      return;
-    }
+  const submitVenue = (input: VenueWriteInput) => {
+    setBusy(true);
+    setEditorError("");
 
+    writeVenueFn({ data: input })
+      .then(() => {
+        setEditorOpen(false);
+        setMessage("Venue saved. Menu and serving claims still require separate review.");
+        refresh();
+      })
+      .catch((cause: unknown) => {
+        setEditorError(describeFailure(cause));
+      })
+      .finally(() => {
+        setBusy(false);
+      });
+  };
+
+  const bulkStatus = (nextStatus: "draft" | "published" | "archived") => {
     void run(
-      () => writeVenueFn({ data: parsed.data }),
-      "Venue saved. Menu and serving claims still require separate review.",
+      async () => {
+        const result = await venuesStatusFn({ data: { ids: [...selection], status: nextStatus } });
+        setSelection([]);
+
+        return result;
+      },
+      `${nextStatus === "published" ? "Published" : "Archived"} ${selection.length} branches.`,
     );
   };
+
+  const template = JSON.stringify(
+    {
+      venueId: menuVenueId,
+      menuName: "",
+      source: {
+        category: "official_menu",
+        url: "",
+        deduplicationKey: "",
+        restaurantVerified: false,
+        observedAt: "",
+        validUntil: "",
+      },
+      items: [{ name: "", variants: [{ name: "As listed" }] }],
+    },
+    null,
+    2,
+  );
 
   const importSource = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -114,29 +404,11 @@ function RestaurantAdmin() {
     void run(async () => {
       const result = await importMenuFn({ data: parsed.data });
       setLastImport(JSON.stringify(result, null, 2));
-      setSelected(parsed.data.venueId);
+      setMenuVenueId(parsed.data.venueId);
 
       return result;
     }, "Source imported transactionally. Prices and dish matches are pending review below.");
   };
-
-  const template = JSON.stringify(
-    {
-      venueId: selected,
-      menuName: "",
-      source: {
-        category: "official_menu",
-        url: "",
-        deduplicationKey: "",
-        restaurantVerified: false,
-        observedAt: "",
-        validUntil: "",
-      },
-      items: [{ name: "", variants: [{ name: "As listed" }] }],
-    },
-    null,
-    2,
-  );
 
   return (
     <section className="discovery-page" lang="en">
@@ -148,132 +420,71 @@ function RestaurantAdmin() {
           pending until reviewed.
         </p>
       </header>
-      <label htmlFor="edit-venue">Edit a branch or add one</label>
-      <select
-        id="edit-venue"
-        value={selected}
-        onChange={(event) => setSelected(event.target.value)}
-      >
-        <option value="">New venue</option>
-        {venues.map((entry) => (
-          <option key={entry.id} value={entry.id}>
-            {entry.name} · {entry.area} · {entry.status}
-          </option>
-        ))}
-      </select>
-      <form key={selected} className="restaurant-filters" onSubmit={saveVenue}>
-        <div>
-          <label htmlFor="business-name">Business name</label>
-          <input
-            id="business-name"
-            name="businessName"
-            defaultValue={venue?.name ?? ""}
-            required
-            maxLength={300}
-          />
-        </div>
-        <div>
-          <label htmlFor="business-id">Existing business ID (for another branch)</label>
-          <input id="business-id" name="businessId" defaultValue={venue?.business_id ?? ""} />
-        </div>
-        <div>
-          <label htmlFor="venue-name">Branch display name</label>
-          <input
-            id="venue-name"
-            name="name"
-            defaultValue={venue?.name ?? ""}
-            required
-            maxLength={300}
-          />
-        </div>
-        <div>
-          <label htmlFor="venue-address">Address</label>
-          <input
-            id="venue-address"
-            name="address"
-            defaultValue={venue?.address ?? ""}
-            required
-            maxLength={1000}
-          />
-        </div>
-        <div>
-          <label htmlFor="venue-area">City / area</label>
-          <input
-            id="venue-area"
-            name="area"
-            defaultValue={venue?.area ?? ""}
-            required
-            maxLength={200}
-          />
-        </div>
-        <div>
-          <label htmlFor="venue-country">Country ISO code</label>
-          <input
-            id="venue-country"
-            name="countryCode"
-            defaultValue={venue?.country_code ?? ""}
-            required
-            pattern="[A-Z]{2}"
-            maxLength={2}
-          />
-        </div>
-        <div>
-          <label htmlFor="venue-longitude">Longitude</label>
-          <input
-            id="venue-longitude"
-            name="longitude"
-            type="number"
-            step="any"
-            min={-180}
-            max={180}
-            defaultValue={venue?.longitude}
-            required
-          />
-        </div>
-        <div>
-          <label htmlFor="venue-latitude">Latitude</label>
-          <input
-            id="venue-latitude"
-            name="latitude"
-            type="number"
-            step="any"
-            min={-90}
-            max={90}
-            defaultValue={venue?.latitude}
-            required
-          />
-        </div>
-        <div>
-          <label htmlFor="venue-status">Visibility</label>
-          <select id="venue-status" name="status" defaultValue={venue?.status ?? "draft"}>
-            <option value="draft">Draft</option>
-            <option value="published">Published</option>
-            <option value="archived">Archived</option>
-          </select>
-        </div>
-        <div>
-          <label htmlFor="venue-cuisines">Curated cuisine IDs (comma separated)</label>
-          <input
-            id="venue-cuisines"
-            name="cuisines"
-            defaultValue={venue?.cuisine_ids.join(", ") ?? ""}
-            aria-describedby="cuisine-warning"
-          />
-        </div>
-        <p id="cuisine-warning" className="filter-help">
-          Cuisine is a filter, never evidence that a dish is served. Saving replaces this branch’s
-          cuisine selection.
-        </p>
-        <button type="submit" disabled={busy}>
-          Save venue
-        </button>
-      </form>
-      {message !== "" && (
-        <p className="discovery-message" aria-live="polite">
-          {message}
-        </p>
-      )}
-      <section>
+
+      <RestaurantDashboard
+        venues={venues}
+        total={total}
+        query={query}
+        status={status}
+        offset={offset}
+        busy={busy || pageBusy}
+        actionMessage={message}
+        selection={selection}
+        cuisinesById={cuisinesById}
+        onQuery={handleQuery}
+        onStatus={(next) => {
+          setStatus(next);
+          setOffset(0);
+          void loadPage(query, next, 0);
+        }}
+        onOffset={(next) => {
+          setOffset(next);
+          void loadPage(query, status, next);
+        }}
+        onToggleSelect={(id) => {
+          if (selection.includes(id)) {
+            setSelection(selection.filter((entry) => entry !== id));
+          } else {
+            setSelection([...selection, id]);
+          }
+        }}
+        onToggleSelectPage={() => {
+          const pageIds = venues.map((venue) => venue.id);
+          const allSelected = pageIds.every((id) => selection.includes(id));
+
+          if (allSelected) {
+            setSelection(selection.filter((id) => !pageIds.includes(id)));
+          } else {
+            setSelection([...new Set([...selection, ...pageIds])]);
+          }
+        }}
+        onCreate={openCreate}
+        onEdit={openEdit}
+        onManageMenus={(venue) => {
+          setMenuVenueId(venue.id);
+          document.getElementById("menu-management")?.scrollIntoView({ behavior: "smooth" });
+        }}
+        onBulkArchive={() => bulkStatus("archived")}
+        onBulkPublish={() => bulkStatus("published")}
+      />
+
+      <RestaurantEditor
+        key={editorKey}
+        open={editorOpen}
+        venue={editing}
+        businesses={businesses}
+        businessQuery={businessQuery}
+        cuisines={cuisines}
+        sources={sources}
+        busy={busy}
+        error={editorError}
+        canPublish={canReview}
+        onSearchBusinesses={searchBusinesses}
+        onSubmit={submitVenue}
+        onClose={() => setEditorOpen(false)}
+      />
+
+      <section id="menu-management">
         <h2>Official menu entry / structured import</h2>
         <p className="my-3 text-sm text-muted">
           Supply source URL or private object reference, a stable snapshot deduplication key, actual
@@ -284,7 +495,7 @@ function RestaurantAdmin() {
         <form className="grid gap-3" onSubmit={importSource}>
           <label htmlFor="menu-payload">Menu JSON (required fields start blank)</label>
           <textarea
-            key={selected}
+            key={menuVenueId}
             id="menu-payload"
             name="payload"
             rows={18}
@@ -293,11 +504,11 @@ function RestaurantAdmin() {
             required
             className="font-mono text-sm"
           />
-          <button type="submit" disabled={busy || selected === ""}>
+          <button type="submit" disabled={busy || menuVenueId === ""}>
             Import pending observations
           </button>
         </form>
-        {selected !== "" && (
+        {menuVenueId !== "" && (
           <details className="mt-4">
             <summary className="cursor-pointer font-semibold">Price field reference</summary>
             <pre className="overflow-x-auto rounded-lg bg-white p-4 text-xs">

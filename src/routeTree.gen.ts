@@ -23,6 +23,7 @@ import { Route as VerifyEmailRouteImport } from './routes/verify-email'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminDishesRouteImport } from './routes/admin.dishes'
 import { Route as AdminImportsRouteImport } from './routes/admin.imports'
+import { Route as AdminRestaurantImportsRouteImport } from './routes/admin.restaurant-imports'
 import { Route as AdminRestaurantsRouteImport } from './routes/admin.restaurants'
 import { Route as AdminReviewsRouteImport } from './routes/admin.reviews'
 import { Route as AdminRolesRouteImport } from './routes/admin.roles'
@@ -135,6 +136,11 @@ const AdminDishesRoute = AdminDishesRouteImport.update({
 const AdminImportsRoute = AdminImportsRouteImport.update({
   id: '/imports',
   path: '/imports',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminRestaurantImportsRoute = AdminRestaurantImportsRouteImport.update({
+  id: '/restaurant-imports',
+  path: '/restaurant-imports',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminRestaurantsRoute = AdminRestaurantsRouteImport.update({
@@ -376,6 +382,7 @@ export interface FileRoutesByFullPath {
   '/verify-email': typeof VerifyEmailRoute
   '/admin/dishes': typeof AdminDishesRouteWithChildren
   '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/restaurant-imports': typeof AdminRestaurantImportsRoute
   '/admin/restaurants': typeof AdminRestaurantsRoute
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
@@ -432,6 +439,7 @@ export interface FileRoutesByTo {
   '/verify-email': typeof VerifyEmailRoute
   '/admin/dishes': typeof AdminDishesRouteWithChildren
   '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/restaurant-imports': typeof AdminRestaurantImportsRoute
   '/admin/restaurants': typeof AdminRestaurantsRoute
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
@@ -492,6 +500,7 @@ export interface FileRoutesById {
   '/verify-email': typeof VerifyEmailRoute
   '/admin/dishes': typeof AdminDishesRouteWithChildren
   '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/restaurant-imports': typeof AdminRestaurantImportsRoute
   '/admin/restaurants': typeof AdminRestaurantsRoute
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
@@ -553,6 +562,7 @@ export interface FileRouteTypes {
     | '/verify-email'
     | '/admin/dishes'
     | '/admin/imports'
+    | '/admin/restaurant-imports'
     | '/admin/restaurants'
     | '/admin/reviews'
     | '/admin/roles'
@@ -609,6 +619,7 @@ export interface FileRouteTypes {
     | '/verify-email'
     | '/admin/dishes'
     | '/admin/imports'
+    | '/admin/restaurant-imports'
     | '/admin/restaurants'
     | '/admin/reviews'
     | '/admin/roles'
@@ -668,6 +679,7 @@ export interface FileRouteTypes {
     | '/verify-email'
     | '/admin/dishes'
     | '/admin/imports'
+    | '/admin/restaurant-imports'
     | '/admin/restaurants'
     | '/admin/reviews'
     | '/admin/roles'
@@ -843,6 +855,13 @@ declare module '@tanstack/react-router' {
       path: '/imports'
       fullPath: '/admin/imports'
       preLoaderRoute: typeof AdminImportsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/restaurant-imports': {
+      id: '/admin/restaurant-imports'
+      path: '/restaurant-imports'
+      fullPath: '/admin/restaurant-imports'
+      preLoaderRoute: typeof AdminRestaurantImportsRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/restaurants': {
@@ -1178,6 +1197,7 @@ const AdminImportsRouteWithChildren = AdminImportsRoute._addFileChildren(
 interface AdminRouteChildren {
   AdminDishesRoute: typeof AdminDishesRouteWithChildren
   AdminImportsRoute: typeof AdminImportsRouteWithChildren
+  AdminRestaurantImportsRoute: typeof AdminRestaurantImportsRoute
   AdminRestaurantsRoute: typeof AdminRestaurantsRoute
   AdminReviewsRoute: typeof AdminReviewsRoute
   AdminRolesRoute: typeof AdminRolesRoute
@@ -1188,6 +1208,7 @@ interface AdminRouteChildren {
 const AdminRouteChildren: AdminRouteChildren = {
   AdminDishesRoute: AdminDishesRouteWithChildren,
   AdminImportsRoute: AdminImportsRouteWithChildren,
+  AdminRestaurantImportsRoute: AdminRestaurantImportsRoute,
   AdminRestaurantsRoute: AdminRestaurantsRoute,
   AdminReviewsRoute: AdminReviewsRoute,
   AdminRolesRoute: AdminRolesRoute,

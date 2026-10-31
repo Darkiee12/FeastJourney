@@ -7,6 +7,8 @@ import {
 } from "@/modules/restaurant-discovery/components/currency-tools";
 import { InteractiveMenuView } from "@/modules/restaurant-discovery/components/interactive-menu";
 import { RestaurantMapPanel } from "@/modules/restaurant-discovery/components/restaurant-map-panel";
+import { photoLoaderSchema } from "@/modules/restaurant-discovery/components/restaurant-photos";
+import { RestaurantPhotoGallery } from "@/modules/restaurant-discovery/components/restaurant-photos-gallery";
 import { presentReviewed } from "@/modules/restaurant-discovery/menu-presentation";
 import { channelSchema } from "@/modules/restaurant-discovery/restaurant.schema";
 import type { Locale } from "@/shared/i18n";
@@ -47,6 +49,12 @@ export function RestaurantDetailPage() {
     preference.currency,
   );
 
+  // Forward-compat: the detail loader gains a typed `photos` field when
+  // photo delivery wires in (see phase report). Until then the payload
+  // parses without photos and the gallery renders its branded empty state.
+  const parsedVenue = photoLoaderSchema.safeParse(venue);
+  const photos = parsedVenue.success ? (parsedVenue.data.photos ?? []) : [];
+
   return (
     <article className="discovery-page">
       <nav aria-label="Discover">
@@ -85,6 +93,10 @@ export function RestaurantDetailPage() {
           Get directions ↗
         </a>
       </header>
+      <section aria-labelledby="venue-photos-heading">
+        <h2 id="venue-photos-heading">Photos</h2>
+        <RestaurantPhotoGallery photos={photos} venueName={venue.name} />
+      </section>
       <CurrencySelector preference={preference} />
       <div className="restaurant-detail-layout">
         <section aria-labelledby="menu-heading">

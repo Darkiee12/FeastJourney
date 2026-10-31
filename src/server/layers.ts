@@ -31,6 +31,8 @@ import {
   FxProviderLive,
   type FxRates,
 } from "@/modules/restaurant-discovery/server/index";
+import type { RestaurantPhotoStorage } from "@/modules/restaurant-discovery/server/integrations/restaurant-photo-storage";
+import { RestaurantPhotoFullLive } from "@/modules/restaurant-discovery/server/operations/photos";
 import { UserRepositoriesLive, UserServicesLive } from "@/modules/user/server/index";
 import type { UserAdminService } from "@/modules/user/server/operations/admin-service";
 import type { Authorization } from "@/modules/user/server/operations/authorization";
@@ -89,11 +91,13 @@ export const AppLive = Layer.mergeAll(
   RecommendationLive,
   MenuExtractorLive,
   PrivateMenuStorageLive,
+  RestaurantPhotoFullLive,
 );
 
 export type AppServices =
   | MenuExtractor
   | PrivateMenuStorage
+  | RestaurantPhotoStorage
   | FxRates
   | Database
   | PersistenceRateLimiter.RateLimiter

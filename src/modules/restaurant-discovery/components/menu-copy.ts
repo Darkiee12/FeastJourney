@@ -37,6 +37,26 @@ const english = {
   mixed: "Different currencies are listed. There is no single subtotal.",
   unknownLanguage: "The menu language is unknown. Original dish names are preserved below.",
   privateOrder: "Menu text and prices came from an unverified private scan.",
+  draftNotice:
+    "Unpublished draft. Names and prices are curator edits awaiting review — confirm with the venue.",
+  draftOrder: "Draft order from unpublished edits. Confirm every line with the waiter.",
+  editorTitle: "Edit the menu",
+  editorHelp:
+    "Create the menu, arrange dishes into sections, and add exact prices. Saving keeps a draft; submitting sends it for review. Publishing stays with reviewers.",
+  menuName: "Menu name",
+  menuLanguage: "Menu language",
+  sectionLabel: "Menu section",
+  sectionHelp: "Sections group dishes for travelers. Leave empty for the main list.",
+  newSection: "New section",
+  dishLink: "Linked dish",
+  dishLookup: "Dish ID or web address name",
+  dishLookupHelp:
+    "Links use published dishes only. Unpublished dishes stay hidden; menu text never creates a dish.",
+  resolveDish: "Look up dish",
+  unlinkDish: "Remove dish link",
+  suppressedNote: "Not published — hidden from travelers",
+  previewTitle: "Traveler preview",
+  submitReview: "Submit for review",
   linePrice: "Menu line estimate",
   edit: "Correct the scan",
   editHelp:
@@ -106,6 +126,26 @@ const vietnamese: typeof english = {
   mixed: "Các món dùng nhiều tiền tệ. Không có một tổng tiền chung.",
   unknownLanguage: "Chưa rõ ngôn ngữ thực đơn. Tên món gốc được giữ nguyên bên dưới.",
   privateOrder: "Tên món và giá đến từ bản quét riêng tư, chưa xác minh.",
+  draftNotice:
+    "Bản nháp chưa công bố. Tên món và giá do người duyệt sửa, đang chờ xem xét — hãy xác nhận với quán.",
+  draftOrder: "Phiếu gọi từ bản nháp chưa công bố. Xác nhận từng món với nhân viên.",
+  editorTitle: "Sửa thực đơn",
+  editorHelp:
+    "Tạo thực đơn, xếp món theo mục và nhập giá chính xác. Lưu giữ bản nháp; gửi đi để được xem xét. Việc công bố do người duyệt quyết định.",
+  menuName: "Tên thực đơn",
+  menuLanguage: "Ngôn ngữ thực đơn",
+  sectionLabel: "Mục thực đơn",
+  sectionHelp: "Các mục nhóm món cho khách. Để trống cho danh sách chính.",
+  newSection: "Mục mới",
+  dishLink: "Món đã liên kết",
+  dishLookup: "Mã món hoặc tên trên địa chỉ web",
+  dishLookupHelp:
+    "Chỉ liên kết món đã công bố. Món chưa công bố được ẩn; chữ trên thực đơn không tạo món mới.",
+  resolveDish: "Tìm món",
+  unlinkDish: "Gỡ liên kết món",
+  suppressedNote: "Chưa công bố — ẩn với khách",
+  previewTitle: "Xem trước cho khách",
+  submitReview: "Gửi để xem xét",
   linePrice: "Tạm tính dòng món",
   edit: "Sửa bản quét",
   editHelp:

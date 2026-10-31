@@ -119,6 +119,7 @@ export function WaiterOrderCard({
         <p className="waiter-subtotal">{subtotalText}</p>
         <p>{copy.fees}</p>
         {menu.provenance === "private_scan" && <p>{copy.privateOrder}</p>}
+        {menu.provenance === "draft" && <p>{copy.draftOrder}</p>}
       </footer>
     </section>
   );

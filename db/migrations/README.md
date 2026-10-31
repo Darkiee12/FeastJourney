@@ -92,6 +92,16 @@ Versioned, immutable schema history for the `feastjourney` app schema:
   price-free items (from `V20261030_101`).
 - `V20261101_013__reviewed_variant_and_price_text.sql` — reviewed variant text +
   original printed price tokens (from `V20261030_102` + `_103`).
+- `V20261101_014__restaurant_menu_sections.sql` — nullable `section_key` on
+  restaurant menu items for curator-arranged menu sections.
+- `V20261101_015__restaurant_images.sql` — venue-scoped `restaurant_photos`
+  tables (draft→review→published, rights metadata, `restaurant-photos/` keys).
+- `V20261101_016__restaurant_image_indexes.sql` — display/publish/review
+  indexes for restaurant photos.
+- `V20261101_017__restaurant_import_jobs.sql` — bulk import job tables with
+  staged payloads and validate-vs-apply state.
+- `V20261101_018__restaurant_import_records.sql` — per-record import results
+  with external-identity dedup keys.
 
 - This directory contains **schema/data migrations**, not application Reylo queries.
 - Create next versioned SQL files such as `V20261027_002__create_user_accounts.sql` after domain ownership and schema review.
