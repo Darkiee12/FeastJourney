@@ -2,9 +2,16 @@ import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
+import { parseCommaList, tooLongTerms } from "@/components/home/recommend/quiz-model";
 import { PersonalNav } from "@/components/personal-nav";
 import { signOutFn } from "@/modules/user/auth.functions";
-import { getProfileFn, updateProfileFn } from "@/modules/user/profile.functions";
+import { ExcludedIngredientsField } from "@/modules/user/components/excluded-ingredients-field";
+import {
+  getFoodPreferencesFn,
+  getProfileFn,
+  saveFoodPreferencesFn,
+  updateProfileFn,
+} from "@/modules/user/profile.functions";
 import { listAccountsFn, unlinkAccountFn } from "@/modules/user/session.functions";
 import {
   messagesFor,
@@ -66,11 +73,15 @@ export const Route = createFileRoute("/settings/account")({
       return { profile: null, accounts: [], unavailable: true } as const;
     }
 
-    const [profile, linked] = await Promise.all([getProfileFn(), listAccountsFn()]);
+    const [profile, linked, foodPreferences] = await Promise.all([
+      getProfileFn(),
+      listAccountsFn(),
+      getFoodPreferencesFn(),
+    ]);
 
     // SAFETY: literal loaded marker for the component's discriminated union
     // branch; row shapes come from Reylo-inferred server functions.
-    return { profile, accounts: linked.accounts, unavailable: false } as const;
+    return { profile, accounts: linked.accounts, foodPreferences, unavailable: false } as const;
   },
   component: AccountSettings,
 });
@@ -90,10 +101,13 @@ function AccountSettings() {
   const fallbackUserName = routeContext.user?.name ?? "";
   const fallbackProfile = loaderData.profile;
   const fallbackAccounts = loaderData.accounts;
+  const fallbackFoodPreferences = loaderData.foodPreferences;
 
   const nameId = `${formId}-display-name`;
   const localeId = `${formId}-locale`;
+  const excludedId = `${formId}-excluded`;
   const saveErrorId = `${formId}-save-error`;
+  const foodPrefsErrorId = `${formId}-food-prefs-error`;
   const unlinkErrorId = `${formId}-unlink-error`;
   const signOutErrorId = `${formId}-signout-error`;
 
@@ -102,6 +116,12 @@ function AccountSettings() {
   const initialLocale = fallbackProfile?.locale ?? "";
 
   const [locale, setLocale] = useState<Locale>(() => resolveInitialLocale(initialLocale, lang));
+
+  const [excludedRaw, setExcludedRaw] = useState(
+    fallbackFoodPreferences?.excludedIngredients.join(", ") ?? "",
+  );
+
+  const [foodPrefsLocalError, setFoodPrefsLocalError] = useState<string | null>(null);
 
   const [accounts, setAccounts] = useState(fallbackAccounts);
 
@@ -126,6 +146,14 @@ function AccountSettings() {
     onSuccess: (_data, accountId) => {
       setAccounts(accounts.filter((other) => other.accountId !== accountId));
       setUnlinkTarget(null);
+    },
+  });
+
+  const saveFoodPrefs = useMutation({
+    mutationFn: (input: { excluded: Array<string> }) =>
+      saveFoodPreferencesFn({ data: { excluded_ingredients: input.excluded } }),
+    onSuccess: () => {
+      setFoodPrefsLocalError(null);
     },
   });
 
@@ -157,6 +185,32 @@ function AccountSettings() {
   const save = (event: React.FormEvent): void => {
     event.preventDefault();
     saveProfile.mutate({ displayName, locale });
+  };
+
+  const saveFood = (event: React.FormEvent): void => {
+    event.preventDefault();
+
+    if (saveFoodPrefs.isPending) {
+      return;
+    }
+
+    // Client mirror of the server 100-char cap: flag locally so the typed
+    // input is preserved; anything else surfaces as a server 400 below.
+    const terms = parseCommaList(excludedRaw);
+
+    if (tooLongTerms(terms)) {
+      setFoodPrefsLocalError(copy.recTermTooLong);
+
+      return;
+    }
+
+    setFoodPrefsLocalError(null);
+
+    if (saveFoodPrefs.isError) {
+      saveFoodPrefs.reset();
+    }
+
+    saveFoodPrefs.mutate({ excluded: terms });
   };
 
   const unlinkEntry = accounts.find((entry) => entry.accountId === unlinkTarget) ?? null;
@@ -247,6 +301,66 @@ function AccountSettings() {
               {saveProfile.isPending ? copy.settingsSaving : copy.authSave}
             </button>
             {saveProfile.isSuccess ? (
+              <output className="text-sm text-green-800">{copy.authSaved}</output>
+            ) : null}
+          </div>
+        </form>
+      </section>
+      <section
+        aria-label={copy.recExcludedLabel}
+        className="mt-6 rounded-lg border border-border-soft bg-white p-6 shadow-sm"
+      >
+        <form
+          className="grid gap-4"
+          onSubmit={(event) => {
+            saveFood(event);
+          }}
+        >
+          <ExcludedIngredientsField
+            compact
+            copy={copy}
+            disabled={saveFoodPrefs.isPending}
+            id={excludedId}
+            onChange={setExcludedRaw}
+            value={excludedRaw}
+          />
+          {foodPrefsLocalError !== null ? (
+            <div
+              role="alert"
+              className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+            >
+              <p>{foodPrefsLocalError}</p>
+            </div>
+          ) : null}
+          {saveFoodPrefs.isError ? (
+            <div
+              role="alert"
+              id={foodPrefsErrorId}
+              className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+            >
+              <p>{copy.settingsSaveFailed}</p>
+              <button
+                type="button"
+                className="mt-2 font-medium underline hover:no-underline"
+                onClick={() => {
+                  saveFoodPrefs.reset();
+                }}
+              >
+                {copy.commonRetry}
+              </button>
+            </div>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              disabled={saveFoodPrefs.isPending}
+              aria-busy={saveFoodPrefs.isPending}
+              aria-describedby={saveFoodPrefs.isError ? foodPrefsErrorId : undefined}
+              className="inline-flex items-center justify-center rounded-md bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60 motion-safe:transition-colors"
+            >
+              {saveFoodPrefs.isPending ? copy.settingsSaving : copy.authSave}
+            </button>
+            {saveFoodPrefs.isSuccess ? (
               <output className="text-sm text-green-800">{copy.authSaved}</output>
             ) : null}
           </div>

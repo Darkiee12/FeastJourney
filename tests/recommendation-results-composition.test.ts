@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { DishCarouselSkeleton } from "@/components/dish/dish-carousel";
 import { DishMedia, DishMediaFallback, DishMediaSkeleton } from "@/components/dish/dish-media";
 import { mealLabelFor, moodLabelFor } from "@/components/home/recommend/quiz-stages";
-import { AllergyNotice, QuizError, ResultWarnings } from "@/components/home/recommend/quiz-status";
+import { QuizError, ResultWarnings } from "@/components/home/recommend/quiz-status";
 import { QuizSummary } from "@/components/home/recommend/quiz-summary";
 import { messagesFor } from "@/shared/i18n";
 
@@ -36,8 +36,7 @@ describe("results summary chips", () => {
     const html = renderToStaticMarkup(
       QuizSummary({
         ...summaryBase,
-        allergies: [],
-        avoid: [],
+        excludedIngredients: [],
         meal: "dinner",
         mood: "any",
         submittedCountry: "VN",
@@ -58,8 +57,7 @@ describe("results summary chips", () => {
     const html = renderToStaticMarkup(
       QuizSummary({
         ...summaryBase,
-        allergies: [],
-        avoid: [],
+        excludedIngredients: [],
         meal: "anything",
         mood: "any",
         onEditStep: (step: number) => {
@@ -77,12 +75,11 @@ describe("results summary chips", () => {
     expect(seen).toEqual([]);
   });
 
-  test("avoid list truncates at two with an honest overflow count", () => {
+  test("exclusions list truncates at two with an honest overflow count", () => {
     const html = renderToStaticMarkup(
       QuizSummary({
         ...summaryBase,
-        allergies: [],
-        avoid: ["pork", "cilantro", "durian"],
+        excludedIngredients: ["pork", "cilantro", "durian"],
         meal: "anything",
         mood: "any",
         submittedCountry: undefined,
@@ -97,12 +94,11 @@ describe("results summary chips", () => {
     expect(html).not.toContain("durian");
   });
 
-  test("allergies never render as editable text, only as a session count", () => {
+  test("unified exclusions render as plain text with no separate allergy line", () => {
     const html = renderToStaticMarkup(
       QuizSummary({
         ...summaryBase,
-        allergies: ["peanut", "shellfish"],
-        avoid: [],
+        excludedIngredients: ["peanut", "shellfish"],
         meal: "anything",
         mood: "any",
         submittedCountry: undefined,
@@ -110,17 +106,15 @@ describe("results summary chips", () => {
       }),
     );
 
-    expect(html).not.toContain("peanut");
-    expect(html).not.toContain("shellfish");
-    expect(html).toContain(`${copyEn.recAllergiesLabel}: 2`);
+    expect(html).toContain("peanut");
+    expect(html).toContain("shellfish");
   });
 
   test("precise scope shows the nearby label without meters, never city precision", () => {
     const html = renderToStaticMarkup(
       QuizSummary({
         ...summaryBase,
-        allergies: [],
-        avoid: [],
+        excludedIngredients: [],
         meal: "anything",
         mood: "any",
         submittedCountry: undefined,
@@ -137,8 +131,7 @@ describe("results summary chips", () => {
     const html = renderToStaticMarkup(
       QuizSummary({
         ...summaryBase,
-        allergies: [],
-        avoid: [],
+        excludedIngredients: [],
         meal: "anything",
         mood: "any",
         submittedCountry: undefined,
@@ -152,10 +145,9 @@ describe("results summary chips", () => {
   test("summary copy exists in Vietnamese", () => {
     const html = renderToStaticMarkup(
       QuizSummary({
-        allergies: [],
-        avoid: [],
         copy: copyVi,
         countryOptions: [...countryOptions],
+        excludedIngredients: [],
         meal: "dinner",
         mood: "comforting",
         onEditStep: () => {},
@@ -177,19 +169,30 @@ describe("results status branches", () => {
     expect(html).toContain(copyEn.recRetry);
   });
 
-  test("allergy notice renders the safety copy with an honest disclaimer", () => {
-    const html = renderToStaticMarkup(AllergyNotice({ copy: copyEn }));
+  test("unresolvable exclusions render as an honest limitation warning", () => {
+    const html = renderToStaticMarkup(
+      ResultWarnings({
+        copy: copyEn,
+        warnings: [
+          'Could not match exclusion "durian" to a known ingredient; it was not applied as a filter.',
+        ],
+      }),
+    );
 
-    expect(html).toContain(copyEn.recAllergyNotice);
-    // Honest disclaimer: explicitly NOT a guarantee.
-    expect(html.toLowerCase()).toContain("not an allergy guarantee");
+    expect(html).toContain(copyEn.recWarningsLabel);
+    expect(html).toContain("durian");
   });
 
   test("empty warnings render nothing; unknown-dislike warnings stay visible", () => {
     expect(renderToStaticMarkup(ResultWarnings({ copy: copyEn, warnings: [] }))).toBe("");
 
     const html = renderToStaticMarkup(
-      ResultWarnings({ copy: copyEn, warnings: ['Ignored unknown dislike "durian".'] }),
+      ResultWarnings({
+        copy: copyEn,
+        warnings: [
+          'Could not match exclusion "durian" to a known ingredient; it was not applied as a filter.',
+        ],
+      }),
     );
 
     expect(html).toContain(copyEn.recWarningsLabel);

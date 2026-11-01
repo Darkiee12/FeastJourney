@@ -91,6 +91,12 @@ export interface MetaRankContext {
   readonly occasion: MealOccasion;
   readonly mood: RecommendationMood;
   readonly cuisineOrRegion: string | null;
+  /**
+   * Raw diner exclusion terms for ordering guidance only (user-message
+   * text, never system instructions). Eligibility is enforced in SQL
+   * before ranking; the model never claims safety.
+   */
+  readonly excludedIngredients: ReadonlyArray<string>;
 }
 
 export type MuseRankingConfig = Extract<RankingConfig, { readonly _tag: "Muse" }>;
@@ -152,6 +158,7 @@ const SYSTEM_PROMPT = [
   "Rank ONLY the dish IDs supplied in the user message.",
   "Never invent, add, or rename dishes.",
   "Never make safety, allergy, or medical claims.",
+  "Respect the diner's listed ingredient exclusions when ordering; never claim safety.",
   "Respond with JSON only, matching the requested schema.",
 ].join(" ");
 
@@ -166,6 +173,7 @@ const buildUserPrompt = (
 
   return [
     `Occasion: ${context.occasion}; mood: ${context.mood}; cuisine or region: ${context.cuisineOrRegion ?? "any"}.`,
+    `Ingredients to avoid: ${context.excludedIngredients.join(", ") || "none"}.`,
     "Rank the most suitable dish IDs first and return at most the requested count.",
     ...lines,
   ].join("\n");

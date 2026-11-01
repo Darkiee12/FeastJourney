@@ -12,8 +12,7 @@ import type { Messages } from "@/shared/i18n";
  * summary's scope label decides the honest region wording).
  */
 export interface YourPicksProps {
-  readonly allergies: ReadonlyArray<string>;
-  readonly avoid: ReadonlyArray<string>;
+  readonly excludedIngredients: ReadonlyArray<string>;
   readonly country: string | undefined;
   readonly location: RecommendPayload["location"];
   readonly meal: RecommendPayload["meal"];
@@ -26,8 +25,7 @@ export interface YourPicksProps {
  * interpretation of the submitted answers.
  */
 export const toYourPicksProps = (submitted: RecommendPayload): YourPicksProps => ({
-  allergies: submitted.allergies,
-  avoid: submitted.avoid,
+  excludedIngredients: submitted.excludedIngredients,
   country: submitted.country,
   location: submitted.location,
   meal: submitted.meal,
@@ -36,16 +34,19 @@ export const toYourPicksProps = (submitted: RecommendPayload): YourPicksProps =>
 
 /**
  * Remember-preferences controls, forwarded verbatim to RememberPrefs.
- * Persistence rules live there: allergies are never persisted and no
+ * Persistence rules: unified exclusions always persist (guest device or
+ * signed-in account); the opt-in governs only the destination. No
  * precise coordinates enter storage.
  */
 export interface SidebarPrefsProps {
+  readonly accountSaveError: string | null;
   readonly checked: boolean;
   readonly hasSaved: boolean;
   readonly onChange: (next: boolean) => void;
   readonly onClear: () => void;
   readonly onConfirmClear: () => void;
   readonly onDismissClear: () => void;
+  readonly onRetryAccountSave: () => void;
   readonly showConfirmClear: boolean;
 }
 
@@ -75,11 +76,10 @@ export function YourPicksCard({
 
   return (
     <QuizSummary
-      allergies={picks.allergies}
-      avoid={picks.avoid}
       compact={compact}
       copy={copy}
       countryOptions={countryOptions}
+      excludedIngredients={picks.excludedIngredients}
       meal={picks.meal}
       mood={picks.mood}
       onEditStep={onEditStep}
@@ -104,6 +104,7 @@ export function SidebarPrefsCard({
 }) {
   return (
     <RememberPrefs
+      accountSaveError={prefs.accountSaveError}
       checked={prefs.checked}
       compact={compact}
       copy={copy}
@@ -112,6 +113,7 @@ export function SidebarPrefsCard({
       onClear={prefs.onClear}
       onConfirmClear={prefs.onConfirmClear}
       onDismissClear={prefs.onDismissClear}
+      onRetryAccountSave={prefs.onRetryAccountSave}
       showConfirmClear={prefs.showConfirmClear}
     />
   );

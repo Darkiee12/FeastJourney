@@ -217,7 +217,22 @@ export type RecommendationLocation = z.infer<typeof recommendationLocationSchema
 export const recommendationQuerySchema = z
   .object({
     meal: mealSchema,
+    /**
+     * Canonical unified exclusions (ingredients to avoid). Replaces the
+     * legacy avoid/allergies split: one list, one policy.
+     */
+    excludedIngredients: z.array(z.string().max(100)).max(20).default([]),
+    /**
+     * Deprecated legacy dislikes: still accepted so older cached clients
+     * keep working, merged server-side into excludedIngredients.
+     */
     avoid: z.array(z.string().max(100)).max(20).default([]),
+    /**
+     * Deprecated legacy allergies: still accepted so older cached clients
+     * keep working, merged server-side into excludedIngredients with an
+     * explicit warning. The strict refusal no longer applies — legacy
+     * callers must not assume safety semantics.
+     */
     allergies: z.array(z.string().max(100)).max(20).default([]),
     cuisine: z.string().max(80).optional(),
     country: z

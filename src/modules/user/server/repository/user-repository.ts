@@ -6,6 +6,8 @@ import favoriteDelete from "@/modules/user/server/repository/sql/favorite-delete
 import favoriteInsert from "@/modules/user/server/repository/sql/favorite-insert.sql";
 import favoritesByUserId from "@/modules/user/server/repository/sql/favorites-by-user-id.sql";
 import favoritesStatusByDishIds from "@/modules/user/server/repository/sql/favorites-status-by-dish-ids.sql";
+import foodPreferencesByUserId from "@/modules/user/server/repository/sql/food-preferences-by-user-id.sql";
+import foodPreferencesUpsert from "@/modules/user/server/repository/sql/food-preferences-upsert.sql";
 import profileByUserId from "@/modules/user/server/repository/sql/profile-by-user-id.sql";
 import profileUpsert from "@/modules/user/server/repository/sql/profile-upsert.sql";
 import type { Database } from "@/server/database/client";
@@ -24,6 +26,8 @@ export type FavoriteRow = (typeof favoritesByUserId)["~reylo"]["element"];
 export type FavoriteKeyRow = (typeof favoriteByUserDish)["~reylo"]["element"];
 
 export type FavoriteStatusRow = (typeof favoritesStatusByDishIds)["~reylo"]["element"];
+
+export type FoodPreferencesRow = (typeof foodPreferencesByUserId)["~reylo"]["element"];
 
 const insertConflict = (
   operation: string,
@@ -82,6 +86,13 @@ export class UserRepository extends Context.Service<
       userId: string,
       dishId: bigint,
     ) => Effect.Effect<void, DatabaseError, Database>;
+    readonly foodPreferencesByUserId: (
+      userId: string,
+    ) => Effect.Effect<FoodPreferencesRow | null, DatabaseError, Database>;
+    readonly upsertFoodPreferences: (input: {
+      readonly userId: string;
+      readonly excludedIngredients: ReadonlyArray<string>;
+    }) => Effect.Effect<FoodPreferencesRow, DatabaseError, Database>;
     readonly insertAuditEvent: (input: {
       readonly actorUserId: string | null;
       readonly sessionId: string | null;
@@ -133,6 +144,17 @@ export const UserRepositoryLive = Layer.succeed(UserRepository, {
   deleteFavorite: (userId, dishId) =>
     runQuery("user/favorite-delete", (sql) =>
       favoriteDelete.run(sql, { user_id: userId, dish_id: dishId }),
+    ),
+  foodPreferencesByUserId: (userId) =>
+    runQuery("user/food-preferences-by-user-id", (sql) =>
+      foodPreferencesByUserId.run(sql, { user_id: userId }),
+    ),
+  upsertFoodPreferences: (input) =>
+    runQuery("user/food-preferences-upsert", (sql) =>
+      foodPreferencesUpsert.run(sql, {
+        user_id: input.userId,
+        excluded_ingredients: [...input.excludedIngredients],
+      }),
     ),
   insertAuditEvent: (input) =>
     runQuery("user/audit-insert", (sql) =>

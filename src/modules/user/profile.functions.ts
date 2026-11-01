@@ -4,6 +4,7 @@ import {
   favoriteLinkSchema,
   favoriteStatusSchema,
   favoritesQuerySchema,
+  foodPreferencesUpdateSchema,
   profileUpdateSchema,
 } from "@/modules/user/user.schema";
 
@@ -123,6 +124,110 @@ export const updateProfileFn = createServerFn({ method: "POST" })
       15000,
       requestId,
     );
+  });
+
+/**
+ * Member ingredient exclusions shared by the quiz and account settings.
+ * Reads return null when the member never saved any; user_id always comes
+ * from the verified session, never from client input.
+ */
+export const getFoodPreferencesFn = createServerFn({ method: "GET" }).handler(async () => {
+  const {
+    effects,
+    server,
+    services: { ProfileService },
+    session,
+    actor,
+    currentActor,
+    runtime,
+  } = await loadServer();
+
+  const headers = server.getRequestHeaders();
+  const requestId = crypto.randomUUID();
+
+  const trusted = await runtime.runApp(
+    session.requirePermission(headers, { resource: "profile", actions: ["read"] }),
+    "fn/user/food-preferences",
+    15000,
+    requestId,
+  );
+
+  const row = await runtime.runApp(
+    currentActor.withActor(
+      actor.Actor.Member({ userId: trusted.userId }),
+      effects.Effect.flatMap(ProfileService, (service) =>
+        service.getFoodPreferences(trusted.userId),
+      ),
+    ),
+    "fn/user/food-preferences",
+    15000,
+    requestId,
+  );
+
+  return row === null
+    ? null
+    : // SAFETY: the database is a trust boundary; text[] can physically hold
+      // NULLs, so only non-null terms cross into the client-safe shape.
+      { excludedIngredients: row.excluded_ingredients.filter((term) => term !== null) };
+});
+
+export const saveFoodPreferencesFn = createServerFn({ method: "POST" })
+  .validator(foodPreferencesUpdateSchema)
+  .handler(async ({ data }) => {
+    const {
+      effects,
+      server,
+      services: { ProfileService },
+      audit,
+      session,
+      actor,
+      currentActor,
+      runtime,
+    } = await loadServer();
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "profile", actions: ["update"] }),
+      "fn/user/food-preferences-update",
+      15000,
+      requestId,
+    );
+
+    const saved = await runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(ProfileService, (service) =>
+          service.saveFoodPreferences({
+            userId: trusted.userId,
+            excludedIngredients: data.excluded_ingredients,
+          }),
+        ).pipe(
+          effects.Effect.tap(() =>
+            audit.recordAuditEvent({
+              actorUserId: trusted.userId,
+              sessionId: trusted.sessionId,
+              requestId,
+              event: "betterAuth.auth.food-preferences.updated",
+              outcome: "succeeded",
+              resource: `user:${trusted.userId}`,
+              // Counts only: ingredient terms never reach logs or analytics.
+              metadata: { count: String(data.excluded_ingredients.length) },
+            }),
+          ),
+        ),
+      ),
+      "fn/user/food-preferences-update",
+      15000,
+      requestId,
+    );
+
+    return {
+      ok: true as const,
+      // SAFETY: same trust-boundary mapping as the read path above.
+      excludedIngredients: saved.excluded_ingredients.filter((term) => term !== null),
+    };
   });
 
 export const listFavoritesFn = createServerFn({ method: "GET" })

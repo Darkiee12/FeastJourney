@@ -23,8 +23,8 @@ export interface SummaryChips {
  * Sidebar YOUR PICKS card: compact editable summary of the last submitted
  * request (e.g. "Exploring Bengaluru, Karnataka, India · Dinner · No pork").
  * Each chip returns to its step so the visitor adjusts one thing instead of
- * restarting. Allergies do not render here as editable text — they stay a
- * session-only safety input. The region chip names the scope honestly:
+ * restarting. The unified exclusions render as plain text (first two plus
+ * an overflow count). The region chip names the scope honestly:
  * approximate home regions explore by country name, chosen cities show the
  * city label (falling back to the wider pool actually served when the
  * server reports one), precise fixes show the nearby scope without accuracy
@@ -32,22 +32,20 @@ export interface SummaryChips {
  * Never claims food is physically near or that a city is proven.
  */
 export function QuizSummary({
-  allergies,
-  avoid,
   compact = false,
   copy,
   countryOptions,
+  excludedIngredients,
   meal,
   mood,
   onEditStep,
   submittedCountry,
   submittedLocation,
 }: {
-  readonly allergies: ReadonlyArray<string>;
-  readonly avoid: ReadonlyArray<string>;
   readonly compact?: boolean;
   readonly copy: Messages;
   readonly countryOptions: ReadonlyArray<CountryOption>;
+  readonly excludedIngredients: ReadonlyArray<string>;
   readonly meal: MealOccasion;
   readonly mood: RecommendationMood;
   readonly onEditStep: (step: number) => void;
@@ -60,15 +58,13 @@ export function QuizSummary({
     countryOptions,
   );
 
-  const shownAvoid = avoid.slice(0, 2).join(", ");
-  const hiddenAvoid = avoid.length - Math.min(avoid.length, 2);
+  const shownExcluded = excludedIngredients.slice(0, 2).join(", ");
+  const hiddenExcluded = excludedIngredients.length - Math.min(excludedIngredients.length, 2);
 
-  const avoidText =
-    avoid.length === 0 && allergies.length === 0
+  const exclusionsText =
+    excludedIngredients.length === 0
       ? copy.recReviewAny
-      : `${shownAvoid}${hiddenAvoid > 0 ? ` +${hiddenAvoid.toString()}` : ""}${
-          allergies.length > 0 ? ` · ${copy.recAllergiesLabel}: ${allergies.length.toString()}` : ""
-        }`;
+      : `${shownExcluded}${hiddenExcluded > 0 ? ` +${hiddenExcluded.toString()}` : ""}`;
 
   const chips: ReadonlyArray<{ label: string; step: number; value: string }> = [
     { label: copy.recWhereLegend, step: 0, value: regionName },
@@ -77,7 +73,7 @@ export function QuizSummary({
       step: 1,
       value: `${mealLabelFor(meal, copy)} · ${moodLabelFor(mood, copy)}`,
     },
-    { label: copy.recAvoidTitle, step: 2, value: avoidText },
+    { label: copy.recAvoidTitle, step: 2, value: exclusionsText },
   ];
 
   return (
@@ -126,10 +122,12 @@ export function QuizSummary({
 }
 
 /**
- * Unobtrusive opt-in shown with results. Never prechecked; allergies are
- * never persisted. Checking it stores dislikes and destination only.
+ * Unobtrusive opt-in shown with results. Never prechecked; the checkbox
+ * governs only the destination (country/city). Unified exclusions always
+ * persist — on this device for guests, to the account when signed in.
  */
 export function RememberPrefs({
+  accountSaveError,
   checked,
   compact = false,
   copy,
@@ -138,8 +136,10 @@ export function RememberPrefs({
   onClear,
   onConfirmClear,
   onDismissClear,
+  onRetryAccountSave,
   showConfirmClear,
 }: {
+  readonly accountSaveError: string | null;
   readonly checked: boolean;
   readonly compact?: boolean;
   readonly copy: Messages;
@@ -148,6 +148,7 @@ export function RememberPrefs({
   readonly onClear: () => void;
   readonly onConfirmClear: () => void;
   readonly onDismissClear: () => void;
+  readonly onRetryAccountSave: () => void;
   readonly showConfirmClear: boolean;
 }) {
   return (
@@ -168,12 +169,27 @@ export function RememberPrefs({
           className="mt-0.5 size-5 flex-none accent-food-orange-strong"
         />
         <span>
-          {copy.recRememberShort}
+          {copy.recRememberDestination}
           <span className="mt-1 block text-xs font-normal text-muted">
-            {copy.recRememberAllergyNote}
+            {copy.recExclusionsAutoSaved}
           </span>
         </span>
       </label>
+      {accountSaveError !== null ? (
+        <p
+          role="alert"
+          className="mt-3 rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
+        >
+          {accountSaveError}{" "}
+          <button
+            type="button"
+            onClick={onRetryAccountSave}
+            className="cursor-pointer underline decoration-2 underline-offset-4 transition hover:opacity-80"
+          >
+            {copy.recRetry}
+          </button>
+        </p>
+      ) : null}
       {hasSaved ? (
         <div className="mt-3">
           {showConfirmClear ? (

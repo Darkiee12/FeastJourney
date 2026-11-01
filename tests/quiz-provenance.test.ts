@@ -16,8 +16,8 @@ import {
 } from "@/components/home/recommend/quiz-model";
 
 const savedPrefs = (overrides: Partial<SavedRecommendPrefs> = {}): SavedRecommendPrefs => ({
-  avoid: ["cilantro"],
   country: "VN",
+  excludedIngredients: ["cilantro"],
   remember: true,
   ...overrides,
 });
@@ -117,8 +117,8 @@ describe("provenance labels", () => {
 });
 
 describe("saved-preference privacy", () => {
-  test("allergies never restore from storage", () => {
-    expect(savedDraft().allergiesRaw).toBe("");
+  test("unified exclusions restore from storage with no separate allergy field", () => {
+    expect(savedDraft().excludedRaw).toBe("cilantro");
   });
 
   test("meal and mood always restart at defaults", () => {
@@ -127,13 +127,17 @@ describe("saved-preference privacy", () => {
 
   test("corrupt or non-consensual storage restores nothing", () => {
     expect(readSavedPrefs(() => "{nope")).toBeNull();
-    expect(readSavedPrefs(() => JSON.stringify({ avoid: ["x"] }))).toBeNull();
+    expect(readSavedPrefs(() => JSON.stringify({ excludedIngredients: "cilantro" }))).toBeNull();
     expect(draftFromSavedPrefs(null)).toEqual(EMPTY_DRAFT);
   });
 
-  test("dislikes restore only with opt-in, joined as raw text", () => {
-    expect(savedDraft().avoidRaw).toBe("cilantro");
+  test("exclusions restore as raw text; the destination restores only with opt-in", () => {
+    expect(savedDraft().excludedRaw).toBe("cilantro");
     expect(savedDraft().remember).toBe(true);
+    expect(
+      draftFromSavedPrefs(savedPrefs({ city: undefined, country: undefined, remember: false }))
+        .excludedRaw,
+    ).toBe("cilantro");
   });
 });
 
@@ -163,9 +167,8 @@ describe("journey snapshot privacy", () => {
     const snapshot = toCoarseSnapshot({
       ...baseModel,
       submitted: {
-        allergies: [],
-        avoid: [],
         country: undefined,
+        excludedIngredients: [],
         locale: "en",
         meal: "dinner",
         mood: "any",

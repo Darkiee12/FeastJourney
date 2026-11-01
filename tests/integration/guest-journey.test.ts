@@ -212,11 +212,10 @@ describe("guest journey: public catalog discovery", () => {
 });
 
 describe("guest journey: surprise keeps restrictions", () => {
-  test("surprise payload preserves avoid, allergies, and country", () => {
+  test("surprise payload preserves exclusions and country", () => {
     const draft = {
       ...EMPTY_DRAFT,
-      avoidRaw: "cilantro, mushrooms",
-      allergiesRaw: "peanuts",
+      excludedRaw: "cilantro, mushrooms, peanuts",
       regionMode: "country" as const,
       country: "vn",
       remember: false,
@@ -230,8 +229,7 @@ describe("guest journey: surprise keeps restrictions", () => {
       surpriseSeed: 0,
     });
 
-    expect(payload.avoid).toEqual(["cilantro", "mushrooms"]);
-    expect(payload.allergies).toEqual(["peanuts"]);
+    expect(payload.excludedIngredients).toEqual(["cilantro", "mushrooms", "peanuts"]);
     expect(payload.country).toBe("VN");
     expect(payload.meal).toBe("dinner");
   });
@@ -255,20 +253,18 @@ describe("guest journey: surprise keeps restrictions", () => {
     expect(payload.locale).toBe("vi");
   });
 
-  test("saved prefs restore only dislikes and destination, never allergies, meal, or mood", () => {
+  test("saved prefs restore exclusions and destination, never meal or mood", () => {
     const saved = readSavedPrefs(() =>
       JSON.stringify({
         remember: true,
-        avoid: ["cilantro"],
-        allergies: ["shrimp"],
+        excludedIngredients: ["cilantro"],
         country: "VN",
       }),
     );
 
     const draft = draftFromSavedPrefs(saved);
 
-    expect(draft.avoidRaw).toBe("cilantro");
-    expect(draft.allergiesRaw).toBe("");
+    expect(draft.excludedRaw).toBe("cilantro");
     expect(draft.regionMode).toBe("country");
   });
 });

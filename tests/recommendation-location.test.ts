@@ -52,8 +52,7 @@ const copyVi = messagesFor("vi");
 
 const baseInput: RecommendDishesInput = {
   meal: "anything",
-  avoid: [],
-  allergies: [],
+  excludedIngredients: [],
   cuisine: undefined,
   country: undefined,
   location: undefined,
@@ -98,7 +97,7 @@ describe("recommendation location (phase 1 geography)", () => {
 
   test("saved opt-in preference restores as an explicit chosen destination", () => {
     const saved = readSavedPrefs(() =>
-      serializePrefs({ remember: true, avoid: ["cilantro"], country: "VN" }),
+      serializePrefs({ remember: true, excludedIngredients: ["cilantro"], country: "VN" }),
     );
 
     const draft = draftFromSavedPrefs(saved);
@@ -408,7 +407,7 @@ describe("recommendation location (phase 1 geography)", () => {
     });
   });
 
-  test("draft locations feed payloads while allergies still refuse and surprise varies", () => {
+  test("draft locations feed payloads and surprise varies", () => {
     const preciseDraft: QuizDraft = {
       ...EMPTY_DRAFT,
       regionMode: "precise",
@@ -532,11 +531,15 @@ describe("recommendation location (phase 1 geography)", () => {
     });
 
     try {
-      persistPrefs(true, ["cilantro"], "VN");
+      persistPrefs({
+        rememberDestination: true,
+        excludedIngredients: ["cilantro"],
+        country: "VN",
+      });
 
-      const stored = store.get("feastjourney.recommend.prefs.v1") ?? "";
+      const stored = store.get("feastjourney.recommend.prefs.v2") ?? "";
 
-      expect(stored).toContain('"avoid"');
+      expect(stored).toContain('"excludedIngredients"');
       expect(stored).toContain('"country"');
       expect(stored).toContain('"remember"');
       expect(stored).not.toContain("latitude");

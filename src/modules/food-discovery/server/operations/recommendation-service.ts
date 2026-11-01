@@ -186,8 +186,8 @@ export const toWireOutcome = (outcome: RecommendationOutcome): RecommendationWir
 
 export interface RecommendDishesInput {
   readonly meal: MealOccasion;
-  readonly avoid: ReadonlyArray<string>;
-  readonly allergies: ReadonlyArray<string>;
+  /** Unified ingredient exclusions: one list, one hard-exclusion policy. */
+  readonly excludedIngredients: ReadonlyArray<string>;
   readonly cuisine?: string | undefined;
   readonly country?: string | undefined;
   readonly location?: RecommendationLocation | undefined;
@@ -281,14 +281,18 @@ export const locationLogFields = (
   });
 
 /**
- * Ranking-model context. Carries occasion, mood, and an optional cuisine or
- * country label — never coordinates, never venue claims. The model only
- * re-ranks the candidate rows it is given.
+ * Ranking-model context. Carries occasion, mood, an optional cuisine or
+ * country label, and the resolved exclusion terms — never coordinates,
+ * never venue claims. The model only re-ranks the candidate rows it is
+ * given. Exclusion terms travel in the user message only (untrusted data,
+ * never system instructions); eligibility itself is enforced in SQL before
+ * the model is consulted.
  */
 export const toRankContext = (input: RecommendDishesInput): MetaRankContext => ({
   cuisineOrRegion: input.cuisine ?? scopeCountryOf(input),
   mood: input.mood,
   occasion: input.meal,
+  excludedIngredients: [...input.excludedIngredients],
 });
 
 export type RecommendationError =
@@ -311,10 +315,8 @@ export class RecommendationService extends Context.Service<
   }
 >()("feastjourney/food-discovery/RecommendationService") {}
 
-// The catalog has no verified-completeness representation for ingredients, so
-// allergy claims can never be proven; any allergy input refuses to rank.
-const INCOMPLETE_DATA_EXPLANATION =
-  "Ingredient data may be incomplete and carries no verified-completeness guarantee.";
+// The catalog has no verified-completeness representation for ingredients,
+// so exclusion matches are best-effort name resolution, never safety claims.
 
 const AI_NOT_CONFIGURED_NOTE = "Deterministic mode: AI ranking is not configured.";
 
@@ -863,6 +865,8 @@ const finishRecommendations = (
         backend: muse === null || input.surpriseSeed > 0 ? "deterministic" : "muse",
         candidateCount: sortedAll.length,
         returnedCount: deterministicTop.length,
+        // Counts only: raw exclusion terms never reach logs.
+        exclusionCount: input.excludedIngredients.length,
         ...locationLogFields(input),
       }),
     );
@@ -1225,26 +1229,16 @@ export const RecommendationServiceLive = Layer.effect(
           return yield* new InvalidLocale({ locale: input.locale });
         }
 
-        if (input.allergies.length > 0) {
-          return RecommendationOutcome.Uncertain({
-            reasons: [
-              ...input.allergies.map(
-                (term) =>
-                  `Cannot verify dish safety for allergy "${term}"; refusing to rank without complete exclusion data.`,
-              ),
-              INCOMPLETE_DATA_EXPLANATION,
-            ],
-          });
-        }
-
         const warnings: Array<string> = [];
         const excluded = new Set<bigint>();
 
-        for (const term of input.avoid) {
+        for (const term of input.excludedIngredients) {
           const resolved = yield* resolveExclusionId(term, input.locale);
 
           if (resolved === null) {
-            warnings.push(`Ignored unknown dislike "${term}".`);
+            warnings.push(
+              `Could not match exclusion "${term}" to a known ingredient; it was not applied as a filter.`,
+            );
           } else {
             excluded.add(resolved);
           }

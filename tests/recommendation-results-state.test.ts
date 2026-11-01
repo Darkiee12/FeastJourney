@@ -25,8 +25,7 @@ const countryOptions = [{ code: "VN", label: "Vietnam" }];
 
 const answeredDraft = (overrides?: Partial<QuizDraft>): QuizDraft => ({
   ...EMPTY_DRAFT,
-  allergiesRaw: "peanut",
-  avoidRaw: "pork, cilantro",
+  excludedRaw: "pork, cilantro, peanut",
   country: "VN",
   countrySource: "chosen",
   regionMode: "country",
@@ -55,8 +54,7 @@ describe("questionnaire answers survive into the results request", () => {
 
     expect(first.meal).toBe("dinner");
     expect(first.mood).toBe("comforting");
-    expect(first.avoid).toEqual(["pork", "cilantro"]);
-    expect(first.allergies).toEqual(["peanut"]);
+    expect(first.excludedIngredients).toEqual(["pork", "cilantro", "peanut"]);
     expect(first.locale).toBe("en");
     expect(first.surpriseSeed).toBe(0);
     expect(second.surpriseSeed).toBe(1);
@@ -82,8 +80,7 @@ describe("questionnaire answers survive into the results request", () => {
     expect(transport.location).toEqual(payload.location);
     // Meal, mood, filters, and seed pass through untouched.
     expect(transport.meal).toBe(payload.meal);
-    expect(transport.avoid).toEqual(payload.avoid);
-    expect(transport.allergies).toEqual(payload.allergies);
+    expect(transport.excludedIngredients).toEqual(payload.excludedIngredients);
     expect(transport.surpriseSeed).toBe(payload.surpriseSeed);
   });
 
@@ -180,7 +177,7 @@ describe("featured navigation foundation", () => {
   });
 
   test("reset on a new result set returns to the first slide", () => {
-    // quiz-flow resets via resetKey (seed:meal:mood:locale:avoid); the index
+    // quiz-flow resets via resetKey (seed:meal:mood:locale:excluded); the index
     // contract underneath is wrap-to-zero on scope change.
     expect(carouselWrappedIndex(7, 10)).toBe(7);
     expect(carouselWrappedIndex(0, 10)).toBe(0);

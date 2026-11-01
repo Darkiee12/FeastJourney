@@ -35,6 +35,7 @@ import {
   type MealOccasion,
   type RecommendationMood,
 } from "@/modules/food-discovery/recommendation.constants";
+import { ExcludedIngredientsField } from "@/modules/user/components/excluded-ingredients-field";
 import type { Locale, Messages } from "@/shared/i18n";
 
 export interface CountryOption {
@@ -796,27 +797,27 @@ export function CravingStep({
 /**
  * Step 3 — fine-tune and exclusions. Mood refinement moved here from Step 2
  * because meal quick-picks auto-advance before visitors ever saw it; mood
- * stays optional, reachable, and never advances on its own. Free-text
- * dislikes plus allergies follow with an explicit find action. Typing never
- * advances; validation runs only on the explicit Find or Skip actions. A
- * restored dislikes value renders softer navy-on-cream with a saved label;
+ * stays optional, reachable, and never advances on its own. The single
+ * unified exclusions field follows with an explicit find action. Typing
+ * never advances; validation runs only on the explicit Find or Skip
+ * actions. A restored exclusions value renders with a saved label;
  * confirming or editing it restores the normal style.
  */
 export function AvoidStep({
-  avoidOrigin,
   compact = false,
   copy,
   draft,
+  excludedOrigin,
   mood,
   moodTouched,
   onDraft,
   onMood,
   provenanceLabels = DEFAULT_PROVENANCE_LABELS,
 }: {
-  readonly avoidOrigin: AnswerOrigin;
   readonly compact?: boolean;
   readonly copy: Messages;
   readonly draft: QuizDraft;
+  readonly excludedOrigin: AnswerOrigin;
   readonly mood: RecommendationMood;
   readonly moodTouched: boolean;
   readonly onDraft: (next: QuizDraft) => void;
@@ -865,57 +866,21 @@ export function AvoidStep({
           );
         })}
       </div>
-      <div className={compact ? "flex flex-col gap-2" : "flex flex-col gap-5"}>
-        <div>
-          <label htmlFor="rec-avoid" className="mb-1 block text-sm font-bold text-ink">
-            {copy.recAvoidLabel}
-          </label>
-          <input
-            id="rec-avoid"
-            type="text"
-            autoComplete="off"
-            value={draft.avoidRaw}
-            placeholder={copy.recAvoidPlaceholder}
-            onChange={(event) => {
-              onDraft({ ...draft, avoidRaw: event.target.value });
-            }}
-            className={`min-h-11 w-full rounded-xl border-2 px-4 py-3 text-base text-ink placeholder:text-muted focus:border-brand-blue ${
-              avoidOrigin === "restored" ? "border-ink bg-cream" : "border-border-soft bg-cream"
-            }`}
-          />
-          {avoidOrigin === "restored" ? (
-            <p className="mt-2 inline-flex items-center rounded-full border-2 border-ink bg-cream px-3 py-1 text-xs font-bold text-ink">
-              {provenanceLabels.saved}
-            </p>
-          ) : null}
-        </div>
-        <div>
-          <label htmlFor="rec-allergies" className="mb-1 block text-sm font-bold text-ink">
-            {copy.recAllergiesLabel}
-          </label>
-          <input
-            id="rec-allergies"
-            type="text"
-            autoComplete="off"
-            value={draft.allergiesRaw}
-            placeholder={copy.recAllergiesPlaceholder}
-            aria-describedby="rec-allergies-note"
-            onChange={(event) => {
-              onDraft({ ...draft, allergiesRaw: event.target.value });
-            }}
-            className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-4 py-3 text-base text-ink placeholder:text-muted focus:border-brand-blue"
-          />
-        </div>
-        <p
-          id="rec-allergies-note"
-          className={
-            compact
-              ? "rounded-xl border-2 border-mango bg-cream px-3 py-2 text-sm font-semibold text-ink"
-              : "rounded-xl border-2 border-mango bg-cream px-4 py-3 text-sm font-semibold text-ink"
-          }
-        >
-          {copy.recAllergyShort}
-        </p>
+      <div className={compact ? "mt-2" : "mt-3"}>
+        <ExcludedIngredientsField
+          compact={compact}
+          copy={copy}
+          id={compact ? "rec-excluded-compact" : "rec-excluded"}
+          onChange={(next) => {
+            onDraft({ ...draft, excludedRaw: next });
+          }}
+          value={draft.excludedRaw}
+        />
+        {excludedOrigin === "restored" ? (
+          <p className="mt-2 inline-flex items-center rounded-full border-2 border-ink bg-cream px-3 py-1 text-xs font-bold text-ink">
+            {provenanceLabels.saved}
+          </p>
+        ) : null}
       </div>
     </fieldset>
   );

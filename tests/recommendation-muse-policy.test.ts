@@ -62,6 +62,7 @@ const CONTEXT: MetaRankContext = {
   occasion: "dinner",
   mood: "any",
   cuisineOrRegion: null,
+  excludedIngredients: [],
 };
 
 const testConfig: MuseRankingConfig = RankingConfig.Muse({
