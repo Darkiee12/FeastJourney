@@ -53,19 +53,32 @@ export function sanitizeCountryCode(value: string): string | null {
 }
 
 export interface QuizDraft {
-  readonly avoidRaw: string;
-  readonly allergiesRaw: string;
+  /**
+   * Raw unified exclusions text (ingredients to avoid, comma-separated).
+   * Single source for the final step: dislikes and former allergy input
+   * share one field, one policy, one persistence path.
+   */
+  readonly excludedRaw: string;
   readonly regionMode: RecRegionMode;
   readonly country: string;
   readonly countrySource: CountrySource | null;
   readonly precise: PreciseFix | null;
   readonly remember: boolean;
+  /**
+   * Explicitly chosen canonical city (place registry id) with its display
+   * label and nearest country ISO hint for the honest wider-pool fallback.
+   * Set only through the city chooser; never overwritten by async
+   * geolocation. Null means no city choice.
+   */
+  readonly cityId: string | null;
+  readonly cityLabel: string | null;
+  readonly cityCountry: string | null;
 }
 
 export interface RecommendAnswers {
   readonly meal: MealOccasion;
-  readonly avoid: ReadonlyArray<string>;
-  readonly allergies: ReadonlyArray<string>;
+  /** Canonical unified exclusions (ingredients to avoid). */
+  readonly excludedIngredients: ReadonlyArray<string>;
   readonly country: string | undefined;
   readonly location?: RecommendationLocation | undefined;
   readonly mood: RecommendationMood;
@@ -74,8 +87,8 @@ export interface RecommendAnswers {
 
 export interface RecommendPayload {
   readonly meal: MealOccasion;
-  readonly avoid: Array<string>;
-  readonly allergies: Array<string>;
+  /** Canonical unified exclusions (ingredients to avoid). */
+  readonly excludedIngredients: Array<string>;
   /** Legacy country mirror for display; stripped at transport when location is present. */
   readonly country?: string | undefined;
   readonly location?: RecommendationLocation | undefined;
@@ -116,12 +129,8 @@ export const tooLongTerms = (terms: ReadonlyArray<string>): boolean =>
   terms.some((term) => term.length > MAX_REC_TERM_LENGTH);
 
 /** Localized error when any exclusion term exceeds the server item limit. */
-export const termLengthError = (
-  avoidRaw: string,
-  allergiesRaw: string,
-  copy: Messages,
-): string | null => {
-  if (tooLongTerms(parseCommaList(avoidRaw)) || tooLongTerms(parseCommaList(allergiesRaw))) {
+export const termLengthError = (excludedRaw: string, copy: Messages): string | null => {
+  if (tooLongTerms(parseCommaList(excludedRaw))) {
     return copy.recTermTooLong;
   }
 
@@ -137,8 +146,7 @@ export const buildRecommendPayload = (
   answers: RecommendAnswers & { readonly surpriseSeed?: number },
 ): RecommendPayload => ({
   meal: answers.meal,
-  avoid: [...answers.avoid],
-  allergies: [...answers.allergies],
+  excludedIngredients: [...answers.excludedIngredients],
   country: answers.country,
   location: answers.location,
   mood: answers.mood,
@@ -157,7 +165,9 @@ export const toTransportPayload = (payload: RecommendPayload): RecommendPayload 
 /**
  * Derive the discriminated location for a draft. Home region and chosen
  * destination both filter by country (provenance differs for labels only);
- * precise needs a live fix; anywhere is explicitly worldwide.
+ * an explicitly chosen city filters by its canonical place id with the
+ * country hint for fallback; precise needs a live fix; anywhere is
+ * explicitly worldwide.
  */
 export const draftLocation = (draft: QuizDraft): RecommendationLocation | undefined => {
   if (draft.regionMode === "precise") {
@@ -176,6 +186,24 @@ export const draftLocation = (draft: QuizDraft): RecommendationLocation | undefi
   }
 
   if (draft.regionMode === "country") {
+    if (draft.cityId !== null && isCityPlaceId(draft.cityId)) {
+      const hint = sanitizeCountryCode(draft.cityCountry ?? "");
+
+      if (hint === null) {
+        if (draft.cityLabel === null) {
+          return { kind: "city", placeId: draft.cityId };
+        }
+
+        return { kind: "city", placeId: draft.cityId, label: draft.cityLabel };
+      }
+
+      if (draft.cityLabel === null) {
+        return { kind: "city", placeId: draft.cityId, country: hint };
+      }
+
+      return { kind: "city", placeId: draft.cityId, country: hint, label: draft.cityLabel };
+    }
+
     const normalized = draft.country.trim().toUpperCase();
     const parsed = recCountrySchema.safeParse(normalized);
 
@@ -202,14 +230,20 @@ export const draftLocation = (draft: QuizDraft): RecommendationLocation | undefi
 export const buildSurprisePayload = (inputs: SurpriseInputs): RecommendPayload =>
   buildRecommendPayload({
     meal: inputs.meal,
-    avoid: parseCommaList(inputs.draft.avoidRaw),
-    allergies: parseCommaList(inputs.draft.allergiesRaw),
-    country: resolveCountry(inputs.draft.regionMode, inputs.draft.country),
+    excludedIngredients: parseCommaList(inputs.draft.excludedRaw),
+    country: draftCountryMirror(inputs.draft),
     location: draftLocation(inputs.draft),
     mood: inputs.mood,
     locale: inputs.locale,
     surpriseSeed: inputs.surpriseSeed,
   });
+
+/**
+ * Canonical city place id shape: a decimal id string from the place
+ * registry. Client-side twin of the server dbId check so drafts fail
+ * closed before transport.
+ */
+export const isCityPlaceId = (value: string): boolean => /^[0-9]+$/.test(value);
 
 /** Validate the region step, returning a localized error or null when it passes. */
 export const validateRegion = (
@@ -217,8 +251,13 @@ export const validateRegion = (
   country: string,
   copy: Messages,
   precise: PreciseFix | null = null,
+  cityId: string | null = null,
 ): string | null => {
   if (mode === "country") {
+    if (cityId !== null && isCityPlaceId(cityId)) {
+      return null;
+    }
+
     return isRegionComplete({ ...EMPTY_DRAFT, regionMode: mode, country })
       ? null
       : copy.recCountryError;
@@ -274,9 +313,20 @@ export const regionOriginFor = (input: {
   readonly touched: boolean;
   readonly draft: QuizDraft;
   readonly savedCountry: string | null;
+  readonly savedCityId?: string | null | undefined;
 }): AnswerOrigin => {
   if (input.touched) {
     return "explicit";
+  }
+
+  if (
+    input.draft.regionMode === "country" &&
+    input.draft.cityId !== null &&
+    input.savedCityId !== null &&
+    input.savedCityId !== undefined &&
+    input.draft.cityId === input.savedCityId
+  ) {
+    return "restored";
   }
 
   if (
@@ -296,11 +346,9 @@ export const regionOriginFor = (input: {
 };
 
 /**
- * Free-text origin (dislikes box): restored only when the visible text is
- * non-empty and matches the opt-in saved value. Empty text is untouched
- * even when a preference exists, so "anything goes" is never claimed as
- * saved. Allergies never restore and always resolve through the touched
- * flag only.
+ * Free-text origin (exclusions box): restored only when the visible text is
+ * non-empty and matches the persisted value. Empty text is untouched even
+ * when a preference exists, so "no exclusions" is never claimed as saved.
  */
 export const textOriginFor = (input: {
   readonly touched: boolean;
@@ -320,12 +368,17 @@ export const textOriginFor = (input: {
 
 /**
  * Copy-free completeness check for one draft snapshot. Home and worldwide
- * are complete by construction; a destination needs a valid ISO country;
- * precise needs a live fix. Used by the single auto-advance commit site so
- * pointer taps advance only on explicitly complete answers.
+ * are complete by construction; a destination needs a valid ISO country or
+ * an explicitly chosen canonical city; precise needs a live fix. Used by the
+ * single auto-advance commit site so pointer taps advance only on explicitly
+ * complete answers.
  */
 export const isRegionComplete = (draft: QuizDraft): boolean => {
   if (draft.regionMode === "country") {
+    if (draft.cityId !== null && isCityPlaceId(draft.cityId)) {
+      return true;
+    }
+
     return recCountrySchema.safeParse(draft.country.trim().toUpperCase()).success;
   }
 
@@ -336,21 +389,23 @@ export const isRegionComplete = (draft: QuizDraft): boolean => {
   return true;
 };
 
-/** True when two drafts select the same Step-1 lane and country. */
+/** True when two drafts select the same Step-1 lane, country, and city. */
 export const sameRegion = (left: QuizDraft, right: QuizDraft): boolean =>
   left.regionMode === right.regionMode &&
   left.country.toUpperCase() === right.country.toUpperCase() &&
-  left.countrySource === right.countrySource;
+  left.countrySource === right.countrySource &&
+  left.cityId === right.cityId;
 
 /**
  * Pure Step-1 lane transition for a radio tap. Home pins the trusted
  * detection (worldwide fallback when detection vanished); precise opens
  * the locator lane with no fix yet (never complete, so never advances);
  * destination opens the catalog selector empty (incomplete until a valid
- * country is chosen); worldwide clears everything (complete at once).
- * The caller commits the returned candidate and advances only when it is
- * complete, so async detection and saved prefs — which never flow through
- * here — can never trigger advancement.
+ * country or city is chosen — any previous city choice is cleared so a
+ * stale city can never ride along); worldwide clears everything (complete
+ * at once). The caller commits the returned candidate and advances only
+ * when it is complete, so async detection and saved prefs — which never
+ * flow through here — can never trigger advancement.
  */
 export const pickRegionChoice = (
   draft: QuizDraft,
@@ -362,31 +417,90 @@ export const pickRegionChoice = (
       ...draft,
       country: detected,
       countrySource: "detected",
+      cityId: null,
+      cityLabel: null,
+      cityCountry: null,
       precise: null,
       regionMode: "country",
     };
   }
 
   if (choice === "precise") {
-    return { ...draft, country: "", countrySource: null, precise: null, regionMode: "precise" };
+    return {
+      ...draft,
+      country: "",
+      countrySource: null,
+      cityId: null,
+      cityLabel: null,
+      cityCountry: null,
+      precise: null,
+      regionMode: "precise",
+    };
   }
 
   if (choice === "destination") {
-    return { ...draft, country: "", countrySource: null, precise: null, regionMode: "country" };
+    return {
+      ...draft,
+      country: "",
+      countrySource: null,
+      cityId: null,
+      cityLabel: null,
+      cityCountry: null,
+      precise: null,
+      regionMode: "country",
+    };
   }
 
-  return { ...draft, country: "", countrySource: null, precise: null, regionMode: "anywhere" };
+  return {
+    ...draft,
+    country: "",
+    countrySource: null,
+    cityId: null,
+    cityLabel: null,
+    cityCountry: null,
+    precise: null,
+    regionMode: "anywhere",
+  };
 };
 
 /**
  * Pure destination-selector transition: a valid pick is a chosen country
  * (complete, advances on pointer); clearing back to the placeholder keeps
  * the lane open but incomplete (reveals the selector, never advances).
+ * Choosing a country clears any city choice — the two never combine.
  */
 export const pickDestinationCountry = (draft: QuizDraft, country: string): QuizDraft => ({
   ...draft,
   country,
   countrySource: country === "" ? null : "chosen",
+  cityId: null,
+  cityLabel: null,
+  cityCountry: null,
+  precise: null,
+  regionMode: "country",
+});
+
+/**
+ * Pure city-selector transition: a chosen canonical city (complete,
+ * advances on pointer) with its display label and country hint. Clearing
+ * (null id) keeps the lane open but incomplete. A city choice clears any
+ * country choice — the served scope is the city, with the hint only for
+ * the honest wider-pool fallback.
+ */
+export const pickDestinationCity = (
+  draft: QuizDraft,
+  city: {
+    readonly placeId: string;
+    readonly label: string | null;
+    readonly country: string | null;
+  },
+): QuizDraft => ({
+  ...draft,
+  country: "",
+  countrySource: null,
+  cityId: city.placeId,
+  cityLabel: city.label,
+  cityCountry: city.country,
   precise: null,
   regionMode: "country",
 });
@@ -462,13 +576,12 @@ export const formatAccuracyM = (accuracy: number): string =>
 
 /**
  * Result-scope label for the summary chips, composed from existing copy plus
- * catalog country names: approximate home regions explore by name, precise
- * fixes lead with the using-location note plus accuracy as secondary detail,
- * destinations show the plain country name, worldwide stays unlabeled.
- * The precise wording never claims food within X meters: it names association
- * use (dishes matched with your area in play) plus fix accuracy, and stays
- * silent on restaurant availability, which the places lookup answers
- * separately. Never claims city precision.
+ * catalog names: approximate home regions explore by name, city choices show
+ * the chosen city label, precise fixes show the honest "Near you" scope
+ * (never GPS accuracy meters), destinations show the plain country name,
+ * worldwide stays unlabeled. City cultural discovery never claims
+ * restaurant availability, which the places lookup answers separately.
+ * Never claims city precision without a resolved city.
  */
 export const scopeLabelFor = (
   input: {
@@ -487,12 +600,18 @@ export const scopeLabelFor = (
     switch (location.kind) {
       case "approx":
         return formatTemplate(copy.recWhereExploring, nameOf(location.country));
-      case "precise":
-        if (location.accuracy === null || location.accuracy === undefined) {
-          return copy.recWhereUsingLocation;
+      case "city":
+        if (location.label !== undefined && location.label.trim() !== "") {
+          return formatTemplate(copy.recWhereExploring, location.label);
         }
 
-        return `${copy.recWhereUsingLocation} · ${copy.recWhereAccuracyNote.replace("{meters}", Math.round(location.accuracy).toString())}`;
+        if (location.country !== undefined) {
+          return formatTemplate(copy.recWhereExploring, nameOf(location.country));
+        }
+
+        return copy.recWhereAnywhere;
+      case "precise":
+        return copy.recWhereNearYou;
       case "destination":
         return nameOf(location.country);
       case "worldwide":
@@ -523,31 +642,81 @@ const resolveCountry = (mode: RecRegionMode, country: string): string | undefine
 };
 
 /**
- * Saved preferences deliberately exclude allergies: dislikes and the
- * destination persist only with explicit opt-in, while allergy text stays in
- * memory for the current visit and is never written to storage.
+ * Legacy country mirror for a draft: the explicitly chosen country, or the
+ * city choice's country hint (kept for restore display alongside the city
+ * location). The discriminated city location remains the scoping source;
+ * this mirror is coarse display context only.
  */
-const savedPrefsSchema = z.object({
+export const draftCountryMirror = (
+  draft: Pick<QuizDraft, "regionMode" | "country" | "cityCountry">,
+): string | undefined => {
+  const direct = resolveCountry(draft.regionMode, draft.country);
+
+  if (direct !== undefined) {
+    return direct;
+  }
+
+  if (draft.regionMode !== "country") {
+    return undefined;
+  }
+
+  return sanitizeCountryCode(draft.cityCountry ?? "") ?? undefined;
+};
+
+/**
+ * Saved preferences v2: unified ingredient exclusions persist for every
+ * guest automatically (no opt-in); the opt-in `remember` flag now governs
+ * only the destination (country/city). Coordinates are never persisted.
+ *
+ * v1 stored `{remember: true, avoid, country?, city?}` with dislikes only.
+ * v1 rows migrate forward on read (avoid → excludedIngredients) and the v1
+ * key is removed — never silently dropped, never downgraded.
+ */
+const savedPrefsV2Schema = z.object({
+  remember: z.boolean().default(false),
+  excludedIngredients: z.array(z.string()).default([]),
+  country: recCountrySchema.optional(),
+  city: z
+    .object({
+      placeId: z.string().regex(/^[0-9]+$/),
+      label: z.string().max(200).optional(),
+      country: recCountrySchema.optional(),
+    })
+    .optional(),
+});
+
+export type SavedRecommendPrefs = z.infer<typeof savedPrefsV2Schema>;
+
+/** Legacy v1 shape: opt-in dislikes only. Read-only; migrated to v2 on read. */
+const savedPrefsV1Schema = z.object({
   remember: z.literal(true),
   avoid: z.array(z.string()).default([]),
   country: recCountrySchema.optional(),
+  city: z
+    .object({
+      placeId: z.string().regex(/^[0-9]+$/),
+      label: z.string().max(200).optional(),
+      country: recCountrySchema.optional(),
+    })
+    .optional(),
 });
 
-export type SavedRecommendPrefs = z.infer<typeof savedPrefsSchema>;
+const PREFS_KEY = "feastjourney.recommend.prefs.v2";
+const LEGACY_PREFS_KEY = "feastjourney.recommend.prefs.v1";
 
-const PREFS_KEY = "feastjourney.recommend.prefs.v1";
-
-/** Storage key for the opt-in recommendation prefs; quiz-flow mirrors hasSaved reads against it. */
+/** Storage key for the versioned recommendation prefs; quiz-flow mirrors hasSaved reads against it. */
 export const PREFS_STORAGE_KEY = PREFS_KEY;
 
 export const EMPTY_DRAFT: QuizDraft = {
-  avoidRaw: "",
-  allergiesRaw: "",
+  excludedRaw: "",
   regionMode: "anywhere",
   country: "",
   countrySource: null,
   precise: null,
   remember: false,
+  cityId: null,
+  cityLabel: null,
+  cityCountry: null,
 };
 
 /** Parse one raw storage value; any corruption or schema drift restores nothing. */
@@ -559,17 +728,95 @@ export const readSavedPrefs = (read: () => string | null): SavedRecommendPrefs |
   }
 
   try {
-    const parsed: unknown = JSON.parse(raw);
-    const result = savedPrefsSchema.safeParse(parsed);
+    const current = savedPrefsV2Schema.safeParse(JSON.parse(raw));
 
-    if (!result.success) {
-      return null;
+    if (current.success) {
+      return current.data;
     }
 
-    return result.data;
+    return null;
   } catch {
     return null;
   }
+};
+
+/**
+ * Legacy v1 migration: reads the old opt-in key once, adopts its dislikes as
+ * unified exclusions (same safety semantics — v1 never stored allergies),
+ * and removes the v1 key so the migration runs exactly once per device.
+ */
+export const migrateLegacyPrefs = (
+  read: () => string | null,
+  remove: () => void,
+): SavedRecommendPrefs | null => {
+  const raw = read();
+
+  if (raw === null) {
+    return null;
+  }
+
+  try {
+    const legacy = savedPrefsV1Schema.safeParse(JSON.parse(raw));
+
+    if (!legacy.success) {
+      return null;
+    }
+
+    remove();
+
+    return {
+      remember: legacy.data.remember,
+      excludedIngredients: legacy.data.avoid,
+      country: legacy.data.country,
+      city: legacy.data.city,
+    };
+  } catch {
+    return null;
+  }
+};
+
+/** Read v2 prefs, falling back to a one-time v1 migration. */
+export const readSavedPrefsWithMigration = (
+  readV2: () => string | null,
+  readV1: () => string | null,
+  removeV1: () => void,
+): SavedRecommendPrefs | null => {
+  const rawV2 = readV2();
+
+  if (rawV2 !== null) {
+    // Defensive: v2 never writes an `avoid` key, so its presence means
+    // legacy v1 data reached this key — migrate it rather than parsing it
+    // as v2 (which would silently drop the legacy list). The boundary
+    // parse below answers only whether the legacy key exists.
+    let legacyPresent = false;
+
+    try {
+      legacyPresent = z
+        .object({ avoid: z.array(z.unknown()) })
+        .safeParse(JSON.parse(rawV2)).success;
+    } catch {
+      return null;
+    }
+
+    if (legacyPresent) {
+      const migrated = migrateLegacyPrefs(
+        () => rawV2,
+        () => {},
+      );
+
+      if (migrated !== null) {
+        return migrated;
+      }
+    }
+
+    const current = readSavedPrefs(() => rawV2);
+
+    if (current !== null) {
+      return current;
+    }
+  }
+
+  return migrateLegacyPrefs(readV1, removeV1);
 };
 
 export const serializePrefs = (prefs: SavedRecommendPrefs): string => JSON.stringify(prefs);
@@ -580,33 +827,129 @@ export const removeSavedPrefs = (remove: () => void): void => {
 };
 
 /**
+ * Preference-lifecycle decisions as pure functions so guest → sign-in →
+ * edit → sign-out, account switching, save → Skip, and clear → reload are
+ * unit-testable without a DOM. The component owns the React Query cache and
+ * storage I/O; these functions own the branching.
+ */
+
+export interface PersistedExclusionsInput {
+  /** Authenticated member id, or null for guests. */
+  readonly userId: string | null;
+  /** True once the account prefs query has resolved (success or empty). */
+  readonly accountLoaded: boolean;
+  /** Loaded account exclusions (null when absent). */
+  readonly account: ReadonlyArray<string> | null;
+  /** Guest-storage mirror (in-memory copy of the v2 key). */
+  readonly guest: ReadonlyArray<string>;
+}
+
+/**
+ * Which persisted list a submit or Skip should use. Signed-in members with
+ * loaded account prefs use the account list; everyone else — including a
+ * member whose account prefs are still loading — uses the guest mirror,
+ * which is what the visible draft was initialized from.
+ */
+export const resolvePersistedExclusions = (input: PersistedExclusionsInput): Array<string> => {
+  if (input.userId !== null && input.accountLoaded) {
+    return [...(input.account ?? [])];
+  }
+
+  return [...input.guest];
+};
+
+export interface AccountPrefillInput {
+  readonly signedIn: boolean;
+  /** Member id the draft was already prefilled for (re-arm per account). */
+  readonly prefilledForUserId: string | null;
+  readonly userId: string | null;
+  readonly accountLoaded: boolean;
+  readonly excludedTouched: boolean;
+  readonly accountNonEmpty: boolean;
+}
+
+/**
+ * Whether the loaded account prefs may adopt the draft. Exactly one
+ * adoption per sign-in: newer user edits (touched draft) and repeat loads
+ * never overwrite. An empty account never wipes guest-restored text.
+ */
+export const needsAccountPrefill = (input: AccountPrefillInput): boolean =>
+  input.signedIn &&
+  input.prefilledForUserId !== input.userId &&
+  input.accountLoaded &&
+  !input.excludedTouched &&
+  input.accountNonEmpty;
+
+/** Order-insensitive comparison so a reorder never nags for an import. */
+export const sameExclusionSet = (
+  left: ReadonlyArray<string>,
+  right: ReadonlyArray<string>,
+): boolean => {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const sortedLeft = [...left].toSorted();
+  const sortedRight = [...right].toSorted();
+
+  return sortedLeft.every((term, index) => term === sortedRight[index]);
+};
+
+export interface ImportBannerInput {
+  readonly signedIn: boolean;
+  readonly accountLoaded: boolean;
+  readonly dismissed: boolean;
+  readonly guest: ReadonlyArray<string>;
+  readonly account: ReadonlyArray<string> | null;
+}
+
+/**
+ * Whether to offer the guest → account import. Never shows for guests or
+ * while account prefs are loading, and never nags after an explicit
+ * dismissal or when both sides already agree.
+ */
+export const shouldShowImportBanner = (input: ImportBannerInput): boolean =>
+  input.signedIn &&
+  input.accountLoaded &&
+  !input.dismissed &&
+  input.guest.length > 0 &&
+  !sameExclusionSet(input.guest, input.account ?? []);
+
+/**
  * Tab-scoped journey snapshot: preserves the in-progress quiz (meal, mood,
  * draft, step, submitted payload, results flag, surprise seed) across dish
- * detail visits within the same tab. In-memory only, never written to disk:
- * dietary text must not land in storage without the opt-in preference, and
- * closing or reloading the tab forgets the journey. A full reload falls back
- * to the opt-in local preferences (restrictions/region) with meal and mood
- * at their defaults.
+ * detail visits within the same tab. In-memory only, never written to disk.
+ * A full reload falls back to the persisted guest preferences (exclusions
+ * plus opt-in destination) with meal and mood at their defaults.
  */
 
 const journeySnapshotSchema = z.object({
   meal: z.enum(MEAL_OCCASIONS).default("anything"),
   mood: z.enum(RECOMMENDATION_MOODS).default("any"),
   draft: z.object({
-    avoidRaw: z.string().max(500).default(""),
-    allergiesRaw: z.string().max(500).default(""),
+    excludedRaw: z.string().max(2000).default(""),
     regionMode: z.enum(["anywhere", "country", "precise"]).default("anywhere"),
     country: z.string().max(12).default(""),
     countrySource: z.enum(["detected", "chosen"]).nullable().default(null),
+    cityId: z.string().max(24).nullable().default(null),
+    cityLabel: z.string().max(200).nullable().default(null),
+    cityCountry: z.string().max(12).nullable().default(null),
     remember: z.boolean().default(false),
   }),
   stepIndex: z.number().int().min(0).max(2).default(0),
   submitted: z
     .object({
       meal: z.enum(MEAL_OCCASIONS),
-      avoid: z.array(z.string().max(100)).max(20),
-      allergies: z.array(z.string().max(100)).max(20),
+      excludedIngredients: z.array(z.string().max(100)).max(20),
       country: recCountrySchema.optional(),
+      location: z
+        .object({
+          kind: z.literal("city"),
+          placeId: z.string().regex(/^[0-9]+$/),
+          country: recCountrySchema.optional(),
+          label: z.string().max(200).optional(),
+        })
+        .optional(),
       mood: z.enum(RECOMMENDATION_MOODS),
       locale: z.string().max(12),
       surpriseSeed: z.number().int().min(0).default(0),
@@ -642,16 +985,22 @@ export const writeJourneySnapshot = (snapshot: JourneySnapshot): void => {
 
   // Coarse context only: precise coordinates never enter the journey cache,
   // even though it is memory-only. Restoring a precise choice keeps the mode
-  // so the visitor can re-locate with one explicit tap.
+  // so the visitor can re-locate with one explicit tap. A chosen city keeps
+  // its canonical place id (coarse registry identity, safe to restore).
   journeyCache = {
     ...snapshot,
     draft: {
-      avoidRaw: snapshot.draft.avoidRaw,
-      allergiesRaw: snapshot.draft.allergiesRaw,
+      excludedRaw: snapshot.draft.excludedRaw,
       regionMode: snapshot.draft.regionMode,
       country: country ?? "",
       countrySource: snapshot.draft.countrySource,
       remember: snapshot.draft.remember,
+      cityId:
+        snapshot.draft.cityId !== null && isCityPlaceId(snapshot.draft.cityId)
+          ? snapshot.draft.cityId
+          : null,
+      cityLabel: snapshot.draft.cityLabel,
+      cityCountry: sanitizeCountryCode(snapshot.draft.cityCountry ?? "") ?? null,
     },
   };
 };
@@ -677,21 +1026,26 @@ export interface JourneyWriteModel {
  * visitor re-locates with one explicit tap); precise results are dropped
  * instead of re-running a stale fix on return, landing back on the quiz.
  * Submitted payloads keep the legacy country mirror for restore display and
- * re-runs, never the discriminated location.
+ * re-runs, plus the city location (canonical place id, coarse and safe to
+ * re-run) — never precise fixes.
  */
 export const toCoarseSnapshot = (model: JourneyWriteModel): JourneySnapshot => {
+  const draft = {
+    excludedRaw: model.draft.excludedRaw,
+    regionMode: model.draft.regionMode,
+    country: model.draft.country,
+    countrySource: model.draft.countrySource,
+    remember: model.draft.remember,
+    cityId: model.draft.cityId,
+    cityLabel: model.draft.cityLabel,
+    cityCountry: model.draft.cityCountry,
+  };
+
   if (model.submitted !== null && model.submitted.location?.kind === "precise") {
     return {
       meal: model.meal,
       mood: model.mood,
-      draft: {
-        avoidRaw: model.draft.avoidRaw,
-        allergiesRaw: model.draft.allergiesRaw,
-        regionMode: model.draft.regionMode,
-        country: model.draft.country,
-        countrySource: model.draft.countrySource,
-        remember: model.draft.remember,
-      },
+      draft,
       stepIndex: model.stepIndex,
       submitted: null,
       showResults: false,
@@ -699,87 +1053,166 @@ export const toCoarseSnapshot = (model: JourneyWriteModel): JourneySnapshot => {
     };
   }
 
+  const submittedLocation =
+    model.submitted?.location?.kind === "city" ? model.submitted.location : undefined;
+
+  if (model.submitted === null) {
+    return {
+      meal: model.meal,
+      mood: model.mood,
+      draft,
+      stepIndex: model.stepIndex,
+      submitted: null,
+      showResults: model.showResults,
+      surpriseSeed: model.surpriseSeed,
+    };
+  }
+
+  const submittedBase = {
+    meal: model.submitted.meal,
+    excludedIngredients: model.submitted.excludedIngredients,
+    country: model.submitted.country,
+    mood: model.submitted.mood,
+    locale: model.submitted.locale,
+    surpriseSeed: model.submitted.surpriseSeed,
+  };
+
   return {
     meal: model.meal,
     mood: model.mood,
-    draft: {
-      avoidRaw: model.draft.avoidRaw,
-      allergiesRaw: model.draft.allergiesRaw,
-      regionMode: model.draft.regionMode,
-      country: model.draft.country,
-      countrySource: model.draft.countrySource,
-      remember: model.draft.remember,
-    },
+    draft,
     stepIndex: model.stepIndex,
-    // Field-by-field: the snapshot never carries the discriminated location,
-    // only the legacy country mirror for coarse restore display and re-runs.
+    // Field-by-field: the snapshot never carries precise fixes, only the
+    // legacy country mirror plus the coarse city location for restore
+    // display and re-runs. The location key is absent unless a city was
+    // submitted, so country/worldwide restores keep their legacy shape.
     submitted:
-      model.submitted === null
-        ? null
-        : {
-            meal: model.submitted.meal,
-            avoid: model.submitted.avoid,
-            allergies: model.submitted.allergies,
-            country: model.submitted.country,
-            mood: model.submitted.mood,
-            locale: model.submitted.locale,
-            surpriseSeed: model.submitted.surpriseSeed,
-          },
+      submittedLocation === undefined
+        ? submittedBase
+        : { ...submittedBase, location: submittedLocation },
     showResults: model.showResults,
     surpriseSeed: model.surpriseSeed,
   };
 };
 
 /**
- * Pure draft initializer from parsed prefs: only dislikes and the
- * destination restore, and only with prior consent. Allergies never restore
- * from storage. Meal and mood are per-visit and always start at defaults.
+ * Pure draft initializer from parsed prefs: unified exclusions always
+ * restore (they persist unconditionally); the destination restores only
+ * with prior opt-in consent. Meal and mood are per-visit and always start
+ * at defaults. A saved canonical city restores with its label and hint,
+ * taking precedence over a saved country.
  */
 export const draftFromSavedPrefs = (saved: SavedRecommendPrefs | null): QuizDraft => {
   if (saved === null) {
     return EMPTY_DRAFT;
   }
 
+  const excludedRaw = saved.excludedIngredients.join(", ");
+
+  if (saved.remember && saved.city !== undefined) {
+    return {
+      excludedRaw,
+      regionMode: "country",
+      country: "",
+      countrySource: "chosen",
+      cityId: saved.city.placeId,
+      cityLabel: saved.city.label ?? null,
+      cityCountry: saved.city.country ?? null,
+      precise: null,
+      remember: true,
+    };
+  }
+
   return {
-    avoidRaw: saved.avoid.join(", "),
-    allergiesRaw: "",
-    regionMode: saved.country === undefined ? "anywhere" : "country",
-    country: saved.country ?? "",
-    countrySource: saved.country === undefined ? null : "chosen",
+    excludedRaw,
+    regionMode: saved.remember && saved.country !== undefined ? "country" : "anywhere",
+    country: saved.remember ? (saved.country ?? "") : "",
+    countrySource: saved.remember && saved.country !== undefined ? "chosen" : null,
+    cityId: null,
+    cityLabel: null,
+    cityCountry: null,
     precise: null,
-    remember: true,
+    remember: saved.remember,
   };
 };
 
-/** Lazy useState initializer: window-backed, consent-gated, corruption-proof. */
+/** Window-backed stored-prefs read with one-time legacy v1 migration. */
+export const readStoredPrefs = (): SavedRecommendPrefs | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return readSavedPrefsWithMigration(
+    () => window.localStorage.getItem(PREFS_KEY),
+    () => window.localStorage.getItem(LEGACY_PREFS_KEY),
+    () => window.localStorage.removeItem(LEGACY_PREFS_KEY),
+  );
+};
+
+/** Lazy useState initializer: window-backed, corruption-proof. */
 export const readInitialDraft = (): QuizDraft => {
   if (typeof window === "undefined") {
     return EMPTY_DRAFT;
   }
 
-  return draftFromSavedPrefs(readSavedPrefs(() => window.localStorage.getItem(PREFS_KEY)));
+  return draftFromSavedPrefs(readStoredPrefs());
 };
 
-export const persistPrefs = (
-  remember: boolean,
-  avoid: ReadonlyArray<string>,
-  country: string | undefined,
-): void => {
+/**
+ * Persist guest preferences. Unified exclusions always persist (no opt-in,
+ * no per-keystroke writes — call this on submit). The `rememberDestination`
+ * flag governs only the destination (country/city); when false, any stored
+ * destination is dropped but exclusions are kept. An empty exclusion list
+ * with no remembered destination removes the key entirely.
+ */
+export const persistPrefs = (input: {
+  readonly rememberDestination: boolean;
+  readonly excludedIngredients: ReadonlyArray<string>;
+  readonly country?: string | undefined;
+  readonly city?:
+    | {
+        readonly placeId: string;
+        readonly label: string | null;
+        readonly country: string | null;
+      }
+    | undefined;
+}): void => {
   if (typeof window === "undefined") {
     return;
   }
 
-  if (!remember) {
+  const prefs: SavedRecommendPrefs = {
+    remember: input.rememberDestination,
+    excludedIngredients: [...input.excludedIngredients],
+  };
+
+  if (input.rememberDestination) {
+    if (input.country !== undefined) {
+      prefs.country = input.country;
+    }
+
+    const city = input.city;
+
+    if (city !== undefined) {
+      if (city.label === null) {
+        if (city.country === null) {
+          prefs.city = { placeId: city.placeId };
+        } else {
+          prefs.city = { placeId: city.placeId, country: city.country };
+        }
+      } else if (city.country === null) {
+        prefs.city = { placeId: city.placeId, label: city.label };
+      } else {
+        prefs.city = { placeId: city.placeId, label: city.label, country: city.country };
+      }
+    }
+  }
+
+  if (prefs.excludedIngredients.length === 0 && !prefs.remember) {
     window.localStorage.removeItem(PREFS_KEY);
 
     return;
   }
-
-  const prefs: SavedRecommendPrefs = {
-    remember: true,
-    avoid: [...avoid],
-    country,
-  };
 
   window.localStorage.setItem(PREFS_KEY, serializePrefs(prefs));
 };

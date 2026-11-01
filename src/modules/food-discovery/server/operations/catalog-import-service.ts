@@ -11,15 +11,26 @@ import {
   InvalidDishData,
   InvalidRelationship,
 } from "@/modules/food-discovery/server/domain/errors";
-import { encodeDbId, isDbIdString, slugifyName } from "@/modules/food-discovery/server/domain/ids";
 import {
+  encodeDbId,
+  isDbIdString,
+  Slug,
+  slugifyName,
+} from "@/modules/food-discovery/server/domain/ids";
+import {
+  AuthoringDescription,
   AuthoringDish,
-  ImportPayload,
+  AuthoringIngredient,
+  AuthoringName,
   StoredImportRecord,
 } from "@/modules/food-discovery/server/domain/schemas";
 import {
+  asLocalizedName,
   isSearchableQuery,
   normalizeSearchKey,
+  pickDisplayName,
+  toContainsKey,
+  toPrefixKey,
 } from "@/modules/food-discovery/server/domain/search";
 import { CurationRepository } from "@/modules/food-discovery/server/repository/curation-repository";
 import { DishRelationsRepository } from "@/modules/food-discovery/server/repository/dish-relations-repository";
@@ -230,6 +241,190 @@ const storedDuplicateOf = (payloadText: string | null): string | null => {
   return null;
 };
 
+/**
+ * Multi-place place-entry grammar for catalog imports (CSV cells and JSON
+ * place arrays share it at the service boundary).
+ *
+ * Entry = target [":" association]; target = <ISO3166> | "place:"<id> |
+ * <city>"@"<parent ISO> | <bare city>; association ∈ origin | associated |
+ * popular, case-insensitive, omitted → `associated` (never `origin`).
+ *
+ * CSV cells split entries on `;` (documented shape, backward compatible)
+ * and `,` (coordinator contract); JSON keeps `{iso}` / `{place_id}` and
+ * adds `{city, parent_iso}` object forms plus raw grammar strings.
+ * Resolution mirrors the place workstream: preferred names then aliases,
+ * scoped by the parent; ambiguous or missing names become validation
+ * issues — never silent country fallbacks, never auto-created places,
+ * never inferred origin.
+ */
+const IMPORT_PLACE_ASSOCIATIONS: ReadonlySet<string> = new Set(["origin", "associated", "popular"]);
+
+const IMPORT_PLACE_ID_PREFIX = "place:";
+
+const IMPORT_ISO_PATTERN = /^[A-Za-z]{2}(-[A-Za-z0-9]{1,3})?$/;
+
+type ParsedPlaceTarget =
+  | { readonly kind: "iso"; readonly iso: string; readonly association: string }
+  | { readonly kind: "id"; readonly placeId: string; readonly association: string }
+  | {
+      readonly kind: "city";
+      readonly city: string;
+      readonly parentIso: string | null;
+      readonly association: string;
+    };
+
+type ParsedPlaceEntry =
+  | { readonly ok: true; readonly target: ParsedPlaceTarget }
+  | { readonly ok: false; readonly error: string };
+
+const parsePlaceIdTarget = (entry: string): ParsedPlaceEntry => {
+  const withoutPrefix = entry.trim().slice(IMPORT_PLACE_ID_PREFIX.length);
+  const segments = withoutPrefix.split(":");
+
+  if (segments.length > 2) {
+    return { ok: false, error: `invalid place entry "${entry}"` };
+  }
+
+  const rawId = (segments[0] ?? "").trim();
+
+  if (!/^[0-9]+$/.test(rawId)) {
+    return { ok: false, error: `invalid place id "${rawId}" in "${entry}"` };
+  }
+
+  if (segments.length === 1) {
+    return { ok: true, target: { kind: "id", placeId: rawId, association: "associated" } };
+  }
+
+  const rawAssociation = (segments[1] ?? "").trim();
+  const association = rawAssociation.toLowerCase();
+
+  if (!IMPORT_PLACE_ASSOCIATIONS.has(association)) {
+    return { ok: false, error: `unsupported place association "${rawAssociation}" in "${entry}"` };
+  }
+
+  return { ok: true, target: { kind: "id", placeId: rawId, association } };
+};
+
+/**
+ * Pure parse of one `places` cell entry. Never throws: every malformed
+ * entry becomes a validation issue naming the offending text, so curators
+ * fix the cell instead of shipping a dangling link.
+ */
+const parseImportPlaceText = (entry: string): ParsedPlaceEntry => {
+  const trimmed = entry.trim();
+
+  if (trimmed.length === 0) {
+    return { ok: false, error: `invalid place entry "${entry}"` };
+  }
+
+  if (trimmed.toLowerCase().startsWith(IMPORT_PLACE_ID_PREFIX)) {
+    return parsePlaceIdTarget(trimmed);
+  }
+
+  const separator = trimmed.indexOf(":");
+  const head = (separator === -1 ? trimmed : trimmed.slice(0, separator)).trim();
+  const rawAssociation = separator === -1 ? null : trimmed.slice(separator + 1).trim();
+  const association = rawAssociation === null ? "associated" : rawAssociation.toLowerCase();
+
+  if (rawAssociation !== null && !IMPORT_PLACE_ASSOCIATIONS.has(association)) {
+    return {
+      ok: false,
+      error: `unsupported place association "${rawAssociation}" in "${entry}"`,
+    };
+  }
+
+  if (head.length === 0) {
+    return { ok: false, error: `invalid place entry "${entry}"` };
+  }
+
+  if (IMPORT_ISO_PATTERN.test(head)) {
+    return { ok: true, target: { kind: "iso", iso: head, association } };
+  }
+
+  const atSign = head.lastIndexOf("@");
+
+  if (atSign !== -1) {
+    const city = head.slice(0, atSign).trim();
+    const parentIso = head.slice(atSign + 1).trim();
+
+    if (city.length === 0 || parentIso.length === 0) {
+      return { ok: false, error: `invalid place entry "${entry}"` };
+    }
+
+    return { ok: true, target: { kind: "city", city, parentIso, association } };
+  }
+
+  return { ok: true, target: { kind: "city", city: head, parentIso: null, association } };
+};
+
+/**
+ * Extended dish shape for import normalization: every `AuthoringDish`
+ * field reuses its canonical schema, but `places` entries also accept the
+ * CSV grammar as raw strings and the `{city, parent_iso}` object form.
+ * Canonical payloads decode identically here and downstream; extended
+ * forms are resolved to canonical links by `normalizeExtendedRecord`
+ * before the strict `AuthoringDish` decode.
+ */
+const ExtendedAuthoringPlace = Schema.Struct({
+  iso: Schema.optional(Schema.String),
+  place_id: Schema.optional(Schema.String),
+  city: Schema.optional(Schema.String),
+  parent_iso: Schema.optional(Schema.String),
+  association: Schema.optional(Schema.String),
+  note: Schema.optional(Schema.Unknown),
+});
+
+type ExtendedAuthoringPlace = typeof ExtendedAuthoringPlace.Type;
+
+const ExtendedAuthoringDish = Schema.Struct({
+  slug: Schema.optional(Slug),
+  status: Schema.optional(Schema.Literals(["draft", "review"])),
+  parent_slug: Schema.optional(Slug),
+  names: Schema.NonEmptyArray(AuthoringName),
+  descriptions: Schema.optional(Schema.Array(AuthoringDescription)),
+  ingredients: Schema.optional(Schema.Array(AuthoringIngredient)),
+  places: Schema.optional(Schema.Array(Schema.Union([Schema.String, ExtendedAuthoringPlace]))),
+  cuisines: Schema.optional(Schema.Array(Schema.String)),
+  categories: Schema.optional(Schema.Array(Schema.String)),
+  editorial_note: Schema.optional(
+    Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isMaxLength(2000))),
+  ),
+});
+
+type ExtendedAuthoringDish = typeof ExtendedAuthoringDish.Type;
+
+/**
+ * Single-shot duplicate-slug preflight shared by the strict and extended
+ * decode paths. Pure over the slug list: a repeated slug fails the whole
+ * job before any row is staged, so no job exists for a duplicated dataset.
+ */
+const checkDuplicateSlugs = (
+  slugs: ReadonlyArray<string | null>,
+): Effect.Effect<void, InvalidDishData> => {
+  const seenSlugs = new Map<string, string>();
+
+  for (const [index, slug] of slugs.entries()) {
+    if (slug === null) {
+      continue;
+    }
+
+    const externalRef = slug;
+    const first = seenSlugs.get(slug);
+
+    if (first !== undefined) {
+      return Effect.fail(
+        new InvalidDishData({
+          reason: `duplicate slug "${slug}" in records "${first}" and "${externalRef}" (record ${index + 1})`,
+        }),
+      );
+    }
+
+    seenSlugs.set(slug, externalRef);
+  }
+
+  return Effect.void;
+};
+
 export class CatalogImportService extends Context.Service<
   CatalogImportService,
   {
@@ -318,6 +513,442 @@ export const CatalogImportServiceLive = Layer.effect(
         return { resolved, errors };
       });
 
+    /**
+     * Geographic context for one place ("Bengaluru (Karnataka, IN)"):
+     * preferred English display name plus the province/state and country
+     * from the canonical ancestor chain — never parsed from display text.
+     * Used in ambiguous/missing validation issues so curators can tell
+     * same-named places apart.
+     */
+    const placeContextLabel = (placeId: bigint): Effect.Effect<string, DatabaseError, Database> =>
+      Effect.gen(function* () {
+        const place = yield* placeRepository.findById(placeId);
+
+        if (place === null) {
+          return `place:${placeId.toString()}`;
+        }
+
+        const chain = yield* placeRepository.ancestors(placeId);
+
+        const ancestorIds = chain.filter((entry) => entry.id !== placeId).map((entry) => entry.id);
+
+        const relatedIds = ancestorIds.length === 0 ? [placeId] : [placeId, ...ancestorIds];
+        const names = yield* placeRepository.namesByPlaceIds(relatedIds);
+        const byPlace = new Map<string, Array<(typeof names)[number]>>();
+
+        for (const entry of names) {
+          const keyId = entry.place_id.toString();
+          const existing = byPlace.get(keyId);
+
+          if (existing === undefined) {
+            byPlace.set(keyId, [entry]);
+          } else {
+            existing.push(entry);
+          }
+        }
+
+        const displayOf = (id: bigint): string | null => {
+          const labels = (byPlace.get(id.toString()) ?? []).map(asLocalizedName);
+          const picked = pickDisplayName(labels, "en");
+
+          return picked === undefined ? null : picked.name;
+        };
+
+        const display = displayOf(placeId) ?? place.iso3166 ?? `place:${placeId.toString()}`;
+        const contextParts: Array<string> = [];
+
+        for (const entry of chain) {
+          if (entry.id === placeId) {
+            continue;
+          }
+
+          if (
+            entry.kind !== "province" &&
+            entry.kind !== "subnational" &&
+            entry.kind !== "country"
+          ) {
+            continue;
+          }
+
+          const label = displayOf(entry.id);
+
+          if (label !== null && label !== display && !contextParts.includes(label)) {
+            contextParts.push(label);
+          }
+        }
+
+        if (contextParts.length === 0 && place.iso3166 !== null && display !== place.iso3166) {
+          contextParts.push(place.iso3166);
+        }
+
+        if (contextParts.length === 0) {
+          return display;
+        }
+
+        return `${display} (${contextParts.join(", ")})`;
+      });
+
+    /**
+     * Resolves a city/province name against the place registry. Preferred
+     * names win over aliases; a parent ISO scopes the search to that
+     * parent's subtree. Ambiguous bare names and unknown names (or unknown
+     * parents) become actionable validation issues naming the Place Manager
+     * — never a silent country fallback, never an auto-created place, and
+     * never an inferred origin (the caller defaults omitted associations).
+     */
+    const resolveCityTarget = (
+      city: string,
+      parentIso: string | null,
+      label: string,
+    ): Effect.Effect<
+      { readonly placeId: bigint | null; readonly error: string | null },
+      DatabaseError,
+      Database
+    > =>
+      Effect.gen(function* () {
+        const key = normalizeSearchKey(city);
+
+        if (key.length === 0) {
+          return { placeId: null, error: `place "${label}" has no searchable text` };
+        }
+
+        let parentId: bigint | null = null;
+
+        if (parentIso !== null) {
+          const parent = yield* placeRepository.findByIso(parentIso);
+
+          if (parent === null) {
+            return {
+              placeId: null,
+              error:
+                `unknown parent place iso "${parentIso}" for city "${city}". ` +
+                `Register it in the Place Manager, then re-validate the import.`,
+            };
+          }
+
+          parentId = parent.id;
+        }
+
+        const hits = yield* placeRepository.searchIds({
+          q: key,
+          prefix: toPrefixKey(key),
+          contains: toContainsKey(key),
+          limit: 10,
+        });
+
+        if (hits.length === 0) {
+          return {
+            placeId: null,
+            error:
+              `unknown place "${label}". ` +
+              `Register it in the Place Manager, then re-validate the import.`,
+          };
+        }
+
+        const tierById = new Map<string, number>();
+
+        for (const hit of hits) {
+          tierById.set(hit.id.toString(), hit.tier);
+        }
+
+        const names = yield* placeRepository.namesByPlaceIds(hits.map((hit) => hit.id));
+        const namesById = new Map<string, Array<(typeof names)[number]>>();
+
+        for (const entry of names) {
+          const keyId = entry.place_id.toString();
+          const existing = namesById.get(keyId);
+
+          if (existing === undefined) {
+            namesById.set(keyId, [entry]);
+          } else {
+            existing.push(entry);
+          }
+        }
+
+        const matchesKey = (name: string): boolean => normalizeSearchKey(name) === key;
+
+        const ranked = hits.toSorted((left, right) => {
+          const leftNames = namesById.get(left.id.toString()) ?? [];
+          const rightNames = namesById.get(right.id.toString()) ?? [];
+
+          const leftPreferred = leftNames.some(
+            (entry) => entry.is_preferred && matchesKey(entry.name),
+          );
+
+          const rightPreferred = rightNames.some(
+            (entry) => entry.is_preferred && matchesKey(entry.name),
+          );
+
+          if (leftPreferred !== rightPreferred) {
+            return leftPreferred ? -1 : 1;
+          }
+
+          const leftExact = leftNames.some((entry) => matchesKey(entry.name));
+          const rightExact = rightNames.some((entry) => matchesKey(entry.name));
+
+          if (leftExact !== rightExact) {
+            return leftExact ? -1 : 1;
+          }
+
+          const tierOrder =
+            (tierById.get(left.id.toString()) ?? 2) - (tierById.get(right.id.toString()) ?? 2);
+
+          if (tierOrder !== 0) {
+            return tierOrder;
+          }
+
+          if (left.id < right.id) {
+            return -1;
+          }
+
+          if (left.id > right.id) {
+            return 1;
+          }
+
+          return 0;
+        });
+
+        let scoped = ranked;
+
+        if (parentId !== null) {
+          const kept: Array<(typeof ranked)[number]> = [];
+
+          for (const hit of ranked) {
+            const chain = yield* placeRepository.ancestors(hit.id);
+
+            if (chain.some((entry) => entry.id === parentId)) {
+              kept.push(hit);
+            }
+          }
+
+          if (kept.length === 0) {
+            const contexts: Array<string> = [];
+
+            for (const hit of ranked.slice(0, 3)) {
+              contexts.push(`"${yield* placeContextLabel(hit.id)}" [place:${hit.id.toString()}]`);
+            }
+
+            return {
+              placeId: null,
+              error:
+                `no place named "${city}" found under "${parentIso}". ` +
+                `Closest matches live elsewhere: ${contexts.join(", ")}. ` +
+                `Use "City@OtherParent" or "place:<id>", or register the city in the Place Manager.`,
+            };
+          }
+
+          scoped = kept;
+        }
+
+        if (scoped.length === 1 && scoped[0] !== undefined) {
+          return { placeId: scoped[0].id, error: null };
+        }
+
+        const listed: Array<string> = [];
+
+        for (const hit of scoped.slice(0, 5)) {
+          listed.push(`"${yield* placeContextLabel(hit.id)}" [place:${hit.id.toString()}]`);
+        }
+
+        return {
+          placeId: null,
+          error:
+            `ambiguous city "${label}": ${scoped.length.toString()} places match — ` +
+            `${listed.join(", ")}. ` +
+            `Refine the entry with "City@ParentIso" or "place:<id>".`,
+        };
+      });
+
+    interface NormalizedPlaceOutcome {
+      readonly values: ReadonlyArray<unknown>;
+      readonly errors: ReadonlyArray<string>;
+    }
+
+    /**
+     * One CSV-grammar place string (`"Hanoi@VN:popular"`, `"place:45"`,
+     * `"VN:origin"`) to canonical links. Strings may still carry `;` (the
+     * documented cell separator) or the contract's `,` separator, so split
+     * on both: neither character is legal inside a single valid entry.
+     */
+    const normalizePlaceText = (
+      text: string,
+      label: string,
+    ): Effect.Effect<NormalizedPlaceOutcome, DatabaseError, Database> =>
+      Effect.gen(function* () {
+        const values: Array<unknown> = [];
+        const errors: Array<string> = [];
+
+        for (const part of text.split(/[;,]/)) {
+          const trimmed = part.trim();
+
+          if (trimmed.length === 0) {
+            continue;
+          }
+
+          const parsed = parseImportPlaceText(trimmed);
+
+          if (!parsed.ok) {
+            errors.push(`${label}: ${parsed.error}`);
+
+            continue;
+          }
+
+          const target = parsed.target;
+
+          if (target.kind === "iso") {
+            values.push({ iso: target.iso, association: target.association });
+
+            continue;
+          }
+
+          if (target.kind === "id") {
+            values.push({ place_id: target.placeId, association: target.association });
+
+            continue;
+          }
+
+          const display =
+            target.parentIso === null ? target.city : `${target.city}@${target.parentIso}`;
+
+          const resolved = yield* resolveCityTarget(target.city, target.parentIso, display);
+
+          if (resolved.error !== null || resolved.placeId === null) {
+            errors.push(`${label}: ${resolved.error ?? `unknown place "${display}"`}`);
+
+            continue;
+          }
+
+          values.push({ place_id: resolved.placeId.toString(), association: target.association });
+        }
+
+        return { values, errors };
+      });
+
+    /**
+     * One decoded `{city, parent_iso}` object to a canonical link.
+     * Canonical `{iso}`/`{place_id}` objects pass through untouched so the
+     * strict `AuthoringDish` decode validates them exactly as before.
+     */
+    const normalizePlaceObject = (
+      place: ExtendedAuthoringPlace,
+      label: string,
+    ): Effect.Effect<NormalizedPlaceOutcome, DatabaseError, Database> =>
+      Effect.gen(function* () {
+        if (place.city === undefined) {
+          if (place.parent_iso !== undefined) {
+            return {
+              values: [],
+              errors: [`${label}: place entry has "parent_iso" without "city"`],
+            };
+          }
+
+          return { values: [place], errors: [] };
+        }
+
+        const city = place.city.trim();
+
+        if (city.length === 0) {
+          return { values: [], errors: [`${label}: place entry has an invalid "city"`] };
+        }
+
+        if (place.parent_iso !== undefined && place.parent_iso.trim().length === 0) {
+          return { values: [], errors: [`${label}: place entry has an invalid "parent_iso"`] };
+        }
+
+        const parentIso = place.parent_iso === undefined ? null : place.parent_iso.trim();
+        const rawAssociation = place.association === undefined ? "associated" : place.association;
+
+        if (!IMPORT_PLACE_ASSOCIATIONS.has(rawAssociation.trim().toLowerCase())) {
+          return {
+            values: [],
+            errors: [`${label}: unsupported place association "${rawAssociation}"`],
+          };
+        }
+
+        const association = rawAssociation.trim().toLowerCase();
+        const display = parentIso === null ? city : `${city}@${parentIso}`;
+        const resolved = yield* resolveCityTarget(city, parentIso, display);
+
+        if (resolved.error !== null || resolved.placeId === null) {
+          return {
+            values: [],
+            errors: [`${label}: ${resolved.error ?? `unknown place "${display}"`}`],
+          };
+        }
+
+        if (place.note === undefined) {
+          return {
+            values: [{ place_id: resolved.placeId.toString(), association }],
+            errors: [],
+          };
+        }
+
+        return {
+          values: [{ place_id: resolved.placeId.toString(), association, note: place.note }],
+          errors: [],
+        };
+      });
+
+    /**
+     * Pre-decode normalization for an extended import record's `places`
+     * array: grammar strings and `{city, parent_iso}` objects become
+     * canonical `{iso | place_id, association}` links; unresolvable entries
+     * are dropped with an actionable error that marks the row invalid.
+     * Entries no schema recognizes pass through so the strict
+     * `AuthoringDish` decode reports them exactly as before.
+     */
+    const normalizeExtendedRecord = (
+      record: ExtendedAuthoringDish,
+      recordRef: string,
+    ): Effect.Effect<
+      { readonly record: unknown; readonly placeErrors: Array<string> },
+      DatabaseError,
+      Database
+    > =>
+      Effect.gen(function* () {
+        if (record.places === undefined) {
+          return { record, placeErrors: [] };
+        }
+
+        const canonical: Array<unknown> = [];
+        const placeErrors: Array<string> = [];
+
+        for (const [position, entry] of record.places.entries()) {
+          const label = `${recordRef}: places[${position.toString()}]`;
+          const asText = Schema.decodeUnknownOption(Schema.String)(entry);
+
+          if (Option.isSome(asText)) {
+            const normalized = yield* normalizePlaceText(asText.value, label);
+
+            canonical.push(...normalized.values);
+            placeErrors.push(...normalized.errors);
+
+            continue;
+          }
+
+          const asObject = Schema.decodeUnknownOption(ExtendedAuthoringPlace)(entry);
+
+          if (Option.isNone(asObject)) {
+            canonical.push(entry);
+
+            continue;
+          }
+
+          const normalized = yield* normalizePlaceObject(asObject.value, label);
+
+          canonical.push(...normalized.values);
+          placeErrors.push(...normalized.errors);
+        }
+
+        return { record: { ...record, places: canonical }, placeErrors };
+      });
+
+    /**
+     * Validates canonical `{iso | place_id, association}` place links.
+     * City/province grammar strings and `{city, parent_iso}` forms are
+     * normalized to this shape by `normalizeExtendedRecord` before decode,
+     * so only registry-linked canonical entries ever arrive here.
+     */
     const resolvePlaces = (record: AuthoringDish) =>
       Effect.gen(function* () {
         const resolved: Array<{ readonly id: bigint; readonly association: string }> = [];
@@ -413,6 +1044,7 @@ export const CatalogImportServiceLive = Layer.effect(
     const validateRecord = (
       record: AuthoringDish,
       index: number,
+      priorErrors: ReadonlyArray<string> = [],
     ): Effect.Effect<
       {
         readonly externalRef: string;
@@ -424,7 +1056,9 @@ export const CatalogImportServiceLive = Layer.effect(
       Database
     > =>
       Effect.gen(function* () {
-        const errors: Array<string> = [];
+        // City/province normalization findings (unknown or ambiguous
+        // names) arrive here so the row reports them and stays invalid.
+        const errors: Array<string> = [...priorErrors];
         const externalRef = record.slug ?? `record-${index + 1}`;
 
         if (record.slug !== undefined) {
@@ -479,6 +1113,124 @@ export const CatalogImportServiceLive = Layer.effect(
         return { externalRef, errors, slug: record.slug ?? null, duplicateOf };
       });
 
+    /**
+     * Lenient single-shot envelope: records stay `unknown` so one extended
+     * place form (a `{city, parent_iso}` object or a grammar string) does
+     * not fail the whole job. Each record is normalized (city names resolved
+     * against the registry) and decoded individually; shape failures become
+     * per-record invalid rows, exactly like the batched stage path.
+     */
+    const LenientImportPayload = Schema.Struct({
+      source_name: Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
+      records: Schema.Array(Schema.Unknown),
+    });
+
+    interface PreparedImportRecord {
+      /** Envelope content staged for apply; always canonical `AuthoringDish` when decoded. */
+      readonly raw: unknown;
+      readonly decoded: AuthoringDish | null;
+      readonly priorErrors: ReadonlyArray<string>;
+    }
+
+    const stageValidatedRecords = (
+      trimmedSource: string,
+      input: ImportValidateInput,
+      prepared: ReadonlyArray<PreparedImportRecord>,
+    ): Effect.Effect<ImportValidationReport, CatalogImportError, Database> =>
+      withTransaction(
+        "import/validate",
+        Effect.gen(function* () {
+          const job = yield* curation.insertImportJob({
+            sourceName: trimmedSource,
+            format: input.format ?? "json",
+            status: "staged",
+            totalRecords: prepared.length,
+            validRecords: 0,
+            invalidRecords: 0,
+            dryRun: true,
+            sourceUrl: input.sourceUrl ?? null,
+            sourceVersion: input.sourceVersion ?? null,
+            license: input.license ?? null,
+            attribution: input.attribution ?? null,
+            editorialNotes: input.editorialNotes ?? null,
+          });
+
+          const items: Array<ImportValidationItem> = [];
+          let valid = 0;
+
+          for (const [index, entry] of prepared.entries()) {
+            if (entry.decoded === null) {
+              const externalRef = `record-${index + 1}`;
+              const errors = ["record is not a valid dish entry"];
+
+              yield* curation.insertImportRecord({
+                jobId: job.id,
+                externalRef,
+                status: "invalid",
+                errors: JSON.stringify(errors),
+                dishId: null,
+                payload: { record: entry.raw, duplicateOf: null },
+              });
+
+              items.push({
+                externalRef,
+                status: "invalid",
+                errors,
+                duplicateOf: null,
+                slug: null,
+              });
+
+              continue;
+            }
+
+            const checked = yield* validateRecord(entry.decoded, index, entry.priorErrors);
+            const status = checked.errors.length === 0 ? "valid" : "invalid";
+
+            if (status === "valid") {
+              valid += 1;
+            }
+
+            yield* curation.insertImportRecord({
+              jobId: job.id,
+              externalRef: checked.externalRef,
+              status,
+              errors: checked.errors.length === 0 ? null : JSON.stringify(checked.errors),
+              dishId: null,
+              payload: { record: entry.decoded, duplicateOf: checked.duplicateOf },
+            });
+
+            items.push({
+              externalRef: checked.externalRef,
+              status,
+              errors: checked.errors,
+              duplicateOf: checked.duplicateOf,
+              slug: checked.slug,
+            });
+          }
+
+          const invalid = prepared.length - valid;
+
+          // Single-shot legacy path stages its full dataset atomically, so
+          // the stage cursor lands on totalRecords in the same transaction.
+          yield* curation.updateImportJobStage({
+            id: job.id,
+            stagedCount: prepared.length,
+            validRecords: valid,
+            invalidRecords: invalid,
+            status: valid > 0 ? "validated" : "failed",
+            completedAt: new Date().toISOString(),
+          });
+
+          return {
+            jobId: encodeDbId(job.id),
+            totalRecords: prepared.length,
+            validRecords: valid,
+            invalidRecords: invalid,
+            items,
+          };
+        }),
+      );
+
     const validateImport = (input: ImportValidateInput) =>
       Effect.gen(function* () {
         const trimmedSource = input.sourceName.trim().slice(0, 200);
@@ -487,102 +1239,61 @@ export const CatalogImportServiceLive = Layer.effect(
           return yield* new InvalidDishData({ reason: "source name is required" });
         }
 
-        const decoded = yield* Option.match(
-          Schema.decodeUnknownOption(ImportPayload)(input.payload),
+        // Records decode through the extended dish shape (a superset of the
+        // strict `AuthoringDish`: it also accepts grammar strings and
+        // `{city, parent_iso}` place forms). Strict `Schema.Struct` decoding
+        // strips unknown keys, so decoding strict-first would silently drop
+        // city names before normalization ever sees them.
+        const envelope = yield* Option.match(
+          Schema.decodeUnknownOption(LenientImportPayload)(input.payload),
           {
             onNone: () => Effect.fail(new InvalidDishData({ reason: "invalid import payload" })),
             onSome: (value) => Effect.succeed(value),
           },
         );
 
-        const seenSlugs = new Map<string, string>();
+        // Single-shot bound (the strict `ImportPayload` cap): larger datasets
+        // travel through the batched stage protocol instead.
+        if (envelope.records.length === 0 || envelope.records.length > MAX_IMPORT_RECORDS) {
+          return yield* new InvalidDishData({ reason: "invalid import payload" });
+        }
 
-        for (const [index, record] of decoded.records.entries()) {
-          if (record.slug === undefined || record.slug.length === 0) {
+        const extended = envelope.records.map((raw) =>
+          Schema.decodeUnknownOption(ExtendedAuthoringDish)(raw),
+        );
+
+        yield* checkDuplicateSlugs(
+          extended.map((entry) => (Option.isSome(entry) ? (entry.value.slug ?? null) : null)),
+        );
+
+        // Normalization reads the place registry (no writes), so it runs
+        // before the staging transaction; per-record issues ride along as
+        // prior errors and keep their rows invalid.
+        const prepared: Array<PreparedImportRecord> = [];
+
+        for (const [index, entry] of extended.entries()) {
+          if (Option.isNone(entry)) {
+            prepared.push({
+              raw: envelope.records[index],
+              decoded: null,
+              priorErrors: [],
+            });
+
             continue;
           }
 
-          const externalRef = record.slug;
-          const first = seenSlugs.get(record.slug);
+          const recordRef = entry.value.slug ?? `record-${index + 1}`;
+          const normalized = yield* normalizeExtendedRecord(entry.value, recordRef);
+          const authoring = Schema.decodeUnknownOption(AuthoringDish)(normalized.record);
 
-          if (first !== undefined) {
-            return yield* new InvalidDishData({
-              reason: `duplicate slug "${record.slug}" in records "${first}" and "${externalRef}" (record ${index + 1})`,
-            });
-          }
-
-          seenSlugs.set(record.slug, externalRef);
+          prepared.push({
+            raw: envelope.records[index],
+            decoded: Option.isSome(authoring) ? authoring.value : null,
+            priorErrors: normalized.placeErrors,
+          });
         }
 
-        return yield* withTransaction(
-          "import/validate",
-          Effect.gen(function* () {
-            const job = yield* curation.insertImportJob({
-              sourceName: trimmedSource,
-              format: input.format ?? "json",
-              status: "staged",
-              totalRecords: decoded.records.length,
-              validRecords: 0,
-              invalidRecords: 0,
-              dryRun: true,
-              sourceUrl: input.sourceUrl ?? null,
-              sourceVersion: input.sourceVersion ?? null,
-              license: input.license ?? null,
-              attribution: input.attribution ?? null,
-              editorialNotes: input.editorialNotes ?? null,
-            });
-
-            const items: Array<ImportValidationItem> = [];
-            let valid = 0;
-
-            for (const [index, record] of decoded.records.entries()) {
-              const checked = yield* validateRecord(record, index);
-              const status = checked.errors.length === 0 ? "valid" : "invalid";
-
-              if (status === "valid") {
-                valid += 1;
-              }
-
-              yield* curation.insertImportRecord({
-                jobId: job.id,
-                externalRef: checked.externalRef,
-                status,
-                errors: checked.errors.length === 0 ? null : JSON.stringify(checked.errors),
-                dishId: null,
-                payload: { record, duplicateOf: checked.duplicateOf },
-              });
-
-              items.push({
-                externalRef: checked.externalRef,
-                status,
-                errors: checked.errors,
-                duplicateOf: checked.duplicateOf,
-                slug: checked.slug,
-              });
-            }
-
-            const invalid = decoded.records.length - valid;
-
-            // Single-shot legacy path stages its full dataset atomically, so
-            // the stage cursor lands on totalRecords in the same transaction.
-            yield* curation.updateImportJobStage({
-              id: job.id,
-              stagedCount: decoded.records.length,
-              validRecords: valid,
-              invalidRecords: invalid,
-              status: valid > 0 ? "validated" : "failed",
-              completedAt: new Date().toISOString(),
-            });
-
-            return {
-              jobId: encodeDbId(job.id),
-              totalRecords: decoded.records.length,
-              validRecords: valid,
-              invalidRecords: invalid,
-              items,
-            };
-          }),
-        );
+        return yield* stageValidatedRecords(trimmedSource, input, prepared);
       });
 
     interface ApplyJobProvenance {
@@ -1024,35 +1735,50 @@ export const CatalogImportServiceLive = Layer.effect(
             for (const [offset, raw] of input.records.entries()) {
               const globalIndex = input.baseIndex + offset;
 
-              // Undecodable rows are staged invalid (never applied) with the
-              // raw envelope preserved for inspection — the batch continues.
-              const record = yield* Option.match(Schema.decodeUnknownOption(AuthoringDish)(raw), {
-                onNone: () =>
-                  Effect.gen(function* () {
-                    yield* curation.insertStagedImportRecord({
-                      jobId,
-                      externalRef: `record-${globalIndex + 1}`,
-                      status: "invalid",
-                      errors: JSON.stringify(["record is not a valid dish entry"]),
-                      dishId: null,
-                      payload: { record: raw, duplicateOf: null },
-                      recordIndex: globalIndex,
-                      recordSlug: null,
-                    });
-
-                    batchInvalid += 1;
-
-                    return null;
-                  }),
-                onSome: (value) => Effect.succeed(value),
+              const invalidRow = curation.insertStagedImportRecord({
+                jobId,
+                externalRef: `record-${globalIndex + 1}`,
+                status: "invalid",
+                errors: JSON.stringify(["record is not a valid dish entry"]),
+                dishId: null,
+                payload: { record: raw, duplicateOf: null },
+                recordIndex: globalIndex,
+                recordSlug: null,
               });
 
-              if (record === null) {
+              // Extended shape first: strict `AuthoringDish` decoding strips
+              // unknown keys, so city forms would lose their names before
+              // normalization ever sees them. Undecodable rows stage invalid
+              // (never applied) with the raw envelope preserved — the batch
+              // continues.
+              const extended = Schema.decodeUnknownOption(ExtendedAuthoringDish)(raw);
+
+              if (Option.isNone(extended)) {
+                yield* invalidRow;
+
+                batchInvalid += 1;
+
                 continue;
               }
 
+              // City/province place forms normalize to canonical registry
+              // links here; unresolvable names ride along as prior errors
+              // and keep the row invalid (never applied).
+              const recordRef = extended.value.slug ?? `record-${globalIndex + 1}`;
+              const normalized = yield* normalizeExtendedRecord(extended.value, recordRef);
+              const authoring = Schema.decodeUnknownOption(AuthoringDish)(normalized.record);
+
+              if (Option.isNone(authoring)) {
+                yield* invalidRow;
+
+                batchInvalid += 1;
+
+                continue;
+              }
+
+              const record = authoring.value;
               const externalRef = record.slug ?? `record-${globalIndex + 1}`;
-              const checked = yield* validateRecord(record, globalIndex);
+              const checked = yield* validateRecord(record, globalIndex, normalized.placeErrors);
               const errors = [...checked.errors];
               let duplicateSlug = false;
 

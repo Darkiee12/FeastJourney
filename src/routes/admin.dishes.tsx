@@ -112,7 +112,18 @@ function AdminDishes() {
 
   return (
     <div className="flex flex-col gap-4">
-      <AdminPageHeading title={copy.adminDishesHeading} />
+      <AdminPageHeading
+        title={copy.adminDishesHeading}
+        action={
+          <Link
+            to="/admin/places"
+            search={{ lang, query: "", kind: "", parentId: "", page: 1 }}
+            className="inline-flex min-h-11 items-center rounded-lg border border-border-soft bg-white px-4 py-2 text-sm font-semibold text-brand-blue underline hover:bg-cream"
+          >
+            {copy.adminPlaces}
+          </Link>
+        }
+      />
 
       <fieldset className="rounded-2xl border border-border-soft bg-white p-4">
         <legend className="px-1 text-sm font-bold">{copy.adminFilterByStatus}</legend>

@@ -80,6 +80,42 @@ describe("csvToRecords places grammar", () => {
       'row 3: unsupported place association "homeland"',
     );
   });
+
+  test("place:<id> entries resolve to canonical place ids for city-level links", () => {
+    expect(csvToRecords("name,places\nPho,place:264\n")).toEqual([
+      {
+        names: [{ language_tag: "en", name: "Pho", name_kind: "localized" }],
+        places: [{ place_id: "264", association: "associated" }],
+      },
+    ]);
+
+    expect(csvToRecords("name,places\nPho,place:264:origin\n")).toEqual([
+      {
+        names: [{ language_tag: "en", name: "Pho", name_kind: "localized" }],
+        places: [{ place_id: "264", association: "origin" }],
+      },
+    ]);
+
+    expect(csvToRecords("name,places\nPho,VN;place:264:popular\n")).toEqual([
+      {
+        names: [{ language_tag: "en", name: "Pho", name_kind: "localized" }],
+        places: [
+          { iso: "VN", association: "associated" },
+          { place_id: "264", association: "popular" },
+        ],
+      },
+    ]);
+  });
+
+  test("malformed place:<id> entries throw naming the 1-based data row", () => {
+    expect(() => csvToRecords("name,places\nPho,place:abc\n")).toThrow("row 2: invalid place id");
+
+    expect(() => csvToRecords("name,places\nPho,place:\n")).toThrow("row 2: invalid place id");
+
+    expect(() => csvToRecords("name,places\nPho,place:264:homeland\n")).toThrow(
+      'row 2: unsupported place association "homeland"',
+    );
+  });
 });
 
 describe("csvToRecords existing behaviors", () => {

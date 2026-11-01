@@ -9,6 +9,7 @@ import {
   moodSchema,
   parseCommaList,
   readSavedPrefs,
+  readSavedPrefsWithMigration,
   recCountrySchema,
   removeSavedPrefs,
   serializePrefs,
@@ -56,8 +57,8 @@ describe("recommend route client parsing", () => {
   test("overlong exclusion terms are rejected before the server call", () => {
     expect(tooLongTerms(["a".repeat(100)])).toBe(false);
     expect(tooLongTerms(["a".repeat(101)])).toBe(true);
-    expect(termLengthError("cilantro", "peanuts", copy)).toBeNull();
-    expect(termLengthError("a".repeat(101), "", copy)).toBe(copy.recTermTooLong);
+    expect(termLengthError("cilantro, peanuts", copy)).toBeNull();
+    expect(termLengthError("a".repeat(101), copy)).toBe(copy.recTermTooLong);
   });
 
   test("region validation requires a real choice per lane", () => {
@@ -70,8 +71,7 @@ describe("recommend route client parsing", () => {
   test("payload builder keeps undefined lanes undefined", () => {
     const payload = buildRecommendPayload({
       meal: "dinner",
-      avoid: ["cilantro"],
-      allergies: [],
+      excludedIngredients: ["cilantro"],
       country: "VN",
       mood: "comforting",
       locale: "en",
@@ -79,54 +79,83 @@ describe("recommend route client parsing", () => {
 
     expect(payload.meal).toBe("dinner");
     expect(payload.country).toBe("VN");
-    expect(payload.avoid).toEqual(["cilantro"]);
+    expect(payload.excludedIngredients).toEqual(["cilantro"]);
   });
 
-  test("stored prefs parse only with the consent flag and a known shape", () => {
+  test("stored prefs parse only a known shape", () => {
     expect(readSavedPrefs(() => null)).toBeNull();
     expect(readSavedPrefs(() => "not json")).toBeNull();
-    expect(readSavedPrefs(() => JSON.stringify({ remember: true, avoid: [1] }))).toBeNull();
-    expect(readSavedPrefs(() => JSON.stringify({ remember: false, avoid: [] }))).toBeNull();
+    expect(
+      readSavedPrefs(() => JSON.stringify({ remember: true, excludedIngredients: [1] })),
+    ).toBeNull();
 
     const saved = readSavedPrefs(() =>
-      serializePrefs({ remember: true, avoid: ["x"], country: "VN" }),
+      serializePrefs({ remember: true, excludedIngredients: ["x"], country: "VN" }),
     );
 
     expect(saved?.country).toBe("VN");
-    expect(saved?.avoid).toEqual(["x"]);
+    expect(saved?.excludedIngredients).toEqual(["x"]);
   });
 
-  test("saved prefs never persist allergies, even with consent", () => {
-    const saved = readSavedPrefs(() =>
-      JSON.stringify({ remember: true, avoid: ["mushrooms"], allergies: ["shrimp"] }),
+  test("legacy v1 prefs migrate forward once and the v1 key is removed", () => {
+    const store = new Map<string, string>([
+      ["v1", JSON.stringify({ remember: true, avoid: ["mushrooms"], country: "VN" })],
+    ]);
+
+    const migrated = readSavedPrefsWithMigration(
+      () => null,
+      () => store.get("v1") ?? null,
+      () => {
+        store.delete("v1");
+      },
     );
 
-    expect(saved?.avoid).toEqual(["mushrooms"]);
-    expect(draftFromSavedPrefs(saved).allergiesRaw).toBe("");
+    expect(migrated?.excludedIngredients).toEqual(["mushrooms"]);
+    expect(migrated?.remember).toBe(true);
+    expect(migrated?.country).toBe("VN");
+    expect(store.has("v1")).toBe(false);
+
+    // Legacy shape under the current key migrates too instead of dropping the list.
+    const migratedInline = readSavedPrefsWithMigration(
+      () => JSON.stringify({ remember: true, avoid: ["cilantro"] }),
+      () => null,
+      () => {},
+    );
+
+    expect(migratedInline?.excludedIngredients).toEqual(["cilantro"]);
   });
 
-  test("saved prefs restore into a draft without touching meal, mood, or allergies", () => {
+  test("saved prefs restore exclusions and destination without touching meal or mood", () => {
     expect(draftFromSavedPrefs(null)).toEqual(EMPTY_DRAFT);
 
     const draft = draftFromSavedPrefs({
       remember: true,
-      avoid: ["cilantro"],
+      excludedIngredients: ["cilantro"],
       country: "VN",
     });
 
-    expect(draft.avoidRaw).toBe("cilantro");
-    expect(draft.allergiesRaw).toBe("");
+    expect(draft.excludedRaw).toBe("cilantro");
     expect(draft.regionMode).toBe("country");
     expect(draft.country).toBe("VN");
     expect(draft.remember).toBe(true);
+  });
+
+  test("exclusions restore even without destination consent", () => {
+    const draft = draftFromSavedPrefs({
+      remember: false,
+      excludedIngredients: ["peanuts"],
+    });
+
+    expect(draft.excludedRaw).toBe("peanuts");
+    expect(draft.regionMode).toBe("anywhere");
+    expect(draft.remember).toBe(false);
   });
 
   test("surprise keeps the current meal, mood, region, and exclusions", () => {
     const payload = buildSurprisePayload({
       draft: {
         ...EMPTY_DRAFT,
-        avoidRaw: "cilantro",
-        allergiesRaw: "peanuts",
+        excludedRaw: "cilantro, peanuts",
         regionMode: "country",
         country: "vn",
       },
@@ -139,13 +168,12 @@ describe("recommend route client parsing", () => {
     expect(payload.meal).toBe("dinner");
     expect(payload.mood).toBe("comforting");
     expect(payload.country).toBe("VN");
-    expect(payload.avoid).toEqual(["cilantro"]);
-    expect(payload.allergies).toEqual(["peanuts"]);
+    expect(payload.excludedIngredients).toEqual(["cilantro", "peanuts"]);
   });
 
-  test("surprise carries saved dislikes and destination through the restored draft", () => {
+  test("surprise carries saved exclusions and destination through the restored draft", () => {
     const saved = readSavedPrefs(() =>
-      serializePrefs({ remember: true, avoid: ["mushrooms"], country: "JP" }),
+      serializePrefs({ remember: true, excludedIngredients: ["mushrooms"], country: "JP" }),
     );
 
     const payload = buildSurprisePayload({
@@ -156,8 +184,7 @@ describe("recommend route client parsing", () => {
       surpriseSeed: 0,
     });
 
-    expect(payload.avoid).toEqual(["mushrooms"]);
-    expect(payload.allergies).toEqual([]);
+    expect(payload.excludedIngredients).toEqual(["mushrooms"]);
     expect(payload.country).toBe("JP");
   });
 
@@ -170,15 +197,14 @@ describe("recommend route client parsing", () => {
       surpriseSeed: 2,
     });
 
-    expect(payload.avoid).toEqual([]);
-    expect(payload.allergies).toEqual([]);
+    expect(payload.excludedIngredients).toEqual([]);
     expect(payload.country).toBeUndefined();
   });
 
   test("surprise never mutates the draft it reads", () => {
     const draft = {
       ...EMPTY_DRAFT,
-      avoidRaw: "cilantro",
+      excludedRaw: "cilantro",
       regionMode: "country" as const,
       country: "vn",
     };

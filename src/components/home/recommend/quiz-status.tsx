@@ -1,5 +1,5 @@
 import { Match } from "effect";
-import { ShieldAlertIcon, SparklesIcon, TriangleAlertIcon } from "lucide-react";
+import { SparklesIcon, TriangleAlertIcon } from "lucide-react";
 
 import type { RankingProvenance } from "@/modules/food-discovery/server/operations/recommendation-service";
 import type { Messages } from "@/shared/i18n";
@@ -37,15 +37,6 @@ export function QuizError({
         {copy.recRetry}
       </button>
     </div>
-  );
-}
-
-export function AllergyNotice({ copy }: { readonly copy: Messages }) {
-  return (
-    <p className="flex items-start gap-2 rounded-2xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-ink">
-      <ShieldAlertIcon aria-hidden="true" className="mt-0.5 size-4 flex-none" />
-      {copy.recAllergyNotice}
-    </p>
   );
 }
 

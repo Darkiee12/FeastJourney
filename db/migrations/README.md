@@ -64,43 +64,56 @@ Versioned, immutable schema history for the `feastjourney` app schema:
 - `V20261031_001__country_short_names_preferred.sql` — prefer short
   English country names in choosers and cards where a formal/short pair
   exists (e.g. "United States", not "United States of America").
-- `V20261101_001__restaurant_discovery_and_currency.sql` — Restaurant Discovery
-  foundation (from PR#6 `V20261028_100`): businesses, venues (PostGIS), names,
+- `V20261031_002__city_registry_seed.sql` — canonical city-level registry
+  seed proving the place pipeline: India → Karnataka → Bengaluru (with a
+  "Bangalore" alias), Vietnam → Hanoi and Ho Chi Minh City. Places only;
+  no dish associations are fabricated.
+- `V20261101_001__place_revisions.sql` — place-registry audit trail
+  (`place_revisions`, place-scoped, `deleted` tombstone survives row delete).
+- `V20261101_002__place_revisions_cascade.sql` — non-deleted place history
+  cascades with its row; only the `deleted` tombstone survives.
+- `V20261101_003__dish_place_pair_key.sql` — converge dish↔place links on
+  the `(dish_id, place_id)` pair key, keeping `origin` over redundant `popular`.
+- `V20261102_001__user_food_preferences.sql` — member ingredient exclusions
+  (`user_food_preferences`, one row per member, upsert-safe).
+- `V20261102_002__restaurant_discovery_and_currency.sql` — Restaurant Discovery
+  foundation (from PR#6 `V20261028_100`, renumbered after main `V20261102_001`):
+  businesses, venues (PostGIS), names,
   cuisines, menus/items/variants, sources, serving evidence, price observations,
   FX cache/leases, `user_profiles.preferred_currency`, `restaurant:manage/review` grants.
-- `V20261101_002__restaurant_observation_integrity.sql` — immutable provenance
+- `V20261102_003__restaurant_observation_integrity.sql` — immutable provenance
   and receipt source/amount triggers (from `V20261028_101`).
-- `V20261101_003__restaurant_search_names.sql` — diacritic-folded search names
+- `V20261102_004__restaurant_search_names.sql` — diacritic-folded search names
   trigger (from `V20261028_102`).
-- `V20261101_004__authoritative_iso_currencies.sql` — SIX ISO 4217 currency
+- `V20261102_005__authoritative_iso_currencies.sql` — SIX ISO 4217 currency
   authority swap (from `V20261028_103`).
-- `V20261101_005__venue_coordinate_projections.sql` — generated lon/lat
+- `V20261102_006__venue_coordinate_projections.sql` — generated lon/lat
   projections (from `V20261028_104`).
-- `V20261101_006__offering_identity_and_retirement.sql` — item/variant identity
+- `V20261102_007__offering_identity_and_retirement.sql` — item/variant identity
   immutability + retirement (from `V20261028_105`).
-- `V20261101_007__unknown_receipt_adjustments.sql` — nullable receipt adjustments
+- `V20261102_008__unknown_receipt_adjustments.sql` — nullable receipt adjustments
   (from `V20261028_106`).
-- `V20261101_008__private_menu_scans.sql` — private scan sessions/assets/revisions/
+- `V20261102_009__private_menu_scans.sql` — private scan sessions/assets/revisions/
   contributions (from `V20261029_001`).
-- `V20261101_009__unverified_source_authority.sql` — remove restaurant-verified
+- `V20261102_010__unverified_source_authority.sql` — remove restaurant-verified
   price authority tier (from `V20261029_002`).
-- `V20261101_010__contribution_evidence_menus.sql` — contribution-to-menu mapping
+- `V20261102_011__contribution_evidence_menus.sql` — contribution-to-menu mapping
   (from `V20261029_003`).
-- `V20261101_011__scan_retention_and_reviewed_text.sql` — retention, reviewed
+- `V20261102_012__scan_retention_and_reviewed_text.sql` — retention, reviewed
   translations, supporting pages (from `V20261030_100`).
-- `V20261101_012__restaurant_item_source.sql` — venue-scoped source FK for
+- `V20261102_013__restaurant_item_source.sql` — venue-scoped source FK for
   price-free items (from `V20261030_101`).
-- `V20261101_013__reviewed_variant_and_price_text.sql` — reviewed variant text +
+- `V20261102_014__reviewed_variant_and_price_text.sql` — reviewed variant text +
   original printed price tokens (from `V20261030_102` + `_103`).
-- `V20261101_014__restaurant_menu_sections.sql` — nullable `section_key` on
+- `V20261102_015__restaurant_menu_sections.sql` — nullable `section_key` on
   restaurant menu items for curator-arranged menu sections.
-- `V20261101_015__restaurant_images.sql` — venue-scoped `restaurant_photos`
+- `V20261102_016__restaurant_images.sql` — venue-scoped `restaurant_photos`
   tables (draft→review→published, rights metadata, `restaurant-photos/` keys).
-- `V20261101_016__restaurant_image_indexes.sql` — display/publish/review
+- `V20261102_017__restaurant_image_indexes.sql` — display/publish/review
   indexes for restaurant photos.
-- `V20261101_017__restaurant_import_jobs.sql` — bulk import job tables with
+- `V20261102_018__restaurant_import_jobs.sql` — bulk import job tables with
   staged payloads and validate-vs-apply state.
-- `V20261101_018__restaurant_import_records.sql` — per-record import results
+- `V20261102_019__restaurant_import_records.sql` — per-record import results
   with external-identity dedup keys.
 
 - This directory contains **schema/data migrations**, not application Reylo queries.

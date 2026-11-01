@@ -100,19 +100,34 @@ export function RecommendationRail({
 
   const safeActive = carouselWrappedIndex(activeIndex, total);
 
-  // Keep the active thumbnail visible as prev/next moves the featured
-  // slide. Nearest-edge scrolling never yanks the page; reduced motion
-  // gets an instant jump instead of a smooth scroll.
+  // Keep the active thumbnail visible with an explicit horizontal scroll
+  // of the rail container only. Never call scrollIntoView: the featured
+  // carousel auto-advances, and any vertical scroll would hijack the
+  // document scroll position. Nearest-edge horizontal scrolling only;
+  // reduced motion gets an instant jump instead of a smooth scroll.
   useEffect(() => {
     if (total <= 1) {
       return;
     }
 
-    thumbRefs.current.get(safeActive)?.scrollIntoView({
-      behavior: reducedMotionRef.current ? "auto" : "smooth",
-      block: "nearest",
-      inline: "nearest",
-    });
+    const scroller = scrollerRef.current;
+    const thumb = thumbRefs.current.get(safeActive);
+
+    if (scroller === null || thumb === undefined) {
+      return;
+    }
+
+    const thumbLeft = thumb.offsetLeft;
+    const thumbRight = thumbLeft + thumb.offsetWidth;
+    const viewLeft = scroller.scrollLeft;
+    const viewRight = viewLeft + scroller.clientWidth;
+    const behavior = reducedMotionRef.current ? "auto" : "smooth";
+
+    if (thumbLeft < viewLeft) {
+      scroller.scrollTo({ left: thumbLeft - 12, behavior });
+    } else if (thumbRight > viewRight) {
+      scroller.scrollTo({ left: thumbRight - scroller.clientWidth + 12, behavior });
+    }
   }, [safeActive, total]);
 
   // Measure overflow: nav controls exist only while the row scrolls.

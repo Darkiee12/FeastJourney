@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { DishCarouselSkeleton } from "@/components/dish/dish-carousel";
+import { DishCarouselCompactSkeleton, DishCarouselSkeleton } from "@/components/dish/dish-carousel";
 import type { Messages } from "@/shared/i18n";
 
 /**
@@ -46,6 +46,11 @@ export interface ResultsLoadingSkeletonProps {
   readonly copy: Messages;
   /** Rail placeholder cards to reserve; clamped to 3–5, defaults to 4. */
   readonly dishCount?: number | undefined;
+  /**
+   * Drawer-first footprint: the compact dish card only, no rail, so the
+   * loading state reserves exactly the successful compact result's space.
+   */
+  readonly compact?: boolean | undefined;
 }
 
 /**
@@ -109,11 +114,21 @@ function RailSkeletonCard({ visibility }: { readonly visibility: string }): Reac
  * reduced motion. SSR-safe: no browser APIs, no effects, no timers.
  */
 export function ResultsLoadingSkeleton({
+  compact = false,
   copy,
   dishCount,
 }: ResultsLoadingSkeletonProps): ReactNode {
   const count = clampResultsLoadingCount(dishCount);
   const cards = Array.from({ length: count }, (_, index) => index);
+
+  if (compact) {
+    return (
+      <div>
+        <p className="sr-only">{copy.recLoading}</p>
+        <DishCarouselCompactSkeleton />
+      </div>
+    );
+  }
 
   return (
     <div>

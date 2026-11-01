@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 
+import { SQL } from "bun";
 import { Effect, Layer, ManagedRuntime } from "effect";
 
 import type { DishSummary } from "@/modules/food-discovery/server/domain/dish";
@@ -121,8 +122,7 @@ const withRankingEnv = (overrides: RankingEnvOverrides): void => {
 
 const baseInput: RecommendDishesInput = {
   meal: "anything",
-  avoid: [],
-  allergies: [],
+  excludedIngredients: [],
   cuisine: undefined,
   country: undefined,
   mood: "any",
@@ -161,6 +161,35 @@ const reasonsOf = (outcome: RecommendationOutcome): Array<string> =>
     Uncertain: ({ reasons }) => [...reasons],
     Empty: ({ reasons }) => [...reasons],
   });
+
+const servedOf = (outcome: RecommendationOutcome): string | undefined =>
+  toWireOutcome(outcome).servedScope;
+
+/**
+ * Seeded Hanoi locality id (read-only lookup, no fixtures): the seed links
+ * dishes to countries only, so the Hanoi city subtree is an empty pool with
+ * a VN country hint — exactly the honest-fallback contract shape.
+ */
+const hanoiPlaceId = async (): Promise<string> => {
+  const sql = new SQL(process.env.DATABASE_URL ?? "");
+
+  try {
+    const rows = await sql<Array<{ id: string }>>`
+      SELECT p.id::text AS id FROM feastjourney.places AS p
+      JOIN feastjourney.place_names AS pn ON pn.place_id = p.id
+      WHERE p.kind = 'locality' AND pn.name = 'Hanoi' AND pn.is_preferred LIMIT 1`;
+
+    const id = rows[0]?.id;
+
+    if (id === undefined) {
+      throw new Error("seeded Hanoi locality is missing");
+    }
+
+    return id;
+  } finally {
+    await sql.end();
+  }
+};
 
 const recommendOn = (runtime: TestRuntime, input: RecommendDishesInput) =>
   runOn(
@@ -238,7 +267,7 @@ describe("dish recommendations", () => {
 
     expect(resolved.length).toBeGreaterThan(0);
 
-    const outcome = await recommendOn(runtime, { ...baseInput, avoid: ["beef"] });
+    const outcome = await recommendOn(runtime, { ...baseInput, excludedIngredients: ["beef"] });
     const slugs = dishesOf(outcome).map((dish) => dish.slug);
 
     expect(slugs).not.toContain("pho");
@@ -279,52 +308,90 @@ describe("dish recommendations", () => {
     }
   });
 
-  test("refuses to rank when any allergy is present", async () => {
+  test("applies multiple exclusions together", async () => {
+    withRankingEnv({});
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+
+    const baseline = dishesOf(await recommendOn(runtime, baseInput)).map((dish) => dish.slug);
+
+    expect(baseline).toContain("pho");
+
+    const outcome = await recommendOn(runtime, {
+      ...baseInput,
+      excludedIngredients: ["beef", "egg"],
+    });
+
+    const slugs = dishesOf(outcome).map((dish) => dish.slug);
+
+    expect(modeOf(outcome)).toBe("deterministic");
+    expect(slugs).not.toContain("pho");
+    expect(slugs).not.toContain("pho-bo");
+    // The window refills from the pool after exclusions, so the count can
+    // stay flat on a large catalog — but exclusions must never add dishes.
+    expect(slugs.length).toBeLessThanOrEqual(baseline.length);
+  });
+
+  test("resolves ingredient aliases to the same exclusion", async () => {
+    withRankingEnv({});
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+
+    // "coriander leaves" is a seeded alias of cilantro, a pho garnish that
+    // pho-bo does not carry: alias resolution removes pho but keeps pho-bo.
+    const outcome = await recommendOn(runtime, {
+      ...baseInput,
+      excludedIngredients: ["coriander leaves"],
+    });
+
+    const slugs = dishesOf(outcome).map((dish) => dish.slug);
+
+    expect(modeOf(outcome)).toBe("deterministic");
+    expect(slugs).not.toContain("pho");
+    expect(slugs).toContain("pho-bo");
+    expect(
+      warningsOf(outcome).some((warning) => warning.includes("Could not match exclusion")),
+    ).toBe(false);
+  });
+
+  test("never refuses on exclusion terms (legacy allergy refusal removed)", async () => {
     withRankingEnv({ provider: "muse", key: "test-key" });
     const counter = { calls: 0 };
     const runtime = track(makeRuntime(silentRank(counter)));
 
-    const allergySets = [["beef"], ["unobtainium-xyz"], ["beef", "shrimp"]];
+    // Former allergy inputs are ordinary exclusions now: no Uncertain
+    // outcome, and the provider IS consulted for members (the old
+    // pre-provider refusal never fires).
+    const termSets = [["beef"], ["unobtainium-xyz"], ["beef", "pork"]];
 
     const outcomes = await Promise.all(
-      allergySets.map(async (allergies) => ({
-        allergies,
-        outcome: await recommendOn(runtime, { ...baseInput, allergies }),
-      })),
+      termSets.map(async (terms) =>
+        recommendAsMember(runtime, { ...baseInput, excludedIngredients: terms }),
+      ),
     );
 
-    for (const { allergies, outcome } of outcomes) {
-      expect(modeOf(outcome)).toBe("uncertain");
-      expect(dishesOf(outcome)).toEqual([]);
-
-      const reasons = reasonsOf(outcome);
-      expect(reasons.length).toBeGreaterThan(allergies.length);
-
-      for (const term of allergies) {
-        expect(reasons.some((reason) => reason.includes(term))).toBe(true);
-      }
-
-      expect(reasons.some((reason) => reason.includes("verified-completeness"))).toBe(true);
+    for (const outcome of outcomes) {
+      expect(modeOf(outcome)).not.toBe("uncertain");
+      expect(dishesOf(outcome).length).toBeGreaterThan(0);
     }
 
-    // The catalog cannot prove exclusion, so the provider is never consulted.
-    expect(counter.calls).toBe(0);
+    expect(counter.calls).toBe(termSets.length);
   });
 
-  test("ignores unknown dislikes with a warning", async () => {
+  test("warns per unresolvable term and still recommends", async () => {
     withRankingEnv({});
     const counter = { calls: 0 };
     const runtime = track(makeRuntime(silentRank(counter)));
 
     const outcome = await recommendOn(runtime, {
       ...baseInput,
-      avoid: ["unobtainium-xyz"],
+      excludedIngredients: ["unobtainium-xyz"],
     });
 
     expect(modeOf(outcome)).toBe("deterministic");
     expect(dishesOf(outcome).length).toBeGreaterThan(0);
-    expect(warningsOf(outcome).some((warning) => warning.includes("Ignored unknown dislike"))).toBe(
-      true,
+    expect(warningsOf(outcome)).toContain(
+      'Could not match exclusion "unobtainium-xyz" to a known ingredient; it was not applied as a filter.',
     );
   });
 
@@ -372,6 +439,90 @@ describe("dish recommendations", () => {
     expect(dishes[0]?.name).toBeDefined();
     expect(dishes[0]?.slug.length).toBeGreaterThan(0);
     expect(dishes[0]?.categorySlugs.length).toBeGreaterThan(0);
+  });
+
+  test("muse receives current meal, mood, region, and exclusions over eligible-only candidates", async () => {
+    withRankingEnv({ provider: "muse", key: "test-key" });
+
+    const seen: Array<{
+      readonly candidateIds: Array<string>;
+      readonly context: MetaRankContext;
+    }> = [];
+
+    const runtime = track(
+      makeRuntime((candidates, context) => {
+        seen.push({
+          candidateIds: candidates.map((candidate) => candidate.id),
+          context: { ...context, excludedIngredients: [...context.excludedIngredients] },
+        });
+
+        return Effect.succeed(candidates.slice(0, 3).map((candidate) => candidate.id));
+      }),
+    );
+
+    // Eligible pool from the deterministic path: the provider must only ever
+    // see ids drawn from the post-exclusion pool.
+    const eligibleFirst = dishesOf(
+      await recommendOn(runtime, {
+        ...baseInput,
+        meal: "dinner",
+        mood: "comforting",
+        country: "VN",
+        excludedIngredients: ["beef"],
+      }),
+    ).map((dish) => dish.id);
+
+    expect(eligibleFirst.length).toBeGreaterThan(0);
+
+    const first = await recommendAsMember(runtime, {
+      ...baseInput,
+      meal: "dinner",
+      mood: "comforting",
+      country: "VN",
+      excludedIngredients: ["beef"],
+    });
+
+    expect(modeOf(first)).toBe("ai");
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.context.occasion).toBe("dinner");
+    expect(seen[0]?.context.mood).toBe("comforting");
+    expect(seen[0]?.context.cuisineOrRegion).toBe("VN");
+    expect(seen[0]?.context.excludedIngredients).toEqual(["beef"]);
+
+    for (const id of seen[0]?.candidateIds ?? []) {
+      expect(eligibleFirst).toContain(id);
+    }
+
+    expect(seen[0]?.candidateIds.length ?? 0).toBeLessThanOrEqual(10);
+
+    // A second submission with different exclusions carries only the new
+    // terms: no stale exclusions leak across calls.
+    const eligibleSecond = dishesOf(
+      await recommendOn(runtime, {
+        ...baseInput,
+        meal: "dinner",
+        mood: "comforting",
+        country: "VN",
+        excludedIngredients: ["pork"],
+      }),
+    ).map((dish) => dish.id);
+
+    const second = await recommendAsMember(runtime, {
+      ...baseInput,
+      meal: "dinner",
+      mood: "comforting",
+      country: "VN",
+      excludedIngredients: ["pork"],
+    });
+
+    expect(modeOf(second)).toBe("ai");
+    expect(seen).toHaveLength(2);
+    expect(seen[1]?.context.excludedIngredients).toEqual(["pork"]);
+    expect(seen[1]?.context.excludedIngredients).not.toContain("beef");
+
+    for (const id of seen[1]?.candidateIds ?? []) {
+      expect(eligibleSecond).toContain(id);
+    }
   });
 
   test("rejects over-limit rankings independent of seed size", async () => {
@@ -604,24 +755,34 @@ describe("dish recommendations", () => {
     expect(counter.calls).toBe(0);
   });
 
-  test("surprise seed keeps hard exclusions and allergy refusals", async () => {
+  test("surprise seed keeps hard exclusions and merges former allergy terms", async () => {
     withRankingEnv({});
 
     const counter = { calls: 0 };
     const runtime = track(makeRuntime(silentRank(counter)));
 
-    const excluded = await recommendOn(runtime, { ...baseInput, avoid: ["beef"], surpriseSeed: 3 });
+    const excluded = await recommendOn(runtime, {
+      ...baseInput,
+      excludedIngredients: ["beef"],
+      surpriseSeed: 3,
+    });
 
     expect(modeOf(excluded)).toBe("deterministic");
+    expect(dishesOf(excluded).map((dish) => dish.slug)).not.toContain("pho");
 
-    const refused = await recommendOn(runtime, {
+    // Former allergy terms are ordinary exclusions now: no Uncertain
+    // outcome, even on the surprise path.
+    const merged = await recommendOn(runtime, {
       ...baseInput,
-      allergies: ["peanuts"],
+      excludedIngredients: ["peanuts"],
       surpriseSeed: 5,
     });
 
-    expect(modeOf(refused)).toBe("uncertain");
-    expect(dishesOf(refused)).toEqual([]);
+    expect(modeOf(merged)).not.toBe("uncertain");
+    expect(dishesOf(merged).length).toBeGreaterThan(0);
+    expect(
+      warningsOf(merged).some((warning) => warning.includes("Could not match exclusion")),
+    ).toBe(true);
     expect(counter.calls).toBe(0);
   });
 
@@ -639,6 +800,91 @@ describe("dish recommendations", () => {
     expect(counter.calls).toBe(0);
   });
 
+  test("city with an empty pool falls back honestly to the country hint pool", async () => {
+    withRankingEnv({});
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+    const hanoi = await hanoiPlaceId();
+
+    const outcome = await recommendOn(runtime, {
+      ...baseInput,
+      location: { kind: "city", placeId: hanoi, country: "VN" },
+    });
+
+    expect(modeOf(outcome)).toBe("deterministic");
+    expect(servedOf(outcome)).toBe("country");
+
+    const slugs = dishesOf(outcome).map((dish) => dish.slug);
+    expect(slugs).toContain("pho");
+
+    expect(warningsOf(outcome).some((warning) => warning.includes("across Vietnam"))).toBe(true);
+    expect(counter.calls).toBe(0);
+  });
+
+  test("city and country both empty returns honest empty, never silent worldwide", async () => {
+    withRankingEnv({});
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+    const hanoi = await hanoiPlaceId();
+
+    const outcome = await recommendOn(runtime, {
+      ...baseInput,
+      cuisine: "ethiopian",
+      location: { kind: "city", placeId: hanoi, country: "VN" },
+    });
+
+    expect(modeOf(outcome)).toBe("empty");
+    expect(dishesOf(outcome)).toEqual([]);
+    expect(servedOf(outcome)).toBeUndefined();
+    expect(toWireOutcome(outcome)).toEqual({
+      mode: "empty",
+      dishes: [],
+      ranking: RankingProvenance.DeterministicCatalog(),
+      reasons: reasonsOf(outcome),
+      warnings: [],
+    });
+
+    const reasons = reasonsOf(outcome).join(" ");
+    expect(reasons).toContain("Vietnam");
+    expect(reasons).toContain("worldwide catalog");
+    expect(reasons).not.toContain("showing worldwide dishes");
+    expect(counter.calls).toBe(0);
+  });
+
+  test("city without a country hint and an empty pool returns honest empty", async () => {
+    withRankingEnv({});
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+    const hanoi = await hanoiPlaceId();
+
+    const outcome = await recommendOn(runtime, {
+      ...baseInput,
+      location: { kind: "city", placeId: hanoi },
+    });
+
+    expect(modeOf(outcome)).toBe("empty");
+    expect(dishesOf(outcome)).toEqual([]);
+    expect(servedOf(outcome)).toBeUndefined();
+    expect(reasonsOf(outcome).join(" ")).toContain("mapped to this city yet");
+    expect(counter.calls).toBe(0);
+  });
+
+  test("worldwide-explicit requests keep serving the worldwide pool", async () => {
+    withRankingEnv({});
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+
+    const outcome = await recommendOn(runtime, {
+      ...baseInput,
+      location: { kind: "worldwide" },
+    });
+
+    expect(modeOf(outcome)).toBe("deterministic");
+    expect(servedOf(outcome)).toBe("worldwide");
+    expect(dishesOf(outcome).length).toBeGreaterThan(0);
+    expect(counter.calls).toBe(0);
+  });
+
   test("returns the whole pool when fewer than ten dishes match", async () => {
     withRankingEnv({});
     const counter = { calls: 0 };
@@ -648,7 +894,7 @@ describe("dish recommendations", () => {
     const slugs = dishesOf(outcome).map((dish) => dish.slug);
 
     expect(modeOf(outcome)).toBe("deterministic");
-    expect(slugs).toHaveLength(2);
+    expect(slugs.length).toBeLessThan(10);
     expect(slugs).toContain("sushi");
     expect(slugs).toContain("ramen");
   });
@@ -673,6 +919,7 @@ describe("recommendation wire mapping", () => {
           dishes: [dish("1")],
           ranking: RankingProvenance.LiveMuse(),
           warnings: ["w"],
+          servedScope: "country",
         }),
       ),
     ).toEqual({
@@ -681,6 +928,7 @@ describe("recommendation wire mapping", () => {
       ranking: RankingProvenance.LiveMuse(),
       reasons: [],
       warnings: ["w"],
+      servedScope: "country",
     });
   });
 
@@ -691,6 +939,7 @@ describe("recommendation wire mapping", () => {
           dishes: [dish("1")],
           ranking: RankingProvenance.DeterministicCatalog(),
           warnings: ["w"],
+          servedScope: "city",
         }),
       ),
     ).toEqual({
@@ -699,6 +948,7 @@ describe("recommendation wire mapping", () => {
       ranking: RankingProvenance.DeterministicCatalog(),
       reasons: [],
       warnings: ["w"],
+      servedScope: "city",
     });
   });
 

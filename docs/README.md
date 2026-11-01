@@ -35,6 +35,9 @@
 - [Task template](agents/task-template.md): copy for assignments.
 - [Skill routing](agents/skills.md): what to load for UI, prototype, accessibility, motion and module-design work.
 
+## Design
+- [Mobile journeys](design/USER-JOURNEYS.md): mobile quiz drawer behavior and the synchronized globe push.
+
 ## Decision log
 - [ADR index](decisions/README.md): recorded architectural choices.
 

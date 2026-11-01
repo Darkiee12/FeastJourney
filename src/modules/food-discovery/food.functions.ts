@@ -8,6 +8,7 @@ import {
   dishSearchQuerySchema,
   localeSchema,
   nameSearchQuerySchema,
+  nearestCityQuerySchema,
   carouselQuerySchema,
   placeQuerySchema,
   recommendationQuerySchema,
@@ -197,6 +198,31 @@ export const listPlacesFn = createServerFn({ method: "GET" })
   });
 
 /**
+ * City chooser search for Food Discovery: canonical sub-country places
+ * matching a name or alias ("Bangalore" finds Bengaluru), each with the
+ * administrative context needed to disambiguate identical names. Guests
+ * may search; ids are canonical registry identities, never free text.
+ */
+export const searchCitiesFn = createServerFn({ method: "GET" })
+  .validator(nameSearchQuerySchema)
+  .handler(async ({ data }) => {
+    const [effects, _dish, { CatalogService }, { Actor }, { withActor }, { runApp }] =
+      await loadServer();
+
+    return runApp(
+      withActor(
+        Actor.Guest(),
+        effects.Effect.flatMap(CatalogService, (service) =>
+          service.searchCities(data.q, data.locale, data.limit),
+        ),
+      ),
+      "fn/cities/search",
+      15000,
+      "server-fn",
+    );
+  });
+
+/**
  * Country chooser for the recommendation region step. Kind-filtered at the
  * database level with verified ISO identity — every eligible country is
  * reachable regardless of how many other places the catalog holds.
@@ -215,6 +241,30 @@ export const listCountriesFn = createServerFn({ method: "GET" })
         ),
       ),
       "fn/countries/list",
+      15000,
+      "server-fn",
+    );
+  });
+
+/**
+ * Nearest catalog city to a coordinate pair, for the honest near-you
+ * status line. Returns one canonical city or null when nothing city-scale
+ * is close enough — never free text, never a far-away guess.
+ */
+export const nearestCityFn = createServerFn({ method: "GET" })
+  .validator(nearestCityQuerySchema)
+  .handler(async ({ data }) => {
+    const [effects, _dish, { CatalogService }, { Actor }, { withActor }, { runApp }] =
+      await loadServer();
+
+    return runApp(
+      withActor(
+        Actor.Guest(),
+        effects.Effect.flatMap(CatalogService, (service) =>
+          service.nearestCity(data.latitude, data.longitude, data.locale),
+        ),
+      ),
+      "fn/cities/nearest",
       15000,
       "server-fn",
     );
@@ -248,6 +298,7 @@ export const getLocalCarouselFn = createServerFn({ method: "GET" })
 
     const runCarousel = (scope: {
       readonly country?: string | undefined;
+      readonly place?: string | undefined;
       readonly latitude?: number | undefined;
       readonly longitude?: number | undefined;
       readonly worldwide?: boolean | undefined;
@@ -258,6 +309,7 @@ export const getLocalCarouselFn = createServerFn({ method: "GET" })
           effects.Effect.flatMap(DishService, (service) =>
             service.getLocalCarousel({
               country: scope.country,
+              place: scope.place,
               latitude: scope.latitude,
               limit: data.limit,
               locale: data.locale,
@@ -277,6 +329,10 @@ export const getLocalCarouselFn = createServerFn({ method: "GET" })
     try {
       if (data.worldwide === true) {
         return await runWorldwide();
+      }
+
+      if (data.place !== undefined) {
+        return await runCarousel({ place: data.place });
       }
 
       if (data.latitude !== undefined && data.longitude !== undefined) {
@@ -325,9 +381,9 @@ export const listCuisinesFn = createServerFn({ method: "GET" })
  * re-ranked by Muse for signed-in members when RECOMMENDATION_PROVIDER is
  * "muse" with valid credentials. The actor always resolves from the verified
  * Better Auth session — never from a client flag. The outcome envelope
- * always returns HTTP 200; empty pools and allergy refusals are honest
- * outcomes, not errors. Auth, permanent provider, and misconfiguration
- * failures reject and surface as HTTP 500.
+ * always returns HTTP 200; empty pools are honest outcomes, not errors.
+ * Auth, permanent provider, and misconfiguration failures reject and
+ * surface as HTTP 500.
  */
 export const recommendDishesFn = createServerFn({ method: "POST" })
   .validator(recommendationQuerySchema)
@@ -404,14 +460,26 @@ export const recommendDishesFn = createServerFn({ method: "POST" })
       requestId,
     );
 
+    // Unified exclusions: the canonical list first, then legacy avoid /
+    // allergies from older cached clients. Exact-dedupe preserving first
+    // occurrence, so the canonical order wins on overlap.
+    const seenExclusions = new Set<string>();
+    const excludedIngredients: Array<string> = [];
+
+    for (const term of [...data.excludedIngredients, ...data.avoid, ...data.allergies]) {
+      if (!seenExclusions.has(term)) {
+        seenExclusions.add(term);
+        excludedIngredients.push(term);
+      }
+    }
+
     const outcome = await runApp(
       withActor(
         actor,
         effects.Effect.flatMap(RecommendationService, (service) =>
           service.recommend({
             meal: data.meal,
-            avoid: data.avoid,
-            allergies: data.allergies,
+            excludedIngredients,
             cuisine: data.cuisine,
             country: data.country,
             location: data.location,
@@ -426,5 +494,17 @@ export const recommendDishesFn = createServerFn({ method: "POST" })
       "server-fn",
     );
 
-    return toWireOutcome(outcome);
+    const wire = toWireOutcome(outcome);
+
+    if (data.allergies.length > 0) {
+      return {
+        ...wire,
+        warnings: [
+          ...wire.warnings,
+          "Legacy allergy terms were merged as ordinary exclusions; strict refusal no longer applies.",
+        ],
+      };
+    }
+
+    return wire;
   });

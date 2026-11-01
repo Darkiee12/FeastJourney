@@ -4,8 +4,7 @@ import type { RecommendPayload } from "@/components/home/recommend/quiz-model";
 import { toYourPicksProps } from "@/components/home/recommend/results-sidebar";
 
 const submittedPayload = (overrides: Partial<RecommendPayload> = {}): RecommendPayload => ({
-  allergies: ["peanuts"],
-  avoid: ["cilantro", "mushrooms"],
+  excludedIngredients: ["cilantro", "mushrooms"],
   country: "VN",
   location: { kind: "destination", country: "VN" },
   locale: "en",
@@ -24,8 +23,7 @@ describe("toYourPicksProps", () => {
     expect(picks.mood).toBe("comforting");
     expect(picks.country).toBe("VN");
     expect(picks.location).toEqual({ kind: "destination", country: "VN" });
-    expect(picks.avoid).toBe(submitted.avoid);
-    expect(picks.allergies).toBe(submitted.allergies);
+    expect(picks.excludedIngredients).toBe(submitted.excludedIngredients);
   });
 
   test("passes a precise location through untouched for the scope label to word honestly", () => {

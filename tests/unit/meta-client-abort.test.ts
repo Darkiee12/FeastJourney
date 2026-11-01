@@ -15,7 +15,7 @@ const museConfig = RankingConfig.Muse({
   maxTokens: 4000,
 });
 
-const context = { occasion: "dinner", mood: "comforting", cuisineOrRegion: null } as const;
+const context = { occasion: "dinner", mood: "comforting", cuisineOrRegion: null, excludedIngredients: [] } as const;
 
 const originalFetch = globalThis.fetch;
 

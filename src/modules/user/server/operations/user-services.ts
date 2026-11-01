@@ -3,7 +3,11 @@ import { Context, Effect, Layer } from "effect";
 import type { DishServiceError } from "@/modules/food-discovery/server/operations/dish-service";
 import { DishService } from "@/modules/food-discovery/server/operations/dish-service";
 import { FavoriteExists, FavoriteNotFound } from "@/modules/user/server/domain/errors";
-import type { FavoriteRow, ProfileRow } from "@/modules/user/server/repository/user-repository";
+import type {
+  FavoriteRow,
+  FoodPreferencesRow,
+  ProfileRow,
+} from "@/modules/user/server/repository/user-repository";
 import { UserRepository } from "@/modules/user/server/repository/user-repository";
 import type { Database } from "@/server/database/client";
 import type { DatabaseError } from "@/server/database/query";
@@ -19,6 +23,18 @@ export class ProfileService extends Context.Service<
       readonly displayName: string | null;
       readonly locale: string;
     }) => Effect.Effect<ProfileRow, DatabaseError, Database>;
+    /**
+     * Member ingredient exclusions shared by the quiz and account settings.
+     * Reads return null when absent; saves never touch display_name/locale
+     * (separate relation, profile row ensured with defaults only).
+     */
+    readonly getFoodPreferences: (
+      userId: string,
+    ) => Effect.Effect<FoodPreferencesRow | null, DatabaseError, Database>;
+    readonly saveFoodPreferences: (input: {
+      readonly userId: string;
+      readonly excludedIngredients: ReadonlyArray<string>;
+    }) => Effect.Effect<FoodPreferencesRow, DatabaseError, Database>;
   }
 >()("feastjourney/user/ProfileService") {}
 
@@ -34,6 +50,12 @@ export const ProfileServiceLive = Layer.effect(
           userId: input.userId,
           displayName: input.displayName,
           locale: input.locale,
+        }),
+      getFoodPreferences: (userId) => repository.foodPreferencesByUserId(userId),
+      saveFoodPreferences: (input) =>
+        repository.upsertFoodPreferences({
+          userId: input.userId,
+          excludedIngredients: input.excludedIngredients,
         }),
     });
   }),

@@ -24,9 +24,9 @@ import { appRuntime } from "@/server/runtime";
  *
  * Targets the SHIPPED contracts in `DishService.getLocalCarousel`:
  * SQL-backed selection per scope (country subtree, locality-radius nearby
- * with a country fallback, worldwide), seeded rotation with per-cuisine
- * diversity shaping, honest scope labels, and the empty outcome when
- * nothing is in scope. Session stability is per seed: same seed + same
+ * with a country fallback, explicit worldwide), seeded rotation with per-cuisine
+ * diversity shaping, honest scope labels, and the honest empty outcome when
+ * nothing is in scope: scoped requests never widen to the worldwide pool. Session stability is per seed: same seed + same
  * scope -> same order; a new seed rotates the window over the same pool.
  *
  * Isolation: unique slug prefix per file run, no TRUNCATE, no seed-count
@@ -391,20 +391,22 @@ describe("discovery carousel", () => {
 
   test("dishes without geo associations never appear as nearby", async () => {
     // Fixture centroid (-25,-15) is the nearest place to itself; the
-    // no-geo dish has no place links at all. Under the fallback chain the
-    // request either serves a nearby band (which can only hold place-linked
-    // dishes) or falls back to worldwide (honestly labeled, never "nearby").
+    // no-geo dish has no place links at all. Under the honest-empty
+    // contract the request either serves a nearby band (which can only hold
+    // place-linked dishes) or an honest empty — never a silent worldwide
+    // pool.
     const output = await run(
       Effect.flatMap(DishService, (service) =>
         service.getLocalCarousel({ locale: "en", latitude: -25.0, longitude: -15.0, limit: 20 }),
       ),
     );
 
-    if (output.scope === "nearby") {
+    if (output.scope === "nearby" && output.items.length > 0) {
       expect(output.items.map((item) => item.slug)).not.toContain(noGeoSlug);
     } else {
-      expect(output.scope).toBe("worldwide");
+      expect(output.scope).toBe("nearby");
       expect(output.fallback).toBe(true);
+      expect(output.items).toEqual([]);
     }
 
     const worldwide = await carouselSlugs({ worldwide: true, limit: 100 });
@@ -420,21 +422,18 @@ describe("discovery carousel", () => {
     expect(output.items).toEqual([]);
   });
 
-  test("zero-dish country falls back to worldwide instead of inventing dishes", async () => {
+  test("zero-dish country resolves to an honest empty, never silent worldwide dishes", async () => {
     const output = await run(
       Effect.flatMap(DishService, (service) =>
         service.getLocalCarousel({ locale: "en", country: emptyIso, limit: 10 }),
       ),
     );
 
-    expect(output.scope).toBe("worldwide");
+    expect(output.requestedScope).toBe("country");
+    expect(output.scope).toBe("country");
     expect(output.fallback).toBe(true);
-    expect(output.items.length).toBeGreaterThan(0);
-
-    for (const item of output.items) {
-      expect(item.slug.length).toBeGreaterThan(0);
-      expect(item.id).toMatch(/^[0-9]+$/);
-    }
+    expect(output.fallbackReason).toBe("country-empty");
+    expect(output.items).toEqual([]);
   });
 
   test("worldwide scope returns real published dishes", async () => {
@@ -533,14 +532,14 @@ describe("discovery carousel", () => {
 
     const ocean = await carouselScopes({ latitude: 0, longitude: -160, limit: 5 });
 
-    expect(ocean.slugs.length).toBeGreaterThan(0);
-    expect(ocean.scope).toBe("worldwide");
+    expect(ocean.slugs).toEqual([]);
+    expect(ocean.scope).toBe("nearby");
     expect(ocean.fallback).toBe(true);
 
     const emptyCountry = await carouselScopes({ country: emptyIso, limit: 5 });
 
-    expect(emptyCountry.slugs.length).toBeGreaterThan(0);
-    expect(emptyCountry.scope).toBe("worldwide");
+    expect(emptyCountry.slugs).toEqual([]);
+    expect(emptyCountry.scope).toBe("country");
     expect(emptyCountry.fallback).toBe(true);
   });
 
@@ -549,14 +548,13 @@ describe("discovery carousel", () => {
 
     expect(home).toContain(`${PREFIX}seven-0`);
 
-    // An empty country falls back to the worldwide pool honestly labeled —
-    // absence of the home dish cannot be asserted from a worldwide window
-    // (pool-size dependent), so pin the served scope and fallback instead.
+    // An empty country is an honest empty: the client offers the explicit
+    // worldwide escape hatch instead of silent worldwide dishes.
     const away = await carouselScopes({ country: emptyIso, limit: 20 });
 
-    expect(away.scope).toBe("worldwide");
+    expect(away.scope).toBe("country");
     expect(away.fallback).toBe(true);
-    expect(away.slugs.length).toBeGreaterThan(0);
+    expect(away.slugs).toEqual([]);
   });
 
   test("boundary coordinates are accepted, out-of-range rejected", async () => {
@@ -600,20 +598,18 @@ describe("discovery carousel", () => {
     }
   });
 
-  test("sparse ocean visitor falls back to worldwide, never a far continent", async () => {
+  test("sparse ocean visitor resolves to an honest empty, never a far continent", async () => {
     const output = await run(
       Effect.flatMap(DishService, (service) =>
         service.getLocalCarousel({ locale: "en", latitude: 0, longitude: -160, limit: 5 }),
       ),
     );
 
-    expect(output.scope).toBe("worldwide");
+    expect(output.requestedScope).toBe("nearby");
+    expect(output.scope).toBe("nearby");
     expect(output.fallback).toBe(true);
-    expect(output.items.length).toBeGreaterThan(0);
-
-    for (const item of output.items) {
-      expect(item.slug.length).toBeGreaterThan(0);
-    }
+    expect(output.fallbackReason).toBe("nearby-empty");
+    expect(output.items).toEqual([]);
   });
 
   test("malformed country codes fail closed", async () => {

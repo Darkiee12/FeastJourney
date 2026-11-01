@@ -48,9 +48,8 @@ const railHtml = (activeIndex: number): string =>
 
 const submitted: RecommendPayload = {
   ...EMPTY_DRAFT,
-  allergies: ["peanut"],
-  avoid: ["pork"],
   country: "VN",
+  excludedIngredients: ["pork", "peanut"],
   locale: "en",
   location: { country: "VN", kind: "destination" },
   meal: "dinner",
@@ -59,12 +58,16 @@ const submitted: RecommendPayload = {
 };
 
 const prefsBase = {
+  // SAFETY: overrides assign string errors into this nullable slot; the
+  // literal null alone would narrow the field and reject them.
+  accountSaveError: null as string | null,
   checked: false,
   hasSaved: false,
   onChange: () => {},
   onClear: () => {},
   onConfirmClear: () => {},
   onDismissClear: () => {},
+  onRetryAccountSave: () => {},
   showConfirmClear: false,
 };
 
@@ -151,7 +154,7 @@ describe("results sidebar composition", () => {
 
     const ai = html.indexOf(copyEn.recAiRankedTitle);
 
-    const remember = html.indexOf(copyEn.recRememberShort);
+    const remember = html.indexOf(copyEn.recRememberDestination);
 
     expect(picks).toBeGreaterThan(-1);
     expect(ai).toBeGreaterThan(picks);
@@ -181,12 +184,12 @@ describe("results sidebar composition", () => {
 });
 
 describe("remember-prefs rules on the results surface", () => {
-  test("opt-in starts unchecked with the allergy never-persisted note", () => {
+  test("opt-in starts unchecked with the destination-only label and auto-save note", () => {
     const html = prefsHtml();
 
     expect(html).not.toContain("checked");
-    expect(html).toContain(copyEn.recRememberShort);
-    expect(html).toContain(copyEn.recRememberAllergyNote);
+    expect(html).toContain(copyEn.recRememberDestination);
+    expect(html).toContain(copyEn.recExclusionsAutoSaved);
   });
 
   test("clear control appears only with saved preferences", () => {
@@ -195,6 +198,14 @@ describe("remember-prefs rules on the results surface", () => {
     const html = prefsHtml({ hasSaved: true });
 
     expect(html).toContain(copyEn.recClearPrefs);
+  });
+
+  test("account save failure surfaces an inline retry without touching the form", () => {
+    const html = prefsHtml({ accountSaveError: copyEn.recError });
+
+    expect(html).toContain('role="alert"');
+    expect(html).toContain(copyEn.recError);
+    expect(html).toContain(copyEn.recRetry);
   });
 
   test("confirm step requires an explicit second tap", () => {

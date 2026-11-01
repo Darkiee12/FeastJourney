@@ -214,7 +214,12 @@ export class CurationRepository extends Context.Service<
       readonly status: string;
       readonly errors: string | null;
       readonly dishId: bigint | null;
-      readonly payload: StoredImportRecord;
+      // Undecodable single-shot rows are stored invalid with their raw
+      // envelope preserved for inspection (never applied), so unknown is
+      // admitted — mirrors insertStagedImportRecord below.
+      readonly payload:
+        | StoredImportRecord
+        | { readonly record: unknown; readonly duplicateOf: null };
     }) => Effect.Effect<ImportRecordRow, DatabaseError, Database>;
     readonly updateImportRecord: (input: {
       readonly id: bigint;

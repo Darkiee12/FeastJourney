@@ -9,10 +9,12 @@ import type { GlobeOverlayBridge } from "@/components/home/globe/geo-utils";
 import type { ActiveDish } from "@/components/home/globe/globe-food-overlay";
 import type { Messages } from "@/shared/i18n";
 
-/** Maximum concurrent food popups on the hero globe. */
-export const MAX_CONCURRENT_POPUPS = 10;
+/** Maximum concurrent food popups on the hero globe: two on desktop, one on
+ * narrow phones (the animator caps to one below 640px). Previously ten
+ * overlapping cards; sparse labels stay readable and never cover the CTAs. */
+export const MAX_CONCURRENT_POPUPS = 2;
 
-const DISH_SHOW_MS = 3200;
+const DISH_SHOW_MS = 6000;
 const DISH_EXIT_MS = 380;
 
 /** DOM nodes for the live popups, positioned imperatively by the animator. */

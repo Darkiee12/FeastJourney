@@ -52,8 +52,7 @@ const copyVi = messagesFor("vi");
 
 const baseInput: RecommendDishesInput = {
   meal: "anything",
-  avoid: [],
-  allergies: [],
+  excludedIngredients: [],
   cuisine: undefined,
   country: undefined,
   location: undefined,
@@ -98,7 +97,7 @@ describe("recommendation location (phase 1 geography)", () => {
 
   test("saved opt-in preference restores as an explicit chosen destination", () => {
     const saved = readSavedPrefs(() =>
-      serializePrefs({ remember: true, avoid: ["cilantro"], country: "VN" }),
+      serializePrefs({ remember: true, excludedIngredients: ["cilantro"], country: "VN" }),
     );
 
     const draft = draftFromSavedPrefs(saved);
@@ -266,6 +265,33 @@ describe("recommendation location (phase 1 geography)", () => {
     expect(options.map((option) => option.choice)).toEqual(["precise", "destination", "worldwide"]);
   });
 
+  test("a hanging implementation stays locating with no browser timer to arm", () => {
+    let calls = 0;
+
+    const env: LocatorEnvironment = {
+      geolocation: {
+        getCurrentPosition: () => {
+          calls += 1;
+        },
+      },
+      secureContext: true,
+    };
+
+    const locator = new PreciseLocator(env);
+
+    locator.request();
+
+    // Bun has no window: the watchdog is skipped, the attempt stays
+    // in-flight, and nothing throws. In a browser the same hang trips
+    // the watchdog to timeout, which the lane auto-retries.
+    expect(locator.getSnapshot().status).toBe("locating");
+    expect(calls).toBe(1);
+
+    locator.reset();
+
+    expect(locator.getSnapshot().status).toBe("idle");
+  });
+
   test("unsupported contexts fail without a retry that would fail identically", () => {
     const locator = new PreciseLocator({ geolocation: null, secureContext: true });
 
@@ -370,6 +396,7 @@ describe("recommendation location (phase 1 geography)", () => {
       }),
       {
         Precise: (scope) => scope,
+        City: () => null,
         Country: () => null,
         Worldwide: () => null,
       },
@@ -377,6 +404,18 @@ describe("recommendation location (phase 1 geography)", () => {
 
     expect(checked?.latitude).toBeCloseTo(21.0278, 6);
     expect(checked?.accuracy).toBe(40);
+
+    const city = resolveLocationScope({
+      location: { kind: "city", placeId: "264", country: "IN" },
+    });
+
+    expect(city._tag).toBe("City");
+    expect(
+      scopeCountryOf({ location: { kind: "city", placeId: "264", country: "IN" } }),
+    ).toBeNull();
+    expect(locationLogFields({ location: { kind: "city", placeId: "264" } })).toEqual({
+      locationKind: "city",
+    });
 
     expect(nearbyRadiiM()).toEqual([NEARBY_START_M, 200_000, NEARBY_MAX_M]);
     expect(NEARBY_START_M).toBe(50_000);
@@ -395,7 +434,7 @@ describe("recommendation location (phase 1 geography)", () => {
     });
   });
 
-  test("draft locations feed payloads while allergies still refuse and surprise varies", () => {
+  test("draft locations feed payloads and surprise varies", () => {
     const preciseDraft: QuizDraft = {
       ...EMPTY_DRAFT,
       regionMode: "precise",
@@ -431,6 +470,54 @@ describe("recommendation location (phase 1 geography)", () => {
     expect(toTransportPayload({ ...payload, location: undefined }).country).toBe(payload.country);
   });
 
+  test("city drafts scope by canonical place id with the country hint preserved", () => {
+    const city: QuizDraft = {
+      ...EMPTY_DRAFT,
+      regionMode: "country",
+      cityId: "264",
+      cityLabel: "Bengaluru, Karnataka, India",
+      cityCountry: "IN",
+    };
+
+    // The discriminated city location carries the hint for the honest
+    // city -> country fallback; the server scopes by placeId only.
+    expect(draftLocation(city)).toEqual({
+      kind: "city",
+      placeId: "264",
+      country: "IN",
+      label: "Bengaluru, Karnataka, India",
+    });
+
+    const scope = resolveLocationScope({ location: draftLocation(city) });
+
+    expect(scope._tag).toBe("City");
+
+    // A city never implies a country filter: multi-country dishes stay
+    // eligible, and no cuisine-name filtering is ever applied.
+    expect(scopeCountryOf({ location: draftLocation(city) })).toBeNull();
+  });
+
+  test("only explicit worldwide resolves to the worldwide scope", () => {
+    const scoped = [
+      resolveLocationScope({ location: { kind: "approx", country: "VN" } }),
+      resolveLocationScope({ location: { kind: "destination", country: "JP" } }),
+      resolveLocationScope({ location: { kind: "city", placeId: "264", country: "IN" } }),
+      resolveLocationScope({
+        location: { kind: "precise", latitude: 21.0278, longitude: 105.8342 },
+      }),
+      resolveLocationScope({ country: "VN" }),
+    ];
+
+    // Location-scoped requests are never silently worldwide: the server must
+    // answer from the requested pool, its country hint, or an honest empty.
+    for (const scope of scoped) {
+      expect(scope._tag).not.toBe("Worldwide");
+    }
+
+    expect(resolveLocationScope({ location: { kind: "worldwide" } })._tag).toBe("Worldwide");
+    expect(resolveLocationScope({})._tag).toBe("Worldwide");
+  });
+
   test("summary scope labels stay honest in English", () => {
     const options = [
       { code: "VN", label: "Vietnam" },
@@ -449,9 +536,21 @@ describe("recommendation location (phase 1 geography)", () => {
         copyEn,
         options,
       ),
-    ).toBe(
-      `${copyEn.recWhereUsingLocation} · ${copyEn.recWhereAccuracyNote.replace("{meters}", "40")}`,
-    );
+    ).toBe(copyEn.recWhereNearYou);
+    expect(
+      scopeLabelFor(
+        {
+          location: {
+            kind: "city",
+            placeId: "42",
+            country: "IN",
+            label: "Bengaluru, Karnataka, India",
+          },
+        },
+        copyEn,
+        options,
+      ),
+    ).toBe("Exploring Bengaluru, Karnataka, India");
     expect(scopeLabelFor({ location: { kind: "worldwide" } }, copyEn, options)).toBe(
       copyEn.recWhereAnywhere,
     );
@@ -476,7 +575,7 @@ describe("recommendation location (phase 1 geography)", () => {
         copyVi,
         options,
       ),
-    ).toBe(copyVi.recWhereUsingLocation);
+    ).toBe(copyVi.recWhereNearYou);
     expect(scopeLabelFor({ location: { kind: "worldwide" } }, copyVi, options)).toBe(
       copyVi.recWhereAnywhere,
     );
@@ -507,11 +606,15 @@ describe("recommendation location (phase 1 geography)", () => {
     });
 
     try {
-      persistPrefs(true, ["cilantro"], "VN");
+      persistPrefs({
+        rememberDestination: true,
+        excludedIngredients: ["cilantro"],
+        country: "VN",
+      });
 
-      const stored = store.get("feastjourney.recommend.prefs.v1") ?? "";
+      const stored = store.get("feastjourney.recommend.prefs.v2") ?? "";
 
-      expect(stored).toContain('"avoid"');
+      expect(stored).toContain('"excludedIngredients"');
       expect(stored).toContain('"country"');
       expect(stored).toContain('"remember"');
       expect(stored).not.toContain("latitude");

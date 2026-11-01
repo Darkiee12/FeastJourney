@@ -146,6 +146,8 @@ export interface LocalCarouselInput {
   readonly latitude?: number | undefined;
   readonly longitude?: number | undefined;
   readonly country?: string | undefined;
+  /** Canonical city scope: a decimal place id; serves the place subtree. */
+  readonly place?: string | undefined;
   readonly worldwide?: boolean | undefined;
   readonly locale?: string | undefined;
   readonly limit?: number | undefined;
@@ -174,23 +176,28 @@ export type CarouselScope = Data.TaggedEnum<{
     readonly country: string | null;
   };
   Country: { readonly country: string };
+  /** Canonical city scope: serves the place subtree, then ancestor pools. */
+  City: { readonly placeId: string };
   Worldwide: {};
 }>;
 
 export const CarouselScope = Data.taggedEnum<CarouselScope>();
 
 /** Coarse scope names for logs, cache keys, and the requested/served labels. */
-export type CarouselScopeName = "nearby" | "country" | "worldwide";
+export type CarouselScopeName = "nearby" | "country" | "city" | "worldwide";
 
 /** Which exhausted scopes a fallback skipped; absent when nothing was skipped. */
 export type CarouselFallbackReason =
   | "nearby-empty"
   | "country-empty"
+  | "city-empty"
+  | "city-empty-country-empty"
   | "nearby-empty-country-empty";
 
 export const carouselScopeName = (scope: CarouselScope): CarouselScopeName =>
   CarouselScope.$match(scope, {
     Country: (): CarouselScopeName => "country",
+    City: (): CarouselScopeName => "city",
     Nearby: (): CarouselScopeName => "nearby",
     Worldwide: (): CarouselScopeName => "worldwide",
   });
@@ -205,22 +212,46 @@ const COUNTRY_PATTERN = /^[A-Z]{2}(-[A-Z0-9]{1,3})?$/;
  * runs with a scope the caller did not actually request.
  */
 export const resolveCarouselScope = (
-  input: Pick<LocalCarouselInput, "country" | "latitude" | "longitude" | "worldwide">,
+  input: Pick<LocalCarouselInput, "country" | "latitude" | "longitude" | "place" | "worldwide">,
 ): Effect.Effect<CarouselScope | null, InvalidSearchFilter> => {
   const latitude = input.latitude;
   const longitude = input.longitude;
   const country = input.country;
+  const place = input.place;
 
   if (input.worldwide === true) {
-    if (latitude !== undefined || longitude !== undefined || country !== undefined) {
+    if (
+      latitude !== undefined ||
+      longitude !== undefined ||
+      country !== undefined ||
+      place !== undefined
+    ) {
       return Effect.fail(
         new InvalidSearchFilter({
-          reason: "worldwide must not carry coordinates or country; send one scope only",
+          reason: "worldwide must not carry coordinates, country, or city; send one scope only",
         }),
       );
     }
 
     return Effect.succeed(CarouselScope.Worldwide());
+  }
+
+  if (place !== undefined) {
+    if (latitude !== undefined || longitude !== undefined || country !== undefined) {
+      return Effect.fail(
+        new InvalidSearchFilter({
+          reason: "city place must not carry coordinates or country; send one scope only",
+        }),
+      );
+    }
+
+    if (!isDbIdString(place)) {
+      return Effect.fail(
+        new InvalidSearchFilter({ reason: "city place must be a decimal id string" }),
+      );
+    }
+
+    return Effect.succeed(CarouselScope.City({ placeId: place }));
   }
 
   if (latitude !== undefined || longitude !== undefined) {
@@ -309,9 +340,12 @@ export interface LocalCarouselOutput {
   /**
    * Scope actually served — the honest label for the cards. A precise
    * request with no dishes in range falls back to the country pool when a
-   * hint is known, then to the worldwide pool; a known-but-empty country
-   * pool falls back to worldwide. The client words the scope line from this,
-   * never from what it asked for.
+   * hint is known, then to an honest empty; a known-but-empty country pool
+   * is an honest empty; an empty city pool falls back to the ancestor
+   * country pool, then to an honest empty. Scoped requests never widen to
+   * the worldwide pool — worldwide cards only ever serve an explicit
+   * worldwide request. The client words the scope line from this, never
+   * from what it asked for.
    */
   readonly scope: CarouselScopeName;
   /**
@@ -357,14 +391,15 @@ export class DishService extends Context.Service<
     /**
      * Batch carousel projection for the homepage local discovery: one
      * round of batched reads per relation (no per-card fetch), resolving
-     * dishes by exactly one scope — visitor coordinates (nearest real
-     * associations first, with the country hint as fallback pool), a
-     * country filter, or the worldwide pool. Coordinates never invent
-     * dishes — every card is a real published catalog association.
-     * Fallback runs inside this one operation (nearby -> country ->
-     * worldwide -> honest empty; country -> worldwide -> honest empty);
-     * the response carries the requested scope, the served scope, and
-     * whether a fallback occurred so the client never mislabels cards.
+     * dishes by exactly one scope — a canonical city subtree, visitor
+     * coordinates (nearest real associations first, with the country hint
+     * as fallback pool), a country filter, or the worldwide pool.
+     * Coordinates never invent dishes — every card is a real published
+     * catalog association. Fallback runs inside this one operation (city ->
+     * ancestor country -> honest empty; nearby -> country -> honest empty;
+     * country -> honest empty; worldwide serves direct); the response
+     * carries the requested scope, the served scope, and whether a fallback
+     * occurred so the client never mislabels cards.
      */
     readonly getLocalCarousel: (
       input: LocalCarouselInput,
@@ -1168,6 +1203,33 @@ export const DishServiceLive = Layer.effect(
             return rows.map((row) => row.id);
           });
 
+        // Canonical city selection: the place subtree through the same
+        // seeded rotation as countries. An unknown place id is not a request
+        // failure (the city was the requested scope), so it resolves to an
+        // empty pool and the chain continues to the ancestor country, then
+        // worldwide. Real database failures still propagate as typed failures.
+        const runCityIds = (
+          placeId: string,
+          fetchLimit: number = limit,
+        ): Effect.Effect<ReadonlyArray<bigint>, DishServiceError, Database> =>
+          Effect.gen(function* () {
+            const found = yield* places.findById(BigInt(placeId));
+
+            if (found === null) {
+              return [];
+            }
+
+            const rows = yield* runQuery("dish/carousel-city", (sql) =>
+              dishCarouselCountry.run(sql, {
+                limit: fetchLimit,
+                place_id: found.id,
+                seed,
+              }),
+            );
+
+            return rows.map((row) => row.id);
+          });
+
         const runWorldwideIds = (): Effect.Effect<Array<bigint>, DatabaseError, Database> =>
           Effect.gen(function* () {
             const rows = yield* runQuery("dish/carousel-worldwide", (sql) =>
@@ -1221,10 +1283,14 @@ export const DishServiceLive = Layer.effect(
             Effect.succeed<ReadonlyArray<bigint>>([]),
           );
 
-        // One coherent fallback chain: nearby (+ country top-up when sparse)
-        // -> country -> worldwide -> honest empty; country -> worldwide ->
-        // honest empty; worldwide runs direct with zero constraints. Empty
-        // pools fall through; only real database failures reject.
+        // One coherent fallback chain: city (+ ancestor country top-up when
+        // sparse) -> ancestor country -> honest empty; nearby (+ country
+        // top-up when sparse) -> country -> honest empty; country -> honest
+        // empty; worldwide runs direct with zero constraints. Scoped requests
+        // never widen to the worldwide pool: an empty city/country pool is an
+        // honest empty with an explicit worldwide escape hatch in the client,
+        // never silent unrelated dishes. Empty pools fall through; only real
+        // database failures reject.
         const selection: CarouselSelection = yield* CarouselScope.$match(scope, {
           Country: ({ country }) =>
             Effect.gen(function* () {
@@ -1241,16 +1307,116 @@ export const DishServiceLive = Layer.effect(
                 return served;
               }
 
-              const worldwideIds = yield* runWorldwideIds();
-
-              const fallback: CarouselSelection = {
+              const countryEmpty: CarouselSelection = {
                 fallbackReason: "country-empty",
-                ids: worldwideIds,
-                servedScope: "worldwide",
+                ids: [],
+                servedScope: "country",
                 supplemented: false,
               };
 
-              return fallback;
+              return countryEmpty;
+            }),
+          City: ({ placeId }) =>
+            Effect.gen(function* () {
+              const cityIds = yield* runCityIds(placeId);
+
+              // Nearest country-kind ancestor carrying a verified ISO code:
+              // the honest wider pool when the city subtree is sparse or
+              // empty. Walks the canonical parent chain, never invents
+              // geography. Prefers the country ("IN") over subnational
+              // codes ("IN-KA") so fallbacks and labels name the country.
+              const chain = yield* places.ancestors(BigInt(placeId));
+
+              let ancestorCountry: string | null = null;
+              let nearestIso: string | null = null;
+
+              for (const entry of chain) {
+                if (entry.iso3166 !== null && /^[A-Z]{2}(-[A-Z0-9]{1,3})?$/.test(entry.iso3166)) {
+                  if (nearestIso === null) {
+                    nearestIso = entry.iso3166;
+                  }
+
+                  if (entry.kind === "country") {
+                    ancestorCountry = entry.iso3166;
+                    break;
+                  }
+                }
+              }
+
+              if (ancestorCountry === null) {
+                ancestorCountry = nearestIso;
+              }
+
+              if (cityIds.length > 0) {
+                // Sparse city pool: keep the eligible city dishes first, then
+                // top up with distinct dishes from the ancestor country. The
+                // client labels this regional with the ancestor country named
+                // (supplemented pools read as regional), never as broader
+                // coverage than it is.
+                if (cityIds.length < limit) {
+                  const seen = new Set(cityIds.map((id) => id.toString()));
+
+                  const extra =
+                    ancestorCountry === null
+                      ? []
+                      : (yield* runCountryHintIds(ancestorCountry, limit + cityIds.length)).filter(
+                          (id) => !seen.has(id.toString()),
+                        );
+
+                  if (extra.length > 0) {
+                    const supplemented: CarouselSelection = {
+                      fallbackReason: null,
+                      ids: [...cityIds, ...extra.slice(0, limit - cityIds.length)],
+                      servedScope: "city",
+                      supplemented: true,
+                    };
+
+                    return supplemented;
+                  }
+                }
+
+                const served: CarouselSelection = {
+                  fallbackReason: null,
+                  ids: cityIds,
+                  servedScope: "city",
+                  supplemented: false,
+                };
+
+                return served;
+              }
+
+              if (ancestorCountry !== null) {
+                const countryIds = yield* runCountryHintIds(ancestorCountry);
+
+                if (countryIds.length > 0) {
+                  const countryFallback: CarouselSelection = {
+                    fallbackReason: "city-empty",
+                    ids: countryIds,
+                    servedScope: "country",
+                    supplemented: false,
+                  };
+
+                  return countryFallback;
+                }
+
+                const countryEmpty: CarouselSelection = {
+                  fallbackReason: "city-empty-country-empty",
+                  ids: [],
+                  servedScope: "country",
+                  supplemented: false,
+                };
+
+                return countryEmpty;
+              }
+
+              const noAncestorEmpty: CarouselSelection = {
+                fallbackReason: "city-empty",
+                ids: [],
+                servedScope: "city",
+                supplemented: false,
+              };
+
+              return noAncestorEmpty;
             }),
           Nearby: ({ country, latitude, longitude }) =>
             Effect.gen(function* () {
@@ -1307,28 +1473,24 @@ export const DishServiceLive = Layer.effect(
                   return countryFallback;
                 }
 
-                const worldwideIds = yield* runWorldwideIds();
-
-                const worldwideFallback: CarouselSelection = {
+                const countryEmpty: CarouselSelection = {
                   fallbackReason: "nearby-empty-country-empty",
-                  ids: worldwideIds,
-                  servedScope: "worldwide",
+                  ids: [],
+                  servedScope: "country",
                   supplemented: false,
                 };
 
-                return worldwideFallback;
+                return countryEmpty;
               }
 
-              const worldwideIds = yield* runWorldwideIds();
-
-              const directFallback: CarouselSelection = {
+              const nearbyEmpty: CarouselSelection = {
                 fallbackReason: "nearby-empty",
-                ids: worldwideIds,
-                servedScope: "worldwide",
+                ids: [],
+                servedScope: "nearby",
                 supplemented: false,
               };
 
-              return directFallback;
+              return nearbyEmpty;
             }),
           Worldwide: () =>
             Effect.gen(function* () {
