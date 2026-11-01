@@ -278,6 +278,13 @@ function CitySearchInput({
           className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream py-3 pr-4 pl-11 text-base text-ink placeholder:text-muted focus:border-brand-blue"
         />
       </div>
+      {trimmed.length < 2 ? (
+        <output className="mt-2 block text-sm text-muted">
+          {lang === "vi"
+            ? "Nhập vài chữ cái để tìm thành phố."
+            : "Type a few letters to find the city."}
+        </output>
+      ) : null}
       {cities.isPending && trimmed.length >= 2 ? (
         <output className="mt-2 block text-sm font-semibold text-muted">
           {lang === "vi" ? "Đang tìm thành phố…" : "Searching cities…"}

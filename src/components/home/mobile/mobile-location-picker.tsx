@@ -219,6 +219,9 @@ export function MobileLocationPicker(props: MobileLocationPickerProps) {
             />
           </div>
           <div className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            {trimmedCity.length < 2 ? (
+              <output className="block py-3 text-sm text-muted">{cityCopy.citySearchHint}</output>
+            ) : null}
             {cities.isPending && trimmedCity.length >= 2 ? (
               <output className="block py-3 text-sm text-muted">{cityCopy.citySearching}</output>
             ) : null}

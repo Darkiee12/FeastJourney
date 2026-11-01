@@ -203,6 +203,7 @@ export interface DiscoveryCityCopy {
   readonly chooseCity: string;
   readonly citySearchLabel: string;
   readonly citySearchPlaceholder: string;
+  readonly citySearchHint: string;
   readonly citySearching: string;
   readonly citySearchError: string;
   readonly citySearchEmpty: string;
@@ -214,6 +215,7 @@ const englishCityCopy: DiscoveryCityCopy = {
   cityResultsLabel: "Matching cities",
   citySearchEmpty: "No matching city — try another spelling.",
   citySearchError: "Could not search cities. Try again.",
+  citySearchHint: "Type a few letters to find the city.",
   citySearchLabel: "Search for a city",
   citySearchPlaceholder: "Search a city… e.g. Bangalore",
   citySearching: "Searching cities…",
@@ -224,6 +226,7 @@ const vietnameseCityCopy: DiscoveryCityCopy = {
   cityResultsLabel: "Thành phố khớp",
   citySearchEmpty: "Không có thành phố nào khớp — thử cách viết khác.",
   citySearchError: "Không tìm được thành phố. Thử lại.",
+  citySearchHint: "Nhập vài chữ cái để tìm thành phố.",
   citySearchLabel: "Tìm thành phố",
   citySearchPlaceholder: "Tìm thành phố… ví dụ Bangalore",
   citySearching: "Đang tìm thành phố…",
@@ -426,14 +429,14 @@ function CitySearchContent(props: {
   const selectedLabel = props.selected === null ? null : discoveryCityLabelFor(props.selected);
 
   return (
-    <div className="p-1">
+    <div className="flex min-h-0 flex-1 flex-col p-1">
       <label
         htmlFor="discovery-city-search"
-        className="mb-1 block px-2 pt-1 text-sm font-bold text-ink"
+        className="mb-1 block flex-none px-2 pt-1 text-sm font-bold text-ink"
       >
         {copy.citySearchLabel}
       </label>
-      <div className="relative">
+      <div className="relative flex-none">
         <SearchIcon
           aria-hidden="true"
           className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted"
@@ -460,61 +463,68 @@ function CitySearchContent(props: {
         />
       </div>
       {props.selected !== null ? (
-        <DropdownMenuItem disabled className="min-h-11">
+        <DropdownMenuItem disabled className="min-h-11 flex-none">
           <CheckIcon aria-hidden="true" />
           <span className="truncate">{selectedLabel ?? copy.chooseCity}</span>
         </DropdownMenuItem>
       ) : null}
-      {cities.isPending && trimmed.length >= 2 ? (
-        <output className="block px-2 py-1.5 text-sm font-semibold text-muted">
-          {copy.citySearching}
-        </output>
-      ) : null}
-      {cities.isError ? (
-        <p className="px-2 py-1.5 text-sm font-bold text-danger" role="alert">
-          {copy.citySearchError}
-        </p>
-      ) : null}
-      {trimmed.length >= 2 && !cities.isPending && !cities.isError && results.length === 0 ? (
-        <output className="block px-2 py-1.5 text-sm text-muted">{copy.citySearchEmpty}</output>
-      ) : null}
-      {results.length > 0 ? (
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>{copy.cityResultsLabel}</DropdownMenuLabel>
-          {results.map((entry) => {
-            const displayName = entry.name ?? entry.id;
+      {/* Fixed scroll region: the input stays docked while results, hints,
+          and status lines scroll inside a stable-height submenu. */}
+      <div className="mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {trimmed.length < 2 ? (
+          <output className="block px-2 py-1.5 text-sm text-muted">{copy.citySearchHint}</output>
+        ) : null}
+        {cities.isPending && trimmed.length >= 2 ? (
+          <output className="block px-2 py-1.5 text-sm font-semibold text-muted">
+            {copy.citySearching}
+          </output>
+        ) : null}
+        {cities.isError ? (
+          <p className="px-2 py-1.5 text-sm font-bold text-danger" role="alert">
+            {copy.citySearchError}
+          </p>
+        ) : null}
+        {trimmed.length >= 2 && !cities.isPending && !cities.isError && results.length === 0 ? (
+          <output className="block px-2 py-1.5 text-sm text-muted">{copy.citySearchEmpty}</output>
+        ) : null}
+        {results.length > 0 ? (
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>{copy.cityResultsLabel}</DropdownMenuLabel>
+            {results.map((entry) => {
+              const displayName = entry.name ?? entry.id;
 
-            return (
-              <DropdownMenuItem
-                key={entry.id}
-                disabled={props.disabled}
-                onSelect={() => {
-                  props.onPick({
-                    id: entry.id,
-                    name: entry.name,
-                    context: entry.context,
-                    country: entry.country,
-                  });
-                }}
-                className="min-h-11"
-              >
-                <MapPinIcon aria-hidden="true" />
-                <span className="min-w-0">
-                  <span className="block truncate font-bold">{displayName}</span>
-                  {entry.context === null || entry.context === "" ? null : (
-                    <span className="block truncate text-xs font-normal text-muted">
-                      {entry.context}
-                    </span>
-                  )}
-                </span>
-                {props.selected?.id === entry.id ? (
-                  <CheckIcon aria-hidden="true" className="ml-auto" />
-                ) : null}
-              </DropdownMenuItem>
-            );
-          })}
-        </DropdownMenuGroup>
-      ) : null}
+              return (
+                <DropdownMenuItem
+                  key={entry.id}
+                  disabled={props.disabled}
+                  onSelect={() => {
+                    props.onPick({
+                      id: entry.id,
+                      name: entry.name,
+                      context: entry.context,
+                      country: entry.country,
+                    });
+                  }}
+                  className="min-h-11"
+                >
+                  <MapPinIcon aria-hidden="true" />
+                  <span className="min-w-0">
+                    <span className="block truncate font-bold">{displayName}</span>
+                    {entry.context === null || entry.context === "" ? null : (
+                      <span className="block truncate text-xs font-normal text-muted">
+                        {entry.context}
+                      </span>
+                    )}
+                  </span>
+                  {props.selected?.id === entry.id ? (
+                    <CheckIcon aria-hidden="true" className="ml-auto" />
+                  ) : null}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuGroup>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -649,7 +659,7 @@ export function DiscoveryLocation(props: DiscoveryLocationProps) {
                   <CheckIcon aria-hidden="true" className="ml-auto" />
                 ) : null}
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="max-h-72 w-72 overflow-y-auto">
+              <DropdownMenuSubContent className="flex h-80 w-72 flex-col overflow-hidden">
                 <CitySearchContent
                   disabled={busy}
                   lang={props.lang}
