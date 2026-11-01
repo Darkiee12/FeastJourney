@@ -1074,9 +1074,11 @@ const serveCityCandidates = (
       );
     }
 
-    // Empty city pool falls back honestly: first the country hint pool when
-    // one is known, then worldwide. The served scope travels with the
-    // outcome so the client labels exactly what it got — never the city.
+    // Empty city pool falls back honestly to the country hint pool when
+    // one is known. When both pools are empty — or no hint is known — the
+    // result is an honest empty outcome, never a silent worldwide scan.
+    // The served scope travels with the outcome so the client labels
+    // exactly what it got — never the city, never worldwide-by-stealth.
     if (scope.countryHint !== null) {
       const countryInput = {
         ...input,
@@ -1112,17 +1114,23 @@ const serveCityCandidates = (
           "country",
         );
       }
+
+      const countryName = yield* countryDisplayName(scope.countryHint, input.locale);
+
+      return RecommendationOutcome.Empty({
+        reasons: [
+          `No published dishes are mapped to this city or ${countryName} yet.`,
+          "Try a different destination, or explore the worldwide catalog instead.",
+        ],
+      });
     }
 
-    return yield* serveCountryCandidates(
-      { ...input, location: { kind: "worldwide" } },
-      [...warnings, "No dishes from this city or country yet — showing worldwide dishes instead."],
-      excluded,
-      limits,
-      muse,
-      guestGated,
-      "worldwide",
-    );
+    return RecommendationOutcome.Empty({
+      reasons: [
+        "No published dishes are mapped to this city yet.",
+        "Try a different destination, or explore the worldwide catalog instead.",
+      ],
+    });
   });
 
 const serveRecommendations = (

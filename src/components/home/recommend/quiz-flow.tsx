@@ -1430,13 +1430,20 @@ export function RecommendSection() {
       // secondary location actions. Drawer footer already owns Adjust /
       // Start over, so they are not repeated here. Detailed backend reasons
       // stay behind an optional disclosure for troubleshooting.
+      // Explicit worldwide is opt-in only: every location-scoped empty
+      // (city, country, destination, approx, precise) offers one tap to
+      // explore worldwide; a request that already was worldwide offers none.
+      const requestedWorldwide =
+        submitted?.location !== undefined
+          ? submitted.location.kind === "worldwide"
+          : submitted?.country === undefined;
+
       if (compact) {
         return (
           <div>
             <p className="text-base font-extrabold text-ink">{copyMessages.recReasonsHeading}</p>
             <p className="mt-1 text-sm font-semibold text-muted">{copyMessages.recEmptySuggest}</p>
-            {outcome.mode === "empty" &&
-            (submitted?.location?.kind === "precise" || submitted?.location?.kind === "city") ? (
+            {outcome.mode === "empty" && !requestedWorldwide ? (
               <div className="mt-3 flex flex-col gap-2">
                 <button
                   type="button"
@@ -1479,8 +1486,7 @@ export function RecommendSection() {
             ranking={outcome.ranking}
             reasons={outcome.reasons}
           />
-          {outcome.mode === "empty" &&
-          (submitted?.location?.kind === "precise" || submitted?.location?.kind === "city") ? (
+          {outcome.mode === "empty" && !requestedWorldwide ? (
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"

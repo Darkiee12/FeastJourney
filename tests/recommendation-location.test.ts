@@ -443,6 +443,54 @@ describe("recommendation location (phase 1 geography)", () => {
     expect(toTransportPayload({ ...payload, location: undefined }).country).toBe(payload.country);
   });
 
+  test("city drafts scope by canonical place id with the country hint preserved", () => {
+    const city: QuizDraft = {
+      ...EMPTY_DRAFT,
+      regionMode: "country",
+      cityId: "264",
+      cityLabel: "Bengaluru, Karnataka, India",
+      cityCountry: "IN",
+    };
+
+    // The discriminated city location carries the hint for the honest
+    // city -> country fallback; the server scopes by placeId only.
+    expect(draftLocation(city)).toEqual({
+      kind: "city",
+      placeId: "264",
+      country: "IN",
+      label: "Bengaluru, Karnataka, India",
+    });
+
+    const scope = resolveLocationScope({ location: draftLocation(city) });
+
+    expect(scope._tag).toBe("City");
+
+    // A city never implies a country filter: multi-country dishes stay
+    // eligible, and no cuisine-name filtering is ever applied.
+    expect(scopeCountryOf({ location: draftLocation(city) })).toBeNull();
+  });
+
+  test("only explicit worldwide resolves to the worldwide scope", () => {
+    const scoped = [
+      resolveLocationScope({ location: { kind: "approx", country: "VN" } }),
+      resolveLocationScope({ location: { kind: "destination", country: "JP" } }),
+      resolveLocationScope({ location: { kind: "city", placeId: "264", country: "IN" } }),
+      resolveLocationScope({
+        location: { kind: "precise", latitude: 21.0278, longitude: 105.8342 },
+      }),
+      resolveLocationScope({ country: "VN" }),
+    ];
+
+    // Location-scoped requests are never silently worldwide: the server must
+    // answer from the requested pool, its country hint, or an honest empty.
+    for (const scope of scoped) {
+      expect(scope._tag).not.toBe("Worldwide");
+    }
+
+    expect(resolveLocationScope({ location: { kind: "worldwide" } })._tag).toBe("Worldwide");
+    expect(resolveLocationScope({})._tag).toBe("Worldwide");
+  });
+
   test("summary scope labels stay honest in English", () => {
     const options = [
       { code: "VN", label: "Vietnam" },

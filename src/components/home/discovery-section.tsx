@@ -46,11 +46,14 @@ function countryNameFor(
  * Homepage food discovery: show relevant published dishes immediately,
  * letting location improve relevance rather than gate it. One exclusive
  * scope per request (precise nearby, city, country, or worldwide); the
- * server falls back automatically (nearby -> country -> worldwide;
- * city -> ancestor country -> worldwide) and labels the served scope
- * honestly. Cards on screen are always described by the scope that served
- * them — never by a newly selected region — because headings follow the
- * last served response, not the pending request.
+ * server falls back honestly (nearby -> country -> honest empty; city ->
+ * ancestor country -> honest empty) and labels the served scope honestly.
+ * Scoped requests never widen to the worldwide pool: an empty city/country
+ * pool renders the region-empty panel with an explicit "explore worldwide"
+ * action, never silent unrelated dishes. Cards on screen are always
+ * described by the scope that served them — never by a newly selected
+ * region — because headings follow the last served response, not the
+ * pending request.
  */
 export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale }) {
   const { session } = rootRoute.useRouteContext();

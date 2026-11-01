@@ -45,6 +45,41 @@ The `/#discover` section shows published food immediately, country-first:
   or the illustrated catalog-empty panel. Geolocation is explicit-only
   (tapped, never auto-requested) and denial keeps existing content.
 
+## Discover geographic honesty (scoped pools never widen to worldwide)
+
+  Scoped discovery requests (country, city, precise nearby) never widen to
+  the worldwide pool. The quiz rule applies verbatim: serve the requested
+  city, then its ancestor country, then an honest empty with an explicit
+  user action to explore worldwide — never silent unrelated dishes (e.g.
+  Mexican dishes for a Vietnam selection). Concretely, in
+  `DishService.getLocalCarousel`:
+
+- Country with dishes → `country`, no fallback. Country known but empty →
+  honest empty (`scope: "country"`, `fallback: true`,
+  `fallbackReason: "country-empty"`, zero items).
+- City with dishes → `city`, no fallback; a sparse city pool is topped up
+  with distinct ancestor-country dishes (`supplemented: true`, still
+  `city`, client reads it as regional with the country named). Empty city
+  with a stocked ancestor → `country` (`fallbackReason: "city-empty"`).
+  Empty city with an empty (or missing) ancestor → honest empty
+  (`fallbackReason: "city-empty-country-empty"` or `"city-empty"`).
+- Precise nearby with dishes → `nearby` (sparse pools topped up from the
+  country hint, `supplemented: true`, still `nearby`). Empty bands with a
+  stocked country hint → `country` (`fallbackReason: "nearby-empty"`).
+  Empty bands with an empty hint — or no hint — → honest empty
+  (`fallbackReason: "nearby-empty-country-empty"` or `"nearby-empty"`).
+- Explicit worldwide (`world` / `world-auto`) is the only lane that serves
+  worldwide dishes. Unknown well-formed country codes stay typed
+  `PlaceNotFound` at the service; `getLocalCarouselFn` keeps its graceful
+  half (serves worldwide for that rewritten request, labeled worldwide).
+
+  The client needs no new strings for this: a scoped honest empty resolves
+  through the existing `region-empty` fallback state (served scope is never
+  `worldwide`, zero items), which renders `carouselRegionEmpty` with the
+  explicit `carouselExploreWorld` escape hatch. Legitimate multi-country
+  dish associations are preserved — selection expands place subtrees
+  downward and never filters by cuisine name or assumes one origin per dish.
+
 ## Provider selection (explicit, validated)
 
 `RECOMMENDATION_PROVIDER` (`deterministic` default, or `muse`) plus

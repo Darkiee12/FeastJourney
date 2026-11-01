@@ -340,9 +340,12 @@ export interface LocalCarouselOutput {
   /**
    * Scope actually served — the honest label for the cards. A precise
    * request with no dishes in range falls back to the country pool when a
-   * hint is known, then to the worldwide pool; a known-but-empty country
-   * pool falls back to worldwide. The client words the scope line from this,
-   * never from what it asked for.
+   * hint is known, then to an honest empty; a known-but-empty country pool
+   * is an honest empty; an empty city pool falls back to the ancestor
+   * country pool, then to an honest empty. Scoped requests never widen to
+   * the worldwide pool — worldwide cards only ever serve an explicit
+   * worldwide request. The client words the scope line from this, never
+   * from what it asked for.
    */
   readonly scope: CarouselScopeName;
   /**
@@ -393,10 +396,10 @@ export class DishService extends Context.Service<
      * as fallback pool), a country filter, or the worldwide pool.
      * Coordinates never invent dishes — every card is a real published
      * catalog association. Fallback runs inside this one operation (city ->
-     * ancestor country -> worldwide -> honest empty; nearby -> country ->
-     * worldwide -> honest empty; country -> worldwide -> honest empty);
-     * the response carries the requested scope, the served scope, and
-     * whether a fallback occurred so the client never mislabels cards.
+     * ancestor country -> honest empty; nearby -> country -> honest empty;
+     * country -> honest empty; worldwide serves direct); the response
+     * carries the requested scope, the served scope, and whether a fallback
+     * occurred so the client never mislabels cards.
      */
     readonly getLocalCarousel: (
       input: LocalCarouselInput,
@@ -1281,11 +1284,13 @@ export const DishServiceLive = Layer.effect(
           );
 
         // One coherent fallback chain: city (+ ancestor country top-up when
-        // sparse) -> ancestor country -> worldwide -> honest empty; nearby
-        // (+ country top-up when sparse) -> country -> worldwide -> honest
-        // empty; country -> worldwide -> honest empty; worldwide runs direct
-        // with zero constraints. Empty pools fall through; only real database
-        // failures reject.
+        // sparse) -> ancestor country -> honest empty; nearby (+ country
+        // top-up when sparse) -> country -> honest empty; country -> honest
+        // empty; worldwide runs direct with zero constraints. Scoped requests
+        // never widen to the worldwide pool: an empty city/country pool is an
+        // honest empty with an explicit worldwide escape hatch in the client,
+        // never silent unrelated dishes. Empty pools fall through; only real
+        // database failures reject.
         const selection: CarouselSelection = yield* CarouselScope.$match(scope, {
           Country: ({ country }) =>
             Effect.gen(function* () {
@@ -1302,16 +1307,14 @@ export const DishServiceLive = Layer.effect(
                 return served;
               }
 
-              const worldwideIds = yield* runWorldwideIds();
-
-              const fallback: CarouselSelection = {
+              const countryEmpty: CarouselSelection = {
                 fallbackReason: "country-empty",
-                ids: worldwideIds,
-                servedScope: "worldwide",
+                ids: [],
+                servedScope: "country",
                 supplemented: false,
               };
 
-              return fallback;
+              return countryEmpty;
             }),
           City: ({ placeId }) =>
             Effect.gen(function* () {
@@ -1347,8 +1350,9 @@ export const DishServiceLive = Layer.effect(
               if (cityIds.length > 0) {
                 // Sparse city pool: keep the eligible city dishes first, then
                 // top up with distinct dishes from the ancestor country. The
-                // client labels this regional with the city named, never as
-                // broader coverage than it is.
+                // client labels this regional with the ancestor country named
+                // (supplemented pools read as regional), never as broader
+                // coverage than it is.
                 if (cityIds.length < limit) {
                   const seen = new Set(cityIds.map((id) => id.toString()));
 
@@ -1395,28 +1399,24 @@ export const DishServiceLive = Layer.effect(
                   return countryFallback;
                 }
 
-                const worldwideIds = yield* runWorldwideIds();
-
-                const worldwideFallback: CarouselSelection = {
+                const countryEmpty: CarouselSelection = {
                   fallbackReason: "city-empty-country-empty",
-                  ids: worldwideIds,
-                  servedScope: "worldwide",
+                  ids: [],
+                  servedScope: "country",
                   supplemented: false,
                 };
 
-                return worldwideFallback;
+                return countryEmpty;
               }
 
-              const worldwideIds = yield* runWorldwideIds();
-
-              const directFallback: CarouselSelection = {
+              const noAncestorEmpty: CarouselSelection = {
                 fallbackReason: "city-empty",
-                ids: worldwideIds,
-                servedScope: "worldwide",
+                ids: [],
+                servedScope: "city",
                 supplemented: false,
               };
 
-              return directFallback;
+              return noAncestorEmpty;
             }),
           Nearby: ({ country, latitude, longitude }) =>
             Effect.gen(function* () {
@@ -1473,28 +1473,24 @@ export const DishServiceLive = Layer.effect(
                   return countryFallback;
                 }
 
-                const worldwideIds = yield* runWorldwideIds();
-
-                const worldwideFallback: CarouselSelection = {
+                const countryEmpty: CarouselSelection = {
                   fallbackReason: "nearby-empty-country-empty",
-                  ids: worldwideIds,
-                  servedScope: "worldwide",
+                  ids: [],
+                  servedScope: "country",
                   supplemented: false,
                 };
 
-                return worldwideFallback;
+                return countryEmpty;
               }
 
-              const worldwideIds = yield* runWorldwideIds();
-
-              const directFallback: CarouselSelection = {
+              const nearbyEmpty: CarouselSelection = {
                 fallbackReason: "nearby-empty",
-                ids: worldwideIds,
-                servedScope: "worldwide",
+                ids: [],
+                servedScope: "nearby",
                 supplemented: false,
               };
 
-              return directFallback;
+              return nearbyEmpty;
             }),
           Worldwide: () =>
             Effect.gen(function* () {

@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 
+import { SQL } from "bun";
 import { Effect, Layer, ManagedRuntime } from "effect";
 
 import type { DishSummary } from "@/modules/food-discovery/server/domain/dish";
@@ -160,6 +161,35 @@ const reasonsOf = (outcome: RecommendationOutcome): Array<string> =>
     Uncertain: ({ reasons }) => [...reasons],
     Empty: ({ reasons }) => [...reasons],
   });
+
+const servedOf = (outcome: RecommendationOutcome): string | undefined =>
+  toWireOutcome(outcome).servedScope;
+
+/**
+ * Seeded Hanoi locality id (read-only lookup, no fixtures): the seed links
+ * dishes to countries only, so the Hanoi city subtree is an empty pool with
+ * a VN country hint — exactly the honest-fallback contract shape.
+ */
+const hanoiPlaceId = async (): Promise<string> => {
+  const sql = new SQL(process.env.DATABASE_URL ?? "");
+
+  try {
+    const rows = await sql<Array<{ id: string }>>`
+      SELECT p.id::text AS id FROM feastjourney.places AS p
+      JOIN feastjourney.place_names AS pn ON pn.place_id = p.id
+      WHERE p.kind = 'locality' AND pn.name = 'Hanoi' AND pn.is_preferred LIMIT 1`;
+
+    const id = rows[0]?.id;
+
+    if (id === undefined) {
+      throw new Error("seeded Hanoi locality is missing");
+    }
+
+    return id;
+  } finally {
+    await sql.end();
+  }
+};
 
 const recommendOn = (runtime: TestRuntime, input: RecommendDishesInput) =>
   runOn(
@@ -767,6 +797,91 @@ describe("dish recommendations", () => {
     expect(modeOf(outcome)).toBe("empty");
     expect(dishesOf(outcome)).toEqual([]);
     expect(reasonsOf(outcome).length).toBeGreaterThan(0);
+    expect(counter.calls).toBe(0);
+  });
+
+  test("city with an empty pool falls back honestly to the country hint pool", async () => {
+    withRankingEnv({});
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+    const hanoi = await hanoiPlaceId();
+
+    const outcome = await recommendOn(runtime, {
+      ...baseInput,
+      location: { kind: "city", placeId: hanoi, country: "VN" },
+    });
+
+    expect(modeOf(outcome)).toBe("deterministic");
+    expect(servedOf(outcome)).toBe("country");
+
+    const slugs = dishesOf(outcome).map((dish) => dish.slug);
+    expect(slugs).toContain("pho");
+
+    expect(warningsOf(outcome).some((warning) => warning.includes("across Vietnam"))).toBe(true);
+    expect(counter.calls).toBe(0);
+  });
+
+  test("city and country both empty returns honest empty, never silent worldwide", async () => {
+    withRankingEnv({});
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+    const hanoi = await hanoiPlaceId();
+
+    const outcome = await recommendOn(runtime, {
+      ...baseInput,
+      cuisine: "ethiopian",
+      location: { kind: "city", placeId: hanoi, country: "VN" },
+    });
+
+    expect(modeOf(outcome)).toBe("empty");
+    expect(dishesOf(outcome)).toEqual([]);
+    expect(servedOf(outcome)).toBeUndefined();
+    expect(toWireOutcome(outcome)).toEqual({
+      mode: "empty",
+      dishes: [],
+      ranking: RankingProvenance.DeterministicCatalog(),
+      reasons: reasonsOf(outcome),
+      warnings: [],
+    });
+
+    const reasons = reasonsOf(outcome).join(" ");
+    expect(reasons).toContain("Vietnam");
+    expect(reasons).toContain("worldwide catalog");
+    expect(reasons).not.toContain("showing worldwide dishes");
+    expect(counter.calls).toBe(0);
+  });
+
+  test("city without a country hint and an empty pool returns honest empty", async () => {
+    withRankingEnv({});
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+    const hanoi = await hanoiPlaceId();
+
+    const outcome = await recommendOn(runtime, {
+      ...baseInput,
+      location: { kind: "city", placeId: hanoi },
+    });
+
+    expect(modeOf(outcome)).toBe("empty");
+    expect(dishesOf(outcome)).toEqual([]);
+    expect(servedOf(outcome)).toBeUndefined();
+    expect(reasonsOf(outcome).join(" ")).toContain("mapped to this city yet");
+    expect(counter.calls).toBe(0);
+  });
+
+  test("worldwide-explicit requests keep serving the worldwide pool", async () => {
+    withRankingEnv({});
+    const counter = { calls: 0 };
+    const runtime = track(makeRuntime(silentRank(counter)));
+
+    const outcome = await recommendOn(runtime, {
+      ...baseInput,
+      location: { kind: "worldwide" },
+    });
+
+    expect(modeOf(outcome)).toBe("deterministic");
+    expect(servedOf(outcome)).toBe("worldwide");
+    expect(dishesOf(outcome).length).toBeGreaterThan(0);
     expect(counter.calls).toBe(0);
   });
 
