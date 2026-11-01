@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { BookmarkIcon } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { z } from "zod";
@@ -293,6 +294,35 @@ const saveLabel = (state: SaveButtonState, loading: boolean, copy: Messages): st
   return copy.saveDishSave;
 };
 
+/**
+ * Compact labels for the drawer-first dish card: short Save/Saved wording
+ * with a Bookmark icon. Transient states reuse the existing strings (all
+ * short); only the steady states switch to the compact copy.
+ */
+const saveLabelShort = (state: SaveButtonState, loading: boolean, copy: Messages): string => {
+  if (state.pending === "save") {
+    return copy.saveDishSaving;
+  }
+
+  if (state.pending === "unsave") {
+    return copy.saveDishRemoving;
+  }
+
+  if (state.confirmed === true) {
+    return copy.saveDishSavedShort;
+  }
+
+  if (state.failedAction !== null) {
+    return copy.saveDishRetry;
+  }
+
+  if (loading || state.confirmed === undefined) {
+    return copy.saveDishLoading;
+  }
+
+  return copy.saveDishSaveShort;
+};
+
 export interface SaveButtonStatus {
   /** Authoritative membership from the list-level status query. */
   readonly saved: boolean | undefined;
@@ -329,10 +359,12 @@ export const statusForDish = (query: FavoriteStatusQuery, dishId: string): SaveB
  * so auth lands back on the dish; nothing fabricates auth state.
  */
 function GuestSaveSheetButton({
+  compact = false,
   dishLabel,
   lang,
   returnTo,
 }: {
+  readonly compact?: boolean;
   readonly dishLabel: string;
   readonly lang: Locale;
   readonly returnTo: string;
@@ -384,8 +416,13 @@ function GuestSaveSheetButton({
         onClick={() => {
           setSheetOpen(true);
         }}
-        className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white md:hidden"
+        className={
+          compact
+            ? "inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-full border-2 border-ink bg-white px-4 text-[13px] font-bold text-ink transition hover:bg-ink hover:text-white md:hidden"
+            : "inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white md:hidden"
+        }
       >
+        {compact ? <BookmarkIcon aria-hidden="true" className="size-4 flex-none" /> : null}
         {dishLabel}
       </button>
       {sheetOpen
@@ -458,12 +495,14 @@ function GuestSaveSheetButton({
 }
 
 export function SaveDishButton({
+  compact = false,
   dishId,
   lang,
   returnTo,
   session,
   status,
 }: {
+  readonly compact?: boolean;
   readonly dishId: string;
   readonly lang: Locale;
   readonly returnTo: string;
@@ -560,7 +599,12 @@ export function SaveDishButton({
         >
           {copy.saveDishSave}
         </button>
-        <GuestSaveSheetButton dishLabel={copy.saveDishSave} lang={lang} returnTo={returnTo} />
+        <GuestSaveSheetButton
+          compact={compact}
+          dishLabel={compact ? copy.saveDishSaveShort : copy.saveDishSave}
+          lang={lang}
+          returnTo={returnTo}
+        />
       </>
     );
   }
@@ -625,9 +669,20 @@ export function SaveDishButton({
         disabled={pending || loading}
         aria-pressed={state.confirmed === true}
         aria-busy={pending || loading}
-        className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white disabled:cursor-wait disabled:opacity-70 aria-pressed:border-food-orange-strong aria-pressed:bg-food-orange-strong aria-pressed:text-white"
+        className={
+          compact
+            ? "inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-full border-2 border-ink bg-white px-4 text-[13px] font-bold text-ink transition hover:bg-ink hover:text-white disabled:cursor-wait disabled:opacity-70 aria-pressed:border-food-orange-strong aria-pressed:bg-food-orange-strong aria-pressed:text-white"
+            : "inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white disabled:cursor-wait disabled:opacity-70 aria-pressed:border-food-orange-strong aria-pressed:bg-food-orange-strong aria-pressed:text-white"
+        }
       >
-        {saveLabel(state, loading, copy)}
+        {compact ? (
+          <BookmarkIcon
+            aria-hidden="true"
+            className="size-4 flex-none"
+            fill={state.confirmed === true ? "currentColor" : "none"}
+          />
+        ) : null}
+        {compact ? saveLabelShort(state, loading, copy) : saveLabel(state, loading, copy)}
       </button>
       {refreshFailed && !pending ? (
         <span className="inline-flex items-center gap-2 text-xs font-semibold text-muted">

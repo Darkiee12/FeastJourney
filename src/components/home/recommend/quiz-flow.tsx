@@ -1,6 +1,13 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { MapPinIcon, SparklesIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  MapPinIcon,
+  SkipForwardIcon,
+  SlidersHorizontalIcon,
+  SparklesIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { DishCarousel } from "@/components/dish/dish-carousel";
@@ -49,6 +56,7 @@ import {
   AiExplanationCard,
   AllergyNotice,
   QuizError,
+  rankingVariantFor,
   ResultWarnings,
 } from "@/components/home/recommend/quiz-status";
 import { RecommendationRail } from "@/components/home/recommend/recommendation-rail";
@@ -409,6 +417,15 @@ export function RecommendSection() {
     }
   }, [stepIndex, showResults, drawerOpen, isMobile]);
 
+  // Results entry always starts at the top of the drawer body: moving from
+  // the final quiz step to results resets the internal scroll position
+  // without moving the page or interrupting carousel navigation.
+  useEffect(() => {
+    if (showResults && drawerOpen && isMobile && typeof document !== "undefined") {
+      document.querySelector("[data-drawer-body]")?.scrollTo({ top: 0 });
+    }
+  }, [showResults, drawerOpen, isMobile]);
+
   const startSearch = (payload: RecommendPayload, remember: boolean): void => {
     const transport = toTransportPayload(payload);
     persistPrefs(
@@ -760,32 +777,14 @@ export function RecommendSection() {
   );
 
   /**
-   * Sticky drawer footer: the single primary action per view, always a
-   * min-44px target. Mirrors the desktop card actions exactly — same
-   * handlers, same validation — only the layout is bottom-docked.
+   * Sticky drawer footer for quiz steps only: the single primary action per
+   * view, always a min-44px target. Mirrors the desktop card actions exactly
+   * — same handlers, same validation — only the layout is bottom-docked.
+   * Successful results deliberately have no fixed footer (the dish owns the
+   * drawer); Adjust lives as a compact header action and Start over in the
+   * secondary disclosure below the dish.
    */
   const renderDrawerFooter = (): ReactNode => {
-    if (showResults) {
-      return (
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={backToQuiz}
-            className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-full bg-ink px-5 text-sm font-bold text-white transition hover:opacity-90"
-          >
-            {copy.recAdjust}
-          </button>
-          <button
-            type="button"
-            onClick={startOver}
-            className="inline-flex min-h-11 cursor-pointer items-center rounded-full px-4 text-sm font-bold text-muted underline decoration-2 underline-offset-4 transition hover:text-ink"
-          >
-            {copy.recStartOver}
-          </button>
-        </div>
-      );
-    }
-
     if (stepIndex < QUIZ_STEPS - 1) {
       return (
         <div className="flex items-center gap-2">
@@ -793,17 +792,19 @@ export function RecommendSection() {
             <button
               type="button"
               onClick={goBack}
-              className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink"
+              aria-label={copy.recBack}
+              className="inline-flex min-h-11 min-w-11 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-3 text-sm font-bold text-ink transition hover:border-ink"
             >
-              {copy.recBack}
+              <ArrowLeftIcon aria-hidden="true" className="size-4" />
             </button>
           ) : null}
           <button
             type="button"
             onClick={tryAdvance}
-            className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
+            className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
           >
             {copy.recContinue}
+            <ArrowRightIcon aria-hidden="true" className="size-4 flex-none" />
           </button>
         </div>
       );
@@ -814,25 +815,28 @@ export function RecommendSection() {
         <button
           type="button"
           onClick={goBack}
-          className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold text-ink transition hover:border-ink"
+          aria-label={copy.recBack}
+          className="inline-flex min-h-11 min-w-11 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-3 text-sm font-bold text-ink transition hover:border-ink"
         >
-          {copy.recBack}
+          <ArrowLeftIcon aria-hidden="true" className="size-4" />
         </button>
         <button
           type="button"
           onClick={skipExclusions}
           disabled={recommend.isPending}
-          className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold text-ink transition hover:border-ink disabled:cursor-wait disabled:opacity-70"
+          className="inline-flex min-h-11 flex-none cursor-pointer items-center gap-1.5 rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold whitespace-nowrap text-ink transition hover:border-ink disabled:cursor-wait disabled:opacity-70"
         >
-          {copy.recSkip}
+          <SkipForwardIcon aria-hidden="true" className="size-4 flex-none" />
+          {copy.recSkipShort}
         </button>
         <button
           type="button"
           onClick={findDishes}
           disabled={recommend.isPending}
-          className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-full bg-food-orange-strong px-4 text-sm font-bold text-white shadow-[0_10px_28px_rgba(194,65,12,0.35)] transition hover:bg-food-orange-dark disabled:cursor-wait disabled:opacity-70"
+          className="inline-flex min-h-11 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-full bg-food-orange-strong px-4 text-sm font-bold whitespace-nowrap text-white shadow-[0_10px_28px_rgba(194,65,12,0.35)] transition hover:bg-food-orange-dark disabled:cursor-wait disabled:opacity-70"
         >
-          {copy.recFindMine}
+          <SparklesIcon aria-hidden="true" className="size-4 flex-none" />
+          {copy.recRecommendSubmit}
         </button>
       </div>
     );
@@ -862,7 +866,19 @@ export function RecommendSection() {
             ) : null
           }
           closeLabel={lang === "vi" ? "Đóng" : "Close"}
-          footer={renderDrawerFooter()}
+          footer={showResults ? null : renderDrawerFooter()}
+          headerAction={
+            showResults ? (
+              <button
+                type="button"
+                onClick={backToQuiz}
+                aria-label={copy.recAdjust}
+                className="inline-flex min-h-11 min-w-11 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-3 text-sm font-bold text-ink transition hover:border-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+              >
+                <SlidersHorizontalIcon aria-hidden="true" className="size-4" />
+              </button>
+            ) : null
+          }
           headingId="quiz-drawer-progress"
           label={showResults ? copy.recResultsHeading : stepQuestion(stepIndex, copy)}
           lang={lang}
@@ -871,19 +887,26 @@ export function RecommendSection() {
           }}
           open={drawerOpen}
           progress={
-            showResults ? null : (
-              <div>
-                <p
-                  aria-live="polite"
-                  className="text-xs font-bold tracking-wide text-muted uppercase"
-                >
-                  {stepLabel}
+            showResults ? (
+              <p className="font-display truncate text-lg leading-tight tracking-wide text-ink">
+                {copy.recResultsHeading}
+              </p>
+            ) : (
+              <div className="min-w-0">
+                <p aria-live="polite" className="truncate text-sm">
+                  <span className="font-semibold text-muted">
+                    {stepIndex + 1}/{QUIZ_STEPS}
+                  </span>
+                  <span aria-hidden="true" className="text-muted">
+                    {" · "}
+                  </span>
+                  <span className="font-extrabold text-ink">{stepQuestion(stepIndex, copy)}</span>
                 </p>
-                <div aria-hidden="true" className="mt-1 flex gap-1.5">
+                <div aria-hidden="true" className="mt-1.5 flex gap-1">
                   {[0, 1, 2].map((dot) => (
                     <span
                       key={dot}
-                      className={`h-2 w-8 rounded-full ${dot <= stepIndex ? "bg-food-orange-strong" : "bg-border-soft"}`}
+                      className={`h-1 flex-1 rounded-full ${dot <= stepIndex ? "bg-food-orange-strong" : "bg-border-soft"}`}
                     />
                   ))}
                 </div>
@@ -897,48 +920,8 @@ export function RecommendSection() {
               : `${stepLabel}: ${stepQuestion(stepIndex, copy)}`}
           </h2>
           {showResults && submitted !== null ? (
-            <div>
-              <YourPicksCard
-                compact
-                copy={copy}
-                countryOptions={countryOptions}
-                onEditStep={editStep}
-                submitted={submitted}
-              />
-              {outcome !== null && (outcome.mode === "ai" || outcome.mode === "deterministic") ? (
-                <div className="mt-3">
-                  <AiExplanationCard copy={copy} mode={outcome.mode} ranking={outcome.ranking} />
-                </div>
-              ) : null}
-              {recommend.isPending && outcome === null ? (
-                <div className="mt-3">
-                  <ResultsExplanationSkeleton />
-                </div>
-              ) : null}
-              <div className="mt-3">
-                <SidebarPrefsCard
-                  compact
-                  copy={copy}
-                  prefs={{
-                    checked: draft.remember,
-                    hasSaved,
-                    onChange: (next) => {
-                      setDraft({ ...draft, remember: next });
-                    },
-                    onClear: () => {
-                      setConfirmClear(true);
-                    },
-                    onConfirmClear: clearSaved,
-                    onDismissClear: () => {
-                      setConfirmClear(false);
-                    },
-                    showConfirmClear: confirmClear,
-                  }}
-                />
-              </div>
-              <div aria-live="polite" aria-busy={recommend.isPending} className="mt-3">
-                {renderOutcome(copy, true)}
-              </div>
+            <div aria-live="polite" aria-busy={recommend.isPending}>
+              {renderOutcome(copy, true)}
             </div>
           ) : (
             <div>
@@ -1172,7 +1155,7 @@ export function RecommendSection() {
 
   function renderOutcome(copyMessages: Messages, compact = false) {
     if (recommend.isPending) {
-      return <ResultsLoadingSkeleton copy={copyMessages} />;
+      return <ResultsLoadingSkeleton compact={compact} copy={copyMessages} />;
     }
 
     if (recommend.isError) {
@@ -1267,6 +1250,108 @@ export function RecommendSection() {
               <AllergyNotice copy={copyMessages} />
             </div>
           ) : null}
+        </div>
+      );
+    }
+
+    // Drawer-first compact success: the dish owns the drawer. Warnings and
+    // allergy notices stay prominent above it; the Muse badge is a small
+    // disclosure, never a card above the dish. Your picks, preferences, and
+    // the full AI explanation live in one optional disclosure below the
+    // dish; Start over sits there too. No rail — the two arrows navigate.
+    if (compact) {
+      const rankingVariant =
+        outcome.mode === "deterministic" ? rankingVariantFor(outcome.mode, outcome.ranking) : null;
+
+      return (
+        <div>
+          {outcome.warnings.length > 0 ? (
+            <div className="mb-2">
+              <ResultWarnings copy={copyMessages} warnings={outcome.warnings} />
+            </div>
+          ) : null}
+          {hasAllergies ? (
+            <div className="mb-2">
+              <AllergyNotice copy={copyMessages} />
+            </div>
+          ) : null}
+          {outcome.mode === "ai" ? (
+            <details className="mb-2 rounded-full border border-border-soft bg-white px-3 py-1.5">
+              <summary className="cursor-pointer text-xs font-bold text-ink">
+                ✦ {copyMessages.recAiNote}
+              </summary>
+              <p className="px-1 pt-1 pb-1 text-xs font-semibold text-muted">
+                {copyMessages.recAiExplainer}
+              </p>
+            </details>
+          ) : (
+            <p className="mb-2 text-xs font-semibold text-muted">
+              {rankingVariant === "degraded"
+                ? copyMessages.recFallbackNote
+                : copyMessages.recCatalogNote}
+            </p>
+          )}
+          <DishCarousel
+            activeIndex={railIndex}
+            autoplay
+            autoplayMs={5000}
+            copy={copyMessages}
+            favoriteStatus={resultFavorites}
+            items={carouselItems}
+            label={copyMessages.recResultsHeading}
+            lang={lang}
+            layout="compact"
+            onIndexChange={setRailIndex}
+            resetKey={outcomeKey}
+            session={session}
+          />
+          <details className="mt-2 rounded-2xl border-2 border-border-soft bg-white px-3 py-2">
+            <summary className="cursor-pointer text-sm font-bold text-ink">
+              {copyMessages.recSummaryLabel}
+            </summary>
+            <div className="mt-2 flex min-w-0 flex-col gap-2">
+              {submitted !== null ? (
+                <YourPicksCard
+                  compact
+                  copy={copyMessages}
+                  countryOptions={countryOptions}
+                  onEditStep={editStep}
+                  submitted={submitted}
+                />
+              ) : null}
+              <SidebarPrefsCard
+                compact
+                copy={copyMessages}
+                prefs={{
+                  checked: draft.remember,
+                  hasSaved,
+                  onChange: (next) => {
+                    setDraft({ ...draft, remember: next });
+                  },
+                  onClear: () => {
+                    setConfirmClear(true);
+                  },
+                  onConfirmClear: clearSaved,
+                  onDismissClear: () => {
+                    setConfirmClear(false);
+                  },
+                  showConfirmClear: confirmClear,
+                }}
+              />
+              <AiExplanationCard
+                copy={copyMessages}
+                mode={outcome.mode}
+                ranking={outcome.ranking}
+              />
+              <button
+                type="button"
+                onClick={startOver}
+                className="inline-flex min-h-10 cursor-pointer items-center self-start rounded-full px-2 text-xs font-bold text-muted underline decoration-2 underline-offset-4 transition hover:text-ink"
+              >
+                {copyMessages.recStartOver}
+              </button>
+            </div>
+          </details>
         </div>
       );
     }

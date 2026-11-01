@@ -485,13 +485,7 @@ export function WhereStep({
 
   return (
     <fieldset className="min-w-0">
-      <legend
-        className={
-          compact
-            ? "font-display px-2 text-xl tracking-wide"
-            : "font-display px-2 text-2xl tracking-wide"
-        }
-      >
+      <legend className={compact ? "sr-only" : "font-display px-2 text-2xl tracking-wide"}>
         {copy.recWhereLegend}
       </legend>
       <p className={compact ? "mb-2 text-xs text-muted" : "mb-4 text-sm text-muted"}>
@@ -758,13 +752,7 @@ export function CravingStep({
 
   return (
     <fieldset className="min-w-0">
-      <legend
-        className={
-          compact
-            ? "font-display px-2 text-xl tracking-wide"
-            : "font-display px-2 text-2xl tracking-wide"
-        }
-      >
+      <legend className={compact ? "sr-only" : "font-display px-2 text-2xl tracking-wide"}>
         {copy.recCravingLegend}
       </legend>
       <p className={compact ? "mb-2 text-xs text-muted" : "mb-4 text-sm text-muted"}>
@@ -837,20 +825,24 @@ export function AvoidStep({
 }) {
   return (
     <fieldset className="min-w-0">
-      <legend
-        className={
-          compact
-            ? "font-display px-2 text-xl tracking-wide"
-            : "font-display px-2 text-2xl tracking-wide"
-        }
-      >
+      <legend className={compact ? "sr-only" : "font-display px-2 text-2xl tracking-wide"}>
         {copy.recAvoidTitle}
       </legend>
-      <p className={compact ? "mb-2 text-xs text-muted" : "mb-4 text-sm text-muted"}>
+      <p className={compact ? "mb-1.5 text-xs text-muted" : "mb-4 text-sm text-muted"}>
         {copy.recAvoidHint}
       </p>
-      <p className="mb-3 text-sm font-bold text-ink">{copy.recMoodRefine}</p>
-      <div className={compact ? "mb-4 flex flex-wrap gap-2" : "mb-6 flex flex-wrap gap-2"}>
+      <p
+        className={
+          compact ? "mb-1.5 text-xs font-bold text-muted" : "mb-3 text-sm font-bold text-ink"
+        }
+      >
+        {compact ? copy.recMoodShort : copy.recMoodRefine}
+      </p>
+      <div
+        className={
+          compact ? "mb-2 flex snap-x gap-2 overflow-x-auto pb-1" : "mb-6 flex flex-wrap gap-2"
+        }
+      >
         {moodOptions(copy).map((option) => {
           const selected = mood === option.value;
 
@@ -862,7 +854,7 @@ export function AvoidStep({
               onClick={() => {
                 onMood(option.value);
               }}
-              className={`inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 px-4 text-sm font-bold transition ${
+              className={`inline-flex min-h-11 flex-none cursor-pointer snap-start items-center rounded-full border-2 px-4 text-sm font-bold whitespace-nowrap transition ${
                 selected && moodTouched
                   ? "border-ink bg-ink text-white"
                   : "border-border-soft bg-white text-ink hover:border-food-orange"
@@ -873,9 +865,9 @@ export function AvoidStep({
           );
         })}
       </div>
-      <div className={compact ? "flex flex-col gap-3" : "flex flex-col gap-5"}>
+      <div className={compact ? "flex flex-col gap-2" : "flex flex-col gap-5"}>
         <div>
-          <label htmlFor="rec-avoid" className="mb-2 block text-sm font-bold text-ink">
+          <label htmlFor="rec-avoid" className="mb-1 block text-sm font-bold text-ink">
             {copy.recAvoidLabel}
           </label>
           <input
@@ -898,7 +890,7 @@ export function AvoidStep({
           ) : null}
         </div>
         <div>
-          <label htmlFor="rec-allergies" className="mb-2 block text-sm font-bold text-ink">
+          <label htmlFor="rec-allergies" className="mb-1 block text-sm font-bold text-ink">
             {copy.recAllergiesLabel}
           </label>
           <input
@@ -916,7 +908,11 @@ export function AvoidStep({
         </div>
         <p
           id="rec-allergies-note"
-          className="rounded-xl border-2 border-mango bg-cream px-4 py-3 text-sm font-semibold text-ink"
+          className={
+            compact
+              ? "rounded-xl border-2 border-mango bg-cream px-3 py-2 text-sm font-semibold text-ink"
+              : "rounded-xl border-2 border-mango bg-cream px-4 py-3 text-sm font-semibold text-ink"
+          }
         >
           {copy.recAllergyShort}
         </p>
