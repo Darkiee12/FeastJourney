@@ -323,6 +323,113 @@ describe("dish name updates", () => {
       "InvalidDishData",
     );
   });
+
+  test("keeps one preferred name per language across en, vi, and fr", async () => {
+    const dish = await createDish(slugFor("perlang"));
+
+    const added = await run(
+      Effect.flatMap(AdminService, (service) =>
+        service.updateDishNames(ACTOR, dish.id, {
+          upsert: [
+            { languageTag: "vi", name: `Tên thử ${stamp}`, nameKind: "native" },
+            { languageTag: "fr", name: `Nom essai ${stamp}`, nameKind: "localized" },
+          ],
+          removeIds: [],
+        }),
+      ),
+    );
+
+    expect(added.names.filter((row) => row.isPreferred)).toHaveLength(3);
+
+    // Preferred swap stays inside French; en/vi keep their preferred rows.
+    const swapped = await run(
+      Effect.flatMap(AdminService, (service) =>
+        service.updateDishNames(ACTOR, dish.id, {
+          upsert: [
+            {
+              languageTag: "fr",
+              name: `Alias français ${stamp}`,
+              nameKind: "alias",
+              isPreferred: true,
+            },
+          ],
+          removeIds: [],
+        }),
+      ),
+    );
+
+    const frenchPreferred = swapped.names.filter(
+      (row) => row.languageTag === "fr" && row.isPreferred,
+    );
+
+    expect(frenchPreferred).toHaveLength(1);
+    expect(frenchPreferred[0]?.name).toBe(`Alias français ${stamp}`);
+    expect(swapped.names.filter((row) => row.languageTag === "en" && row.isPreferred)).toHaveLength(
+      1,
+    );
+    expect(swapped.names.filter((row) => row.languageTag === "vi" && row.isPreferred)).toHaveLength(
+      1,
+    );
+
+    // Removing the vi preferred while a sibling survives is refused per language.
+    const withSibling = await run(
+      Effect.flatMap(AdminService, (service) =>
+        service.updateDishNames(ACTOR, dish.id, {
+          upsert: [{ languageTag: "vi", name: `Tên phụ ${stamp}`, nameKind: "alias" }],
+          removeIds: [],
+        }),
+      ),
+    );
+
+    const viPreferred = withSibling.names.find(
+      (row) => row.languageTag === "vi" && row.isPreferred,
+    );
+
+    const viSibling = withSibling.names.find(
+      (row) => row.languageTag === "vi" && row.id !== viPreferred?.id,
+    );
+
+    await expectFailure(
+      Effect.flatMap(AdminService, (service) =>
+        service.updateDishNames(ACTOR, dish.id, {
+          upsert: [],
+          removeIds: [viPreferred?.id ?? "0"],
+        }),
+      ),
+      "InvalidDishData",
+    );
+
+    // Same removal with a same-request replacement succeeds; en/fr untouched.
+    const outcome = await run(
+      Effect.flatMap(AdminService, (service) =>
+        service.updateDishNames(ACTOR, dish.id, {
+          upsert: [
+            {
+              id: viSibling?.id ?? "0",
+              languageTag: "vi",
+              name: viSibling?.name ?? "",
+              nameKind: "alias",
+              isPreferred: true,
+            },
+          ],
+          removeIds: [viPreferred?.id ?? "0"],
+        }),
+      ),
+    );
+
+    expect(outcome.names.filter((row) => row.languageTag === "vi" && row.isPreferred)).toHaveLength(
+      1,
+    );
+    expect(outcome.names.find((row) => row.languageTag === "vi" && row.isPreferred)?.name).toBe(
+      viSibling?.name,
+    );
+    expect(outcome.names.filter((row) => row.languageTag === "en" && row.isPreferred)).toHaveLength(
+      1,
+    );
+    expect(outcome.names.filter((row) => row.languageTag === "fr" && row.isPreferred)).toHaveLength(
+      1,
+    );
+  });
 });
 
 describe("dish description updates", () => {

@@ -78,7 +78,15 @@ export function DishNamesEditor({
     (row) => row.name.trim() === "" || row.name.length > 300 || !LANG_PATTERN.test(row.languageTag),
   );
 
-  const preferredCount = rows.filter((row) => row.isPreferred).length;
+  const preferredByLang = new Map<string, number>();
+
+  for (const row of rows) {
+    if (row.isPreferred) {
+      preferredByLang.set(row.languageTag, (preferredByLang.get(row.languageTag) ?? 0) + 1);
+    }
+  }
+
+  const duplicatePreferred = [...preferredByLang.values()].some((count) => count > 1);
 
   const dirty =
     removed.length > 0 ||
@@ -87,12 +95,20 @@ export function DishNamesEditor({
       snapshot.map((row) => ({ ...row, key: undefined })),
     );
 
-  const canSave = !invalid && preferredCount <= 1;
+  const canSave = !invalid && !duplicatePreferred;
 
   const openDialog = (): void => {
     setRows(snapshot);
     setRemoved([]);
     setOpen(true);
+  };
+
+  const handleClose = (): void => {
+    // Cancel restores the snapshot; failed saves keep edits for retry
+    // (the dialog stays open on failure, only success closes it).
+    setRows(snapshot);
+    setRemoved([]);
+    setOpen(false);
   };
 
   const patchRow = (key: string, patch: Partial<NameRow>): void => {
@@ -166,16 +182,14 @@ export function DishNamesEditor({
           dirty={dirty}
           error={error}
           lang={lang}
-          onClose={() => {
-            setOpen(false);
-          }}
+          onClose={handleClose}
           onSave={handleSave}
           open={open}
           pending={pending}
           title={copy.adminNames}
         >
           {missingIds ? <p className="text-sm text-muted">{copy.adminIdsPending}</p> : null}
-          <ul className="flex min-w-0 flex-col gap-4">
+          <ul className="flex min-w-0 flex-col gap-3">
             {rows.map((row) => (
               <li
                 key={row.key}
@@ -203,7 +217,7 @@ export function DishNamesEditor({
                 </div>
                 <AdminField
                   id={`name-value-${row.key}`}
-                  label={copy.adminDishName}
+                  label={copy.adminNameLabel}
                   value={row.name}
                   onChange={(event) => {
                     patchRow(row.key, { name: event.target.value });
@@ -225,9 +239,16 @@ export function DishNamesEditor({
                       className="h-5 w-5 shrink-0"
                     />
                     {copy.adminPreferred}
+                    <span className="rounded-full bg-cream px-2 py-0.5 text-xs font-bold text-food-orange-dark">
+                      {row.languageTag}
+                    </span>
                   </label>
                   {row.id === undefined && !row.key.startsWith("new-") ? null : (
-                    <AdminGhostButton type="button" onClick={() => removeRow(row)}>
+                    <AdminGhostButton
+                      type="button"
+                      aria-label={`${copy.adminRemove} ${row.name.trim() === "" ? row.languageTag : row.name.trim()}`}
+                      onClick={() => removeRow(row)}
+                    >
                       {copy.adminRemove}
                     </AdminGhostButton>
                   )}
@@ -240,9 +261,9 @@ export function DishNamesEditor({
               {copy.adminAddName}
             </AdminGhostButton>
           </div>
-          {preferredCount > 1 ? (
+          {duplicatePreferred ? (
             <p role="alert" className="text-sm font-semibold text-red-800">
-              {copy.adminSaveFailed}
+              {copy.adminPreferredSingle}
             </p>
           ) : null}
         </SectionDialog>

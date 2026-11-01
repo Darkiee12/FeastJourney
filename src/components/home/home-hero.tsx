@@ -1,11 +1,8 @@
 import { Link } from "@tanstack/react-router";
 import { MapPinned } from "lucide-react";
-import { useEffect, useState } from "react";
 
 import { SURPRISE_DISH_EVENT } from "@/components/home/globe/food-locations";
 import { GlobeCanvas } from "@/components/home/globe/globe-canvas";
-import { QUIZ_DRAWER_OPEN_EVENT, openQuizDrawer } from "@/components/home/recommend/quiz-drawer";
-import { QUIZ_DRAWER_CLOSE_EVENT } from "@/components/home/recommend/quiz-flow";
 import type { Locale, Messages } from "@/shared/i18n";
 
 function UtensilsIcon() {
@@ -48,33 +45,9 @@ function surprise() {
 }
 
 export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
-  // Drawer-signal mirror for the motion workstream: open sets the flag,
-  // close clears it. The hero never drives the drawer from here — it only
-  // exposes `data-quiz-open` so CSS can dim the globe under the sheet.
-  const [quizOpen, setQuizOpen] = useState(false);
-
-  useEffect(() => {
-    const onOpen = (): void => {
-      setQuizOpen(true);
-    };
-
-    const onClose = (): void => {
-      setQuizOpen(false);
-    };
-
-    window.addEventListener(QUIZ_DRAWER_OPEN_EVENT, onOpen);
-    window.addEventListener(QUIZ_DRAWER_CLOSE_EVENT, onClose);
-
-    return () => {
-      window.removeEventListener(QUIZ_DRAWER_OPEN_EVENT, onOpen);
-      window.removeEventListener(QUIZ_DRAWER_CLOSE_EVENT, onClose);
-    };
-  }, []);
-
   return (
     <section
       aria-label={copy.globeLabel}
-      data-quiz-open={quizOpen ? "true" : undefined}
       className="hero relative isolate flex min-h-[max(36rem,calc(100dvh-4rem))] flex-col overflow-hidden"
     >
       <div aria-hidden="true" className="hero-stars" />
@@ -99,26 +72,18 @@ export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
             search={{ lang }}
             hash="recommend"
             resetScroll={false}
-            className="hidden min-h-12 items-center justify-center gap-2 rounded-full bg-food-orange-strong px-6 text-base font-bold text-white no-underline shadow-[0_10px_28px_rgba(194,65,12,0.45)] transition hover:-translate-y-px hover:bg-food-orange-dark active:translate-y-0 sm:min-h-13 sm:px-8 sm:text-lg md:inline-flex"
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-food-orange-strong px-6 text-base font-bold text-white no-underline shadow-[0_10px_28px_rgba(194,65,12,0.45)] transition hover:-translate-y-px hover:bg-food-orange-dark active:translate-y-0 sm:min-h-13 sm:px-8 sm:text-lg"
           >
             <UtensilsIcon />
             {copy.ctaRecommend}
           </Link>
-          <button
-            type="button"
-            onClick={openQuizDrawer}
-            className="inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-full bg-food-orange-strong px-6 text-base font-bold text-white shadow-[0_10px_28px_rgba(194,65,12,0.45)] transition hover:bg-food-orange-dark sm:min-h-13 sm:px-8 sm:text-lg md:hidden"
-          >
-            <UtensilsIcon />
-            {copy.ctaRecommend}
-          </button>
 
           <Link
             to="/"
             search={{ lang }}
             hash="discover"
             resetScroll={false}
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full border-2 border-mango bg-transparent px-6 text-base font-bold text-mango transition hover:bg-mango/10 sm:min-h-13 sm:px-8 sm:text-lg"
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full border-2 border-mango bg-transparent px-6 text-base font-bold text-mango transition hover:bg-mango/10 [text-shadow:0_1px_2px_rgb(0_0_0/0.9),0_0_14px_rgb(0_0_0/0.65)] sm:min-h-13 sm:px-8 sm:text-lg"
           >
             <MapPinned aria-hidden="true" className="h-5 w-5 flex-none" />
             {copy.ctaExplore}

@@ -27,11 +27,9 @@
   --animate-popup-exit: popup-exit 380ms ease-in forwards;
   --animate-rec-step-enter: rec-step-enter 240ms ease-out;
 
-  /* Shared drawer/globe timing source of truth: the mobile quiz sheet and
-     the hero globe push read the same duration/easing so sheet and globe
-     arrive together. quiz-drawer.tsx resolves the duration live from
-     --drawer-spring-duration (fallback 450ms); never hardcode a second
-     duration elsewhere. */
+  /* Shared mobile sheet/globe timing: MobileSheet and the mobile globe
+     wrapper use the same duration/easing so sheet and globe arrive
+     together (450ms). */
   --drawer-spring-duration: 450ms;
   --drawer-spring-easing: cubic-bezier(0.32, 0.72, 0, 1);
 
@@ -129,10 +127,40 @@
     min-width: 0;
   }
 
-  main:has(> .home) {
+  /* Homepage contract: every homepage variant resets the default page
+     padding — DesktopHome renders `.home`, MobileHome renders
+     `[data-mobile-home]` (plus `.home` for contract stability). The
+     descendant form survives ClientOnly/provider wrappers that add no DOM
+     but would break a direct-child-only selector. */
+  main:has(> .home, [data-mobile-home]) {
     max-width: none;
     margin-inline: 0;
     padding: 0;
+  }
+
+  /* Mobile homepage viewport: the app shell becomes exactly one viewport
+     tall (header intrinsic + main stage fills the rest), the stage owns all
+     scrolling, and the global footer stays out of the mobile experience.
+     Desktop and all other routes are untouched (strict max-md gate). */
+  @media (max-width: 767.98px) {
+    .app-shell:has([data-mobile-home]) {
+      height: 100dvh;
+      max-height: 100dvh;
+      min-height: 100dvh;
+      overflow: clip;
+    }
+
+    .app-shell:has([data-mobile-home]) main#main {
+      display: flex;
+      min-height: 0;
+      flex: 1 1 auto;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .app-shell:has([data-mobile-home]) .site-footer {
+      display: none;
+    }
   }
 
   main:focus {
@@ -251,32 +279,6 @@
 
   @media (prefers-reduced-motion: reduce) {
     .discover-carousel-track {
-      transition: none;
-    }
-  }
-
-  /* Synchronized globe push (mobile only). While the quiz drawer is open the
-     hero section carries data-quiz-open="true" (owned by the quiz flow; this
-     stylesheet only hooks onto it and never adds hero JS). The whole
-     .hero-globe subtree — WebGL canvas, overlays, pins, static fallback —
-     lifts as one GPU-friendly translate3d layer on the shared drawer-spring
-     timing: no Canvas remount, no texture/camera/data re-init, no per-frame
-     React state. Only the globe layer moves; hero copy and CTAs are
-     siblings and never transform, so no headline/CTA overlap. Desktop never
-     lifts (max-md gate matches useIsMaxMd/md:hidden). Reduced motion snaps
-     to the final position with no prolonged animation. */
-  @media (max-width: 767.98px) {
-    .hero-globe[data-globe-lift] {
-      transition: transform var(--drawer-spring-duration) var(--drawer-spring-easing);
-    }
-
-    .hero[data-quiz-open="true"] .hero-globe[data-globe-lift] {
-      transform: translate3d(0, -12dvh, 0);
-    }
-  }
-
-  @media (max-width: 767.98px) and (prefers-reduced-motion: reduce) {
-    .hero-globe[data-globe-lift] {
       transition: none;
     }
   }

@@ -180,6 +180,21 @@ const vietnameseCopy: DiscoveryLocationCopy = {
 export const discoveryLocationCopyFor = (lang: Locale): DiscoveryLocationCopy =>
   lang === "vi" ? vietnameseCopy : englishCopy;
 
+/** Client-side country filter: localized label, English label text, or ISO code. */
+export function filterCountryOptions(
+  countries: ReadonlyArray<DiscoveryCountryOption>,
+  query: string,
+): Array<DiscoveryCountryOption> {
+  const needle = query.trim().toLowerCase();
+
+  if (needle === "") return [...countries];
+
+  return countries.filter(
+    (country) =>
+      country.label.toLowerCase().includes(needle) || country.code.toLowerCase().includes(needle),
+  );
+}
+
 /**
  * City submenu strings. Kept separate from DiscoveryLocationCopy so the
  * copy-key contract pinned by unit tests stays untouched.
@@ -507,6 +522,8 @@ function CitySearchContent(props: {
 export function DiscoveryLocation(props: DiscoveryLocationProps) {
   const copy = discoveryLocationCopyFor(props.lang);
   const cityCopy = discoveryCityCopyFor(props.lang);
+  const [countryQuery, setCountryQuery] = useState("");
+  const filteredCountries = filterCountryOptions(props.countries, countryQuery);
   const busy = props.disabled || props.locating;
   const destinationsReady = !props.countriesLoading && props.countries.length > 0;
 
@@ -583,12 +600,34 @@ export function DiscoveryLocation(props: DiscoveryLocationProps) {
                   <MapPinIcon aria-hidden="true" />
                   <span>{copy.chooseDestination}</span>
                 </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="max-h-72 overflow-y-auto">
+                <DropdownMenuSubContent className="max-h-72 w-72 overflow-y-auto">
+                  <div className="p-1">
+                    <label htmlFor="discovery-country-search" className="sr-only">
+                      {props.lang === "vi" ? "Tìm quốc gia" : "Search countries"}
+                    </label>
+                    <input
+                      id="discovery-country-search"
+                      type="search"
+                      autoComplete="off"
+                      value={countryQuery}
+                      placeholder={props.lang === "vi" ? "Tìm quốc gia…" : "Search countries…"}
+                      onChange={(event) => setCountryQuery(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Escape" && event.key !== "Tab") event.stopPropagation();
+                      }}
+                      className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-3 text-base text-ink"
+                    />
+                  </div>
+                  {filteredCountries.length === 0 ? (
+                    <output className="block px-3 py-2 text-sm text-muted">
+                      {props.lang === "vi" ? "Không có quốc gia nào khớp." : "No matching country."}
+                    </output>
+                  ) : null}
                   <DropdownMenuRadioGroup
                     value={props.selectedCountry ?? ""}
                     onValueChange={props.onChooseCountry}
                   >
-                    {props.countries.map((country) => (
+                    {filteredCountries.map((country) => (
                       <DropdownMenuRadioItem
                         key={country.code}
                         disabled={busy}

@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 
 import type { DishIngredientUpsert } from "@/components/admin/dish/edit-contracts";
+import { roleLabel } from "@/components/admin/dish/presentation";
 import {
   GatedEditTrigger,
   SectionDialog,
@@ -176,7 +177,7 @@ export function DishIngredientsEditor({
                     onValueChange={(value) => {
                       patchRow(row.key, { role: value });
                     }}
-                    options={ROLES.map((role) => ({ label: role, value: role }))}
+                    options={ROLES.map((role) => ({ label: roleLabel(role, lang), value: role }))}
                   />
                 </div>
                 <div className="flex items-end">

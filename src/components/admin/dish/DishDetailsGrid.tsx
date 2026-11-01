@@ -34,11 +34,11 @@ export function DishIngredients({
           {pick(lang, "No ingredients recorded.", "Chưa ghi nhận nguyên liệu.")}
         </p>
       ) : (
-        <ul className="flex min-w-0 flex-wrap gap-2">
+        <ul className="flex min-w-0 flex-wrap gap-1.5">
           {dish.ingredients.map((entry) => (
             <li
               key={entry.id}
-              className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-border-soft bg-cream px-3 py-1 text-sm"
+              className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-border-soft bg-cream px-2.5 py-1 text-sm"
             >
               <span className="min-w-0 truncate font-semibold">{entry.name ?? entry.id}</span>
               <span className="shrink-0 text-xs text-muted">{roleLabel(entry.role, lang)}</span>
@@ -77,11 +77,11 @@ export function DishPlaces({
           {pick(lang, "No places recorded.", "Chưa ghi nhận địa điểm.")}
         </p>
       ) : (
-        <ul className="flex min-w-0 flex-wrap gap-2">
+        <ul className="flex min-w-0 flex-wrap gap-1.5">
           {dish.places.map((entry) => (
             <li
               key={entry.id}
-              className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-border-soft bg-cream px-3 py-1 text-sm"
+              className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-border-soft bg-cream px-2.5 py-1 text-sm"
             >
               <span className="min-w-0 truncate font-semibold">{entry.name ?? entry.id}</span>
               <span className="shrink-0 text-xs text-muted">
@@ -133,13 +133,13 @@ export function DishTaxonomy({
           )}
         </p>
       ) : (
-        <div className="flex min-w-0 flex-col gap-2 text-sm">
+        <div className="flex min-w-0 flex-col gap-1.5 text-sm">
           {dish.cuisines.length > 0 ? (
-            <ul className="flex min-w-0 flex-wrap gap-2">
+            <ul className="flex min-w-0 flex-wrap gap-1.5">
               {dish.cuisines.map((entry) => (
                 <li
                   key={entry.id}
-                  className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-border-soft bg-cream px-3 py-1"
+                  className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-border-soft bg-cream px-2.5 py-1"
                 >
                   <span className="shrink-0 text-xs text-muted">{copy.adminCuisines}</span>
                   <span className="min-w-0 truncate font-semibold">{entry.name ?? entry.slug}</span>
@@ -148,11 +148,11 @@ export function DishTaxonomy({
             </ul>
           ) : null}
           {dish.categories.length > 0 ? (
-            <ul className="flex min-w-0 flex-wrap gap-2">
+            <ul className="flex min-w-0 flex-wrap gap-1.5">
               {dish.categories.map((entry) => (
                 <li
                   key={entry.id}
-                  className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-border-soft bg-cream px-3 py-1"
+                  className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-border-soft bg-cream px-2.5 py-1"
                 >
                   <span className="shrink-0 text-xs text-muted">{copy.adminCategories}</span>
                   <span className="min-w-0 truncate font-semibold">{entry.name ?? entry.slug}</span>

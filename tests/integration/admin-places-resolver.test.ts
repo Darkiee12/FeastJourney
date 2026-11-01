@@ -294,4 +294,51 @@ describe("resolvePlaceRef", () => {
 
     expect(mismatch).toBeInstanceOf(PlaceNotFound);
   });
+
+  test("finds a renamed city by its new name and forgets the old text", async () => {
+    const view = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.createPlace({
+          kind: "locality",
+          names: [{ languageTag: "en", name: `E2E Oldname ${stamp}` }],
+        }),
+      ),
+    );
+
+    ownedPlaceIds.push(view.id);
+
+    const before = await runAs(adminUserId, resolve({ city: `E2E Oldname ${stamp}` }));
+
+    expect(before.id).toBe(view.id);
+
+    const detail = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) => service.placeDetail(view.id)),
+    );
+
+    const nameId = detail.names.find((entry) => entry.languageTag === "en")?.id ?? "";
+
+    expect(nameId).toMatch(/^[0-9]+$/);
+
+    const saved = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.savePlaceNames(view.id, {
+          upsert: [{ id: nameId, languageTag: "en", name: `E2E Newname ${stamp}` }],
+          removeIds: [],
+        }),
+      ),
+    );
+
+    expect(saved.find((entry) => entry.id === nameId)?.name).toBe(`E2E Newname ${stamp}`);
+
+    const renamed = await runAs(adminUserId, resolve({ city: `E2E Newname ${stamp}` }));
+
+    expect(renamed.id).toBe(view.id);
+
+    const stale = await runAsFailure(adminUserId, resolve({ city: `E2E Oldname ${stamp}` }));
+
+    expect(stale).toBeInstanceOf(PlaceNotFound);
+  });
 });

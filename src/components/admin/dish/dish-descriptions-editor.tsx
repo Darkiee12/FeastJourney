@@ -161,7 +161,7 @@ export function DishDescriptionsEditor({
                 />
                 <div className="flex flex-col gap-1">
                   <label htmlFor={`desc-value-${row.key}`} className="text-sm font-semibold">
-                    {copy.adminDescriptions}
+                    {copy.adminDescriptionLabel}
                   </label>
                   <textarea
                     id={`desc-value-${row.key}`}

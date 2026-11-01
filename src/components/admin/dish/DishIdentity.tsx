@@ -34,7 +34,7 @@ export function DishIdentity({
 }): ReactNode {
   return (
     <CollapsiblePanel title={pick(lang, "Identity", "Định danh")} defaultOpen action={action}>
-      <dl className="flex min-w-0 flex-col gap-2 text-sm">
+      <dl className="flex min-w-0 flex-col gap-1.5 text-sm">
         <div className="min-w-0">
           <dt className="font-semibold">{copy.adminSlug}</dt>
           <dd className="min-w-0 font-mono break-words">{dish.slug}</dd>
@@ -79,7 +79,7 @@ export function DishNames({
         </span>
       }
     >
-      <dl className="flex min-w-0 flex-col gap-2 text-sm">
+      <dl className="flex min-w-0 flex-col gap-1.5 text-sm">
         <div className="min-w-0">
           <dt className="font-semibold">{pick(lang, "Display name", "Tên hiển thị")}</dt>
           <dd className="min-w-0 break-words">{canonicalName}</dd>
@@ -96,7 +96,7 @@ export function DishNames({
         )}
       </dl>
       {dish.nativeNames.length === 0 ? (
-        <p className="mt-2 text-sm text-muted">
+        <p className="mt-1.5 text-sm text-muted">
           {pick(
             lang,
             "No additional native names recorded.",
@@ -104,15 +104,24 @@ export function DishNames({
           )}
         </p>
       ) : (
-        <ul className="mt-2 flex min-w-0 flex-col gap-1 text-sm">
-          {dish.nativeNames.map((entry) => (
-            <li key={`${entry.languageTag}:${entry.name}`} className="min-w-0 break-words">
-              <span className="mr-2 inline-block rounded-full bg-cream px-2 py-0.5 text-xs font-bold text-food-orange-dark">
-                {entry.languageTag}
-              </span>
-              {entry.name}
-            </li>
-          ))}
+        <ul className="mt-1.5 flex min-w-0 flex-col gap-1 text-sm">
+          {dish.nativeNames.map((entry) => {
+            const preferred = "isPreferred" in entry && entry.isPreferred === true;
+
+            return (
+              <li key={`${entry.languageTag}:${entry.name}`} className="min-w-0 break-words">
+                <span className="mr-2 inline-block rounded-full bg-cream px-2 py-0.5 text-xs font-bold text-food-orange-dark">
+                  {entry.languageTag}
+                </span>
+                {entry.name}
+                {preferred ? (
+                  <span className="ml-2 text-xs font-bold text-food-orange-dark">
+                    · {copy.adminPreferred}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       )}
     </CollapsiblePanel>
@@ -132,9 +141,8 @@ export function DishDescriptions({
 }): ReactNode {
   return (
     <CollapsiblePanel title={copy.adminDescriptions} defaultOpen action={action}>
-      <h3 className="text-sm font-bold">{copy.adminDescriptions}</h3>
       {dish.description !== null ? (
-        <p className="mt-1 min-w-0 text-sm break-words">
+        <p className="min-w-0 text-sm break-words">
           {dish.description}
           {dish.descriptionLanguage !== null ? (
             <span className="ml-2 inline-block rounded-full bg-cream px-2 py-0.5 text-xs font-bold text-food-orange-dark">
@@ -143,7 +151,7 @@ export function DishDescriptions({
           ) : null}
         </p>
       ) : (
-        <p className="mt-1 text-sm text-muted">
+        <p className="text-sm text-muted">
           {pick(lang, "No description recorded.", "Chưa có mô tả.")}
         </p>
       )}

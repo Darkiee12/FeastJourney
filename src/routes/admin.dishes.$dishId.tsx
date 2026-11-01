@@ -286,7 +286,7 @@ function AdminDishDetail() {
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-3">
       <DishHeader
         lang={lang}
         labLabel={copy.adminWorkspace}
@@ -313,7 +313,7 @@ function AdminDishDetail() {
 
       <DishPhotosPanel dishId={dish.id} lang={lang} />
 
-      <div className="grid min-w-0 gap-4 md:grid-cols-2">
+      <div className="grid min-w-0 gap-3 md:grid-cols-2">
         <DishIdentity
           dish={dish}
           lang={lang}
@@ -343,7 +343,7 @@ function AdminDishDetail() {
         />
       </div>
 
-      <div className="grid min-w-0 gap-4 md:grid-cols-2">
+      <div className="grid min-w-0 gap-3 md:grid-cols-2">
         <DishNames
           dish={dish}
           lang={lang}
@@ -368,7 +368,7 @@ function AdminDishDetail() {
         />
       </div>
 
-      <div className="grid min-w-0 gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid min-w-0 gap-3 md:grid-cols-2 lg:grid-cols-3">
         <DishPlaces
           dish={dish}
           lang={lang}
@@ -394,7 +394,7 @@ function AdminDishDetail() {
         <DishProvenance dish={dish} lang={lang} copy={copy} />
       </div>
 
-      <div className="grid min-w-0 gap-4 md:grid-cols-2">
+      <div className="grid min-w-0 gap-3 md:grid-cols-2">
         <DishNotes notes={notes} lang={lang} copy={copy} />
         <RevisionTimeline dishId={dish.id} lang={lang} copy={copy} fetchPage={fetchPage} />
       </div>

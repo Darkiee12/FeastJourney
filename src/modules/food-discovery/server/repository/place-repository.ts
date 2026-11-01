@@ -17,9 +17,11 @@ import placeListWithNames from "@/modules/food-discovery/server/repository/sql/p
 import placeNameDelete from "@/modules/food-discovery/server/repository/sql/place-name-delete.sql";
 import placeNameInsert from "@/modules/food-discovery/server/repository/sql/place-name-insert.sql";
 import placeNamePromote from "@/modules/food-discovery/server/repository/sql/place-name-promote.sql";
+import placeNameUpdate from "@/modules/food-discovery/server/repository/sql/place-name-update.sql";
 import placeNamesByPlaceIds from "@/modules/food-discovery/server/repository/sql/place-names-by-place-ids.sql";
 import placeNamesDemote from "@/modules/food-discovery/server/repository/sql/place-names-demote.sql";
 import placeNamesWithIdsByPlaceIds from "@/modules/food-discovery/server/repository/sql/place-names-with-ids-by-place-ids.sql";
+import placeNearestCity from "@/modules/food-discovery/server/repository/sql/place-nearest-city.sql";
 import placeParentDelete from "@/modules/food-discovery/server/repository/sql/place-parent-delete.sql";
 import placeParentInsert from "@/modules/food-discovery/server/repository/sql/place-parent-insert.sql";
 import placeParentsAll from "@/modules/food-discovery/server/repository/sql/place-parents-all.sql";
@@ -57,6 +59,10 @@ export type PlaceNameWithIdRow = (typeof placeNamesWithIdsByPlaceIds)["~reylo"][
 
 export type PlaceNamePromoteRow = (typeof placeNamePromote)["~reylo"]["element"];
 
+export type PlaceNameUpdateRow = (typeof placeNameUpdate)["~reylo"]["element"];
+
+export type PlaceNearestCityRow = (typeof placeNearestCity)["~reylo"]["element"];
+
 export type PlaceDeletedRow = (typeof placeDelete)["~reylo"]["element"];
 
 export type PlaceNameDeletedRow = (typeof placeNameDelete)["~reylo"]["element"];
@@ -86,6 +92,15 @@ export interface PlaceListAdminInput {
 }
 
 export interface PlaceNameInsertInput {
+  readonly placeId: bigint;
+  readonly languageTag: string;
+  readonly name: string;
+  readonly isPreferred: boolean;
+  readonly searchKey: string;
+}
+
+export interface PlaceNameUpdateInput {
+  readonly id: bigint;
   readonly placeId: bigint;
   readonly languageTag: string;
   readonly name: string;
@@ -141,6 +156,17 @@ export class PlaceRepository extends Context.Service<
       id: bigint,
     ) => Effect.Effect<ReadonlyArray<PlaceAncestorRow>, DatabaseError, Database>;
     readonly coordsAll: () => Effect.Effect<ReadonlyArray<PlaceCoordsRow>, DatabaseError, Database>;
+    /**
+     * Nearest city-scale place id to a coordinate pair within the caller's
+     * max distance, or null when no city-scale place is close enough. Only
+     * locality/province/subnational rows with coordinates count — country,
+     * region, and continent centroids never pose as the visitor's city.
+     */
+    readonly nearestCityId: (input: {
+      readonly latitude: number;
+      readonly longitude: number;
+      readonly maxDistanceM: number;
+    }) => Effect.Effect<{ readonly id: bigint } | null, DatabaseError, Database>;
     readonly dishIdsByPlace: (input: {
       readonly placeId: bigint;
       readonly status: string;
@@ -196,6 +222,14 @@ export class PlaceRepository extends Context.Service<
       readonly id: bigint;
       readonly placeId: bigint;
     }) => Effect.Effect<PlaceNamePromoteRow | null, DatabaseError, Database>;
+    /**
+     * ID-preserving rename: updates language tag, text, preferred flag,
+     * and derived search key for one name row scoped to its place.
+     * Returns null when the row moved places or vanished mid-transaction.
+     */
+    readonly updateName: (
+      input: PlaceNameUpdateInput,
+    ) => Effect.Effect<PlaceNameUpdateRow | null, DatabaseError, Database>;
     readonly deleteName: (input: {
       readonly id: bigint;
       readonly placeId: bigint;
@@ -303,6 +337,22 @@ export const PlaceRepositoryLive = Layer.succeed(PlaceRepository, {
   coordsAll: () =>
     Effect.gen(function* () {
       return yield* runQuery("place/coords-all", (sql) => placeCoordsAll.run(sql, {}));
+    }),
+  nearestCityId: (input) =>
+    Effect.gen(function* () {
+      const row = yield* runQuery("place/nearest-city", (sql) =>
+        placeNearestCity.run(sql, {
+          latitude: input.latitude,
+          longitude: input.longitude,
+          max_distance_m: input.maxDistanceM,
+        }),
+      );
+
+      if (row === null) {
+        return null;
+      }
+
+      return { id: row.id };
     }),
   dishIdsByPlace: (input) =>
     Effect.gen(function* () {
@@ -444,6 +494,25 @@ export const PlaceRepositoryLive = Layer.succeed(PlaceRepository, {
       return yield* runQuery("place/name-promote", (sql) =>
         placeNamePromote.run(sql, { id: input.id, place_id: input.placeId }),
       );
+    }),
+  updateName: (input) =>
+    Effect.gen(function* () {
+      const outcome = yield* runQuery("place/name-update", (sql) =>
+        placeNameUpdate.try(sql, {
+          id: input.id,
+          place_id: input.placeId,
+          language_tag: input.languageTag,
+          name: input.name,
+          is_preferred: input.isPreferred,
+          search_key: input.searchKey,
+        }),
+      );
+
+      if (outcome.error !== undefined) {
+        return yield* insertConflict("place/name-update", outcome);
+      }
+
+      return outcome.value;
     }),
   deleteName: (input) =>
     Effect.gen(function* () {

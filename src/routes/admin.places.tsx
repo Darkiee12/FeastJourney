@@ -1,8 +1,9 @@
 import { Link, createFileRoute, getRouteApi, redirect, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { z } from "zod";
 
 import { PLACE_KINDS, type PlaceListItem } from "@/components/admin/places/place-contracts";
+import { normalizeParentId } from "@/components/admin/places/place-grammar";
 import { PlaceSelector } from "@/components/admin/places/PlaceSelector";
 import { PlaceTable } from "@/components/admin/places/PlaceTable";
 import { AdminSelectField } from "@/components/admin/select";
@@ -12,12 +13,11 @@ import {
   AdminPageHeading,
   AdminRouteError,
 } from "@/components/admin/ui";
-import { normalizeParentId } from "@/components/admin/places/place-grammar";
 import { adminPlacesListFn } from "@/modules/food-discovery/place.functions";
 import { placeKindSchema, type AdminPlacesList } from "@/modules/food-discovery/place.schema";
 import { authorizeFn } from "@/modules/user/admin.functions";
 import { getSessionFn } from "@/modules/user/session.functions";
-import { localeSearchSchema, messagesFor, type Locale } from "@/shared/i18n";
+import { localeSearchSchema, messagesFor, type Locale, type Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -103,6 +103,98 @@ export interface PlacesLoaderData {
   readonly pageSize: number;
 }
 
+/**
+ * Toolbar form with local drafts. Keyed by the applied URL filters so
+ * back/forward navigation remounts with fresh drafts — no sync effect, no
+ * stale values, and typing never remounts mid-keystroke.
+ */
+function PlacesFilterForm({
+  copy,
+  initialKind,
+  initialParentId,
+  initialQuery,
+  lang,
+  onApply,
+}: {
+  readonly copy: Messages;
+  readonly initialKind: string;
+  readonly initialParentId: string;
+  readonly initialQuery: string;
+  readonly lang: Locale;
+  readonly onApply: (filters: { kind: string; parentId: string; query: string }) => void;
+}): ReactNode {
+  const [draftQuery, setDraftQuery] = useState(initialQuery);
+  const [draftKind, setDraftKind] = useState(initialKind);
+  const [draftParentId, setDraftParentId] = useState(initialParentId);
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    // Single submit per Enter keypress or Search click: inputs carry no
+    // key handlers of their own, so filtering can never double-fire.
+    event.preventDefault();
+    onApply({ kind: draftKind, parentId: draftParentId, query: draftQuery });
+  };
+
+  const handleClear = (): void => {
+    setDraftQuery("");
+    setDraftKind("");
+    setDraftParentId("");
+    onApply({ kind: "", parentId: "", query: "" });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-[minmax(0,1fr)_12rem_minmax(0,17rem)_auto] md:items-end">
+        <div className="min-w-0 sm:col-span-2 md:col-span-1">
+          <label htmlFor="places-query" className="sr-only">
+            {copy.adminSearchPlaces}
+          </label>
+          <input
+            id="places-query"
+            type="search"
+            value={draftQuery}
+            placeholder={copy.adminSearchPlacesPlaceholder}
+            onChange={(event) => {
+              setDraftQuery(event.target.value);
+            }}
+            className="min-h-11 w-full min-w-0 rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink outline-none focus-visible:border-brand-blue focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+          />
+        </div>
+        <div className="min-w-0">
+          <AdminSelectField
+            id="places-kind"
+            label={copy.adminKind}
+            value={draftKind}
+            onValueChange={setDraftKind}
+            triggerClassName="w-full"
+            options={[
+              { label: copy.adminAllKinds, value: "" },
+              ...PLACE_KINDS.map((entry) => ({ label: entry, value: entry })),
+            ]}
+          />
+        </div>
+        <div className="min-w-0">
+          <PlaceSelector
+            id="places-parent"
+            label={copy.adminParentFilter}
+            copy={copy}
+            lang={lang}
+            variant="parentFilter"
+            placeholder={copy.adminSearchPlacesPlaceholder}
+            value={draftParentId}
+            onChange={setDraftParentId}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:col-span-2 md:col-span-1">
+          <AdminGhostButton type="submit">{copy.adminSearchPlaces}</AdminGhostButton>
+          <AdminGhostButton type="button" onClick={handleClear}>
+            {copy.adminImportsClearFilters}
+          </AdminGhostButton>
+        </div>
+      </div>
+    </form>
+  );
+}
+
 function AdminPlaces() {
   const { lang } = rootRoute.useSearch();
   const search = Route.useSearch();
@@ -110,43 +202,15 @@ function AdminPlaces() {
   const data = Route.useLoaderData();
   const navigate = useNavigate({ from: Route.fullPath });
 
-  const [draftQuery, setDraftQuery] = useState(search.query);
-  const [draftKind, setDraftKind] = useState(search.kind);
-  const [draftParentId, setDraftParentId] = useState(search.parentId);
-
-  // Back/forward navigation restores URL filters; mirror them into the
-  // drafts so the toolbar never shows stale values.
-  useEffect(() => {
-    setDraftQuery(search.query);
-    setDraftKind(search.kind);
-    setDraftParentId(search.parentId);
-  }, [search.kind, search.parentId, search.query]);
-
-  const applyFilters = (): void => {
+  const applyFilters = (filters: { kind: string; parentId: string; query: string }): void => {
     void navigate({
       search: (previous) => ({
         ...previous,
-        query: draftQuery,
-        kind: draftKind,
-        parentId: draftParentId,
+        query: filters.query,
+        kind: filters.kind,
+        parentId: filters.parentId,
         page: 1,
       }),
-    });
-  };
-
-  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
-    // Single submit per Enter keypress or Search click: inputs carry no
-    // key handlers of their own, so filtering can never double-fire.
-    event.preventDefault();
-    applyFilters();
-  };
-
-  const clearFilters = (): void => {
-    setDraftQuery("");
-    setDraftKind("");
-    setDraftParentId("");
-    void navigate({
-      search: (previous) => ({ ...previous, query: "", kind: "", parentId: "", page: 1 }),
     });
   };
 
@@ -156,7 +220,7 @@ function AdminPlaces() {
     <div className="flex flex-col gap-4">
       <AdminPageHeading
         title={copy.adminPlaces}
-        description={copy.adminPlaceGrammarIntro}
+        description={copy.adminPlacesDescription}
         action={
           <Link
             to="/admin/places/$placeId"
@@ -177,56 +241,17 @@ function AdminPlaces() {
 
       <fieldset className="rounded-2xl border border-border-soft bg-white p-4">
         <legend className="px-1 text-sm font-bold">{copy.adminSearchPlaces}</legend>
-        <form onSubmit={handleSubmit}>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-[minmax(0,1fr)_12rem_minmax(0,17rem)_auto] md:items-end">
-            <div className="min-w-0 sm:col-span-2 md:col-span-1">
-              <label htmlFor="places-query" className="sr-only">
-                {copy.adminSearchPlaces}
-              </label>
-              <input
-                id="places-query"
-                type="search"
-                value={draftQuery}
-                placeholder={copy.adminSearchPlacesPlaceholder}
-                onChange={(event) => {
-                  setDraftQuery(event.target.value);
-                }}
-                className="min-h-11 w-full min-w-0 rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink outline-none focus-visible:border-brand-blue focus-visible:ring-2 focus-visible:ring-brand-blue/40"
-              />
-            </div>
-            <div className="min-w-0">
-              <AdminSelectField
-                id="places-kind"
-                label={copy.adminKind}
-                value={draftKind}
-                onValueChange={setDraftKind}
-                triggerClassName="w-full"
-                options={[
-                  { label: copy.adminAllKinds, value: "" },
-                  ...PLACE_KINDS.map((entry) => ({ label: entry, value: entry })),
-                ]}
-              />
-            </div>
-            <div className="min-w-0">
-              <PlaceSelector
-                id="places-parent"
-                label={copy.adminParentFilter}
-                copy={copy}
-                lang={lang}
-                variant="parentFilter"
-                placeholder={copy.adminSearchPlacesPlaceholder}
-                value={draftParentId}
-                onChange={setDraftParentId}
-              />
-            </div>
-            <div className="flex flex-wrap items-center gap-2 sm:col-span-2 md:col-span-1">
-              <AdminGhostButton type="submit">{copy.adminSearchPlaces}</AdminGhostButton>
-              <AdminGhostButton type="button" onClick={clearFilters}>
-                {copy.adminImportsClearFilters}
-              </AdminGhostButton>
-            </div>
-          </div>
-        </form>
+        <PlacesFilterForm
+          key={`${search.query}
+${search.kind}
+${search.parentId}`}
+          copy={copy}
+          lang={lang}
+          initialQuery={search.query}
+          initialKind={search.kind}
+          initialParentId={search.parentId}
+          onApply={applyFilters}
+        />
       </fieldset>
 
       {data.items.length === 0 ? (

@@ -201,6 +201,7 @@ export function DishPlacesEditor({
           pending={pending}
           title={copy.adminPlaces}
         >
+          <p className="text-sm text-muted">{copy.adminPlaceGrammarIntro}</p>
           <ul className="flex min-w-0 flex-col gap-4">
             {rows.map((row) => (
               <li

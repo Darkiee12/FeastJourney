@@ -11,12 +11,8 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { DishCarousel } from "@/components/dish/dish-carousel";
-import {
-  openQuizDrawer,
-  QUIZ_DRAWER_OPEN_EVENT,
-  QuizDrawer,
-  useIsMaxMd,
-} from "@/components/home/recommend/quiz-drawer";
+import { useMobileHomeOptional } from "@/components/home/mobile/mobile-home-context";
+import { useIsMaxMd } from "@/components/home/recommend/quiz-drawer";
 import {
   buildRecommendPayload,
   buildSurprisePayload,
@@ -83,16 +79,6 @@ import { messagesFor, type Messages } from "@/shared/i18n";
 const rootRoute = getRouteApi("__root__");
 
 const QUIZ_STEPS = 3;
-
-/**
- * Cross-component signal for drawer dismissal. The hero owns no shared
- * parent with this flow, so it listens for both the motion-owned open event
- * and this close event to mirror the drawer state as `data-quiz-open` for
- * globe dimming. Defined and dispatched here because quiz-drawer.tsx is
- * owned by the motion workstream — same `feastjourney:` namespace, same
- * fire-and-forget CustomEvent shape as QUIZ_DRAWER_OPEN_EVENT.
- */
-export const QUIZ_DRAWER_CLOSE_EVENT = "feastjourney:close-quiz-drawer";
 
 type RecommendResult = Awaited<ReturnType<typeof recommendDishesFn>>;
 
@@ -164,12 +150,32 @@ export function RecommendSection() {
   const [moodTouched, setMoodTouched] = useState<boolean>(initial.moodTouched);
   const [excludedTouched, setExcludedTouched] = useState<boolean>(initial.excludedTouched);
   const explicitRegionRef = useRef(initial.regionTouched);
+  /**
+   * Latest region draft for same-tick readers: `commit` calls `onDraft`
+   * then `onAdvance` synchronously, so `tryAdvance` must validate the
+   * just-picked candidate instead of the pre-update render state. Mirrors
+   * `explicitRegionRef` — state lags within the tick, the ref does not.
+   * Only region funnels write it; every other draft reader runs after a
+   * commit or builds its payload from an explicit local.
+   */
+  const draftRef = useRef(initial.draft);
   const precise = usePreciseLocation();
+
+  // Keep the ref truthful for writers that bypass updateRegionDraft
+  // (reset/remember paths): the effect flushes after every commit, while
+  // the setter-site write above covers same-tick readers before it.
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
 
   /** Region edits are always explicit and must never be clobbered by async detection. */
   const updateRegionDraft = (next: QuizDraft): void => {
     explicitRegionRef.current = true;
+    draftRef.current = next;
     setRegionTouched(true);
+    // A stale step error (e.g. "choose a country") never survives a new
+    // region choice: validation re-runs on the next Continue instead.
+    setStepError(null);
     setDraft(next);
   };
 
@@ -197,7 +203,6 @@ export function RecommendSection() {
   const [submitted, setSubmitted] = useState<RecommendPayload | null>(journey?.submitted ?? null);
   const [confirmClear, setConfirmClear] = useState<boolean>(false);
   const [surpriseSeed, setSurpriseSeed] = useState<number>(journey?.surpriseSeed ?? 0);
-  const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
   /**
    * Guest save-sheet visibility, reported up from the nested sheet inside
    * the results carousel. While true the quiz drawer defers its Escape
@@ -205,12 +210,39 @@ export function RecommendSection() {
    * the drawer closes (the sheet unmounts with it).
    */
   const [saveSheetOpen, setSaveSheetOpen] = useState<boolean>(false);
-  const isMobile = useIsMaxMd();
+  const mobile = useMobileHomeOptional();
+  const embeddedMobile = mobile !== null;
+  // Legacy standalone mounts (tests/other routes) keep viewport detection;
+  // route mounts are split by MobileHome/DesktopHome so context presence is
+  // the authoritative presentation signal and only one quiz tree mounts.
+  const legacyIsMobile = useIsMaxMd();
+  const isMobile = embeddedMobile || legacyIsMobile;
+
+  const drawerOpen = embeddedMobile
+    ? mobile.state.mode === "quiz" || mobile.state.mode === "results"
+    : false;
 
   const [hasSaved, setHasSaved] = useState<boolean>(() => savedInitial !== null);
 
+  useEffect(() => {
+    mobile?.setNestedDialogOpen(saveSheetOpen);
+  }, [mobile, saveSheetOpen]);
+
+  useEffect(() => {
+    if (mobile === null) return;
+
+    if (showResults && mobile.state.mode === "quiz") {
+      mobile.showResults();
+    }
+
+    if (!showResults && mobile.state.mode === "results") {
+      mobile.openQuiz();
+    }
+  }, [mobile, showResults]);
+
   const stepHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const drawerHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const mobileBodyRef = useRef<HTMLDivElement | null>(null);
   const skipInitialFocusRef = useRef(true);
 
   const regionQuery = useQuery({
@@ -528,49 +560,8 @@ export function RecommendSection() {
     }
   }, [userId, queryClient]);
 
-  // Mobile drawer trigger: the hero CTA (a sibling section with no shared
-  // parent this phase owns) dispatches QUIZ_DRAWER_OPEN_EVENT. Opening or
-  // closing the drawer only flips its open flag — the draft, answers, rail
-  // index, and journey snapshot are untouched.
-  useEffect(() => {
-    const onOpen = (): void => {
-      setDrawerOpen(true);
-    };
-
-    window.addEventListener(QUIZ_DRAWER_OPEN_EVENT, onOpen);
-
-    return () => {
-      window.removeEventListener(QUIZ_DRAWER_OPEN_EVENT, onOpen);
-    };
-  }, []);
-
-  // Deep-link entry: landing directly on #recommend on a phone opens the
-  // drawer instead of leaving the visitor at a slim anchor section. Also
-  // listens for in-app hash changes so bookmarked links keep working after
-  // the visible duplicate section was removed (drawer-first mobile). Goes
-  // through the shared open event (not a direct state set) so the hero's
-  // mirrored drawer state — and therefore the globe push — stays in sync.
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return undefined;
-    }
-
-    const maybeOpenFromHash = (): void => {
-      if (
-        window.location.hash === "#recommend" &&
-        window.matchMedia("(max-width: 767.98px)").matches
-      ) {
-        openQuizDrawer();
-      }
-    };
-
-    maybeOpenFromHash();
-    window.addEventListener("hashchange", maybeOpenFromHash);
-
-    return () => {
-      window.removeEventListener("hashchange", maybeOpenFromHash);
-    };
-  }, []);
+  // Deep links are handled by MobileHome (context owner) on mobile and by
+  // normal document anchors on desktop; no window-event coordination here.
 
   // Predictable focus: each step and the results heading receive focus on
   // entry (without scrolling), so keyboard and screen-reader users land on
@@ -598,8 +589,8 @@ export function RecommendSection() {
   // the final quiz step to results resets the internal scroll position
   // without moving the page or interrupting carousel navigation.
   useEffect(() => {
-    if (showResults && drawerOpen && isMobile && typeof document !== "undefined") {
-      document.querySelector("[data-drawer-body]")?.scrollTo({ top: 0 });
+    if (showResults && drawerOpen && isMobile) {
+      mobileBodyRef.current?.scrollTo({ top: 0 });
     }
   }, [showResults, drawerOpen, isMobile]);
 
@@ -653,13 +644,18 @@ export function RecommendSection() {
    * guard and the defensive backstop.
    */
   const tryAdvance = (): void => {
+    // Validate the latest draft, not the render snapshot: `commit` runs
+    // this synchronously after a region pick, and the state update has
+    // not committed yet within the same tick.
+    const live = draftRef.current;
+
     if (stepIndex === 0) {
       const regionError = validateRegion(
-        draft.regionMode,
-        draft.country,
+        live.regionMode,
+        live.country,
         copy,
-        draft.precise,
-        draft.cityId,
+        live.precise,
+        live.cityId,
       );
 
       if (regionError !== null) {
@@ -1117,55 +1113,18 @@ export function RecommendSection() {
     );
   };
 
-  if (isMobile) {
+  if (embeddedMobile) {
     return (
-      <>
-        {/* Drawer-first mobile: nonvisual anchor preserves #recommend
-            deep-links, bookmarks, and screen-reader targets without
-            reserving vertical space or rendering a second entry section.
-            Hierarchy stays: hero → globe → drawer (on demand) → Discover.
-            Desktop keeps its full visible section below. */}
+      <div className="flex min-h-0 flex-1 flex-col" data-quiz-sheet>
         <span
           id="recommend"
           aria-hidden="true"
           tabIndex={-1}
           className="block h-0 w-full overflow-hidden"
         />
-        <QuizDrawer
-          cityChip={
-            draft.cityId !== null && draft.cityLabel !== null ? (
-              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border-2 border-ink bg-ink px-3 py-1 text-xs font-bold text-white">
-                <MapPinIcon aria-hidden="true" className="size-3.5 flex-none" />
-                <span className="truncate">{draft.cityLabel}</span>
-              </span>
-            ) : null
-          }
-          closeLabel={lang === "vi" ? "Đóng" : "Close"}
-          footer={showResults ? null : renderDrawerFooter()}
-          headerAction={
-            showResults ? (
-              <button
-                type="button"
-                onClick={backToQuiz}
-                aria-label={copy.recAdjust}
-                className="inline-flex min-h-11 min-w-11 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-3 text-sm font-bold text-ink transition hover:border-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
-              >
-                <SlidersHorizontalIcon aria-hidden="true" className="size-4" />
-              </button>
-            ) : null
-          }
-          headingId="quiz-drawer-progress"
-          label={showResults ? copy.recRecommendationsHeading : stepQuestion(stepIndex, copy)}
-          lang={lang}
-          nestedDialogOpen={saveSheetOpen}
-          onClose={() => {
-            setDrawerOpen(false);
-            setSaveSheetOpen(false);
-            window.dispatchEvent(new CustomEvent(QUIZ_DRAWER_CLOSE_EVENT));
-          }}
-          open={drawerOpen}
-          progress={
-            showResults ? (
+        <div className="flex flex-none items-center justify-between gap-2 px-4 pt-1">
+          <div className="min-w-0 flex-1">
+            {showResults ? (
               <p className="truncate text-base font-extrabold tracking-wide text-ink">
                 {copy.recRecommendationsHeading}
               </p>
@@ -1176,7 +1135,8 @@ export function RecommendSection() {
                     {stepIndex + 1}/{QUIZ_STEPS}
                   </span>
                   <span aria-hidden="true" className="text-muted">
-                    {" · "}
+                    {" "}
+                    ·{" "}
                   </span>
                   <span className="font-extrabold text-ink">{stepQuestion(stepIndex, copy)}</span>
                 </p>
@@ -1189,8 +1149,31 @@ export function RecommendSection() {
                   ))}
                 </div>
               </div>
-            )
-          }
+            )}
+          </div>
+          {showResults ? (
+            <button
+              type="button"
+              onClick={backToQuiz}
+              aria-label={copy.recAdjust}
+              className="inline-flex min-h-11 min-w-11 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-3 text-sm font-bold text-ink"
+            >
+              <SlidersHorizontalIcon aria-hidden="true" className="size-4" />
+            </button>
+          ) : null}
+        </div>
+        {draft.cityId !== null && draft.cityLabel !== null ? (
+          <div className="flex-none px-4 pt-2">
+            <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border-2 border-ink bg-ink px-3 py-1 text-xs font-bold text-white">
+              <MapPinIcon aria-hidden="true" className="size-3.5 flex-none" />
+              <span className="truncate">{draft.cityLabel}</span>
+            </span>
+          </div>
+        ) : null}
+        <div
+          ref={mobileBodyRef}
+          data-drawer-body
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3"
         >
           <h2 ref={drawerHeadingRef} tabIndex={-1} className="sr-only">
             {showResults
@@ -1215,8 +1198,13 @@ export function RecommendSection() {
               ) : null}
             </div>
           )}
-        </QuizDrawer>
-      </>
+        </div>
+        {showResults ? null : (
+          <div className="flex-none border-t-2 border-border-soft bg-cream px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            {renderDrawerFooter()}
+          </div>
+        )}
+      </div>
     );
   }
 

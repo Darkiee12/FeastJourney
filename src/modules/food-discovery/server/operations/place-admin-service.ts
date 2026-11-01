@@ -209,6 +209,31 @@ export interface UpdatePlaceInput {
 }
 
 /**
+ * One entry of an atomic place-name save: `id` present renames that name
+ * row in place (row and place ids never change); absent inserts a new row.
+ * `isPreferred` absent keeps the stored flag for edits, or the
+ * first-per-language default for inserts.
+ */
+export interface PlaceNameSaveEntry {
+  readonly id?: string | undefined;
+  readonly languageTag: string;
+  readonly name: string;
+  readonly isPreferred?: boolean | undefined;
+}
+
+/**
+ * Atomic multi-row name save: renames (by id), inserts (no id), and
+ * deletes (by id) apply in one transaction or all roll back. Deleting a
+ * preferred name while same-language siblings survive auto-promotes the
+ * oldest sibling; no language is ever left without exactly one preferred
+ * row unless the request marks a replacement preferred.
+ */
+export interface SavePlaceNamesInput {
+  readonly upsert: ReadonlyArray<PlaceNameSaveEntry>;
+  readonly removeIds: ReadonlyArray<string>;
+}
+
+/**
  * Portable place reference resolver input, shared by every workstream that
  * links dishes to places (admin UI, import studio, dish editor). Exactly one
  * variant is set: a registry id, an ISO 3166 code, or a city display name
@@ -339,11 +364,47 @@ const toNameView = (row: PlaceNameWithIdRow): PlaceNameView => ({
   searchKey: row.search_key,
 });
 
-const pickDisplayName = (names: ReadonlyArray<PlaceNameRow>): string | null => {
-  const english = names.find((entry) => entry.is_preferred && entry.language_tag === "en");
+const oldestNameRowOf = (
+  rows: ReadonlyArray<PlaceNameRow | PlaceNameWithIdRow>,
+): PlaceNameRow | PlaceNameWithIdRow | undefined => {
+  const [first, ...rest] = rows;
 
-  if (english !== undefined) {
-    return english.name;
+  if (first === undefined) {
+    return undefined;
+  }
+
+  let oldest = first;
+
+  for (const entry of rest) {
+    if ("id" in entry && "id" in oldest && entry.id < oldest.id) {
+      oldest = entry;
+    }
+  }
+
+  return oldest;
+};
+
+const pickDisplayName = (
+  names: ReadonlyArray<PlaceNameRow | PlaceNameWithIdRow>,
+): string | null => {
+  // Per-language election: callers (detail, resolver, delete summary) show
+  // one name, and every language keeps at most one preferred row (partial
+  // unique index). English preferred wins; when English has rows but no
+  // preferred row, the oldest English row wins — never a preferred alias
+  // from another language. Otherwise any preferred row, else the oldest
+  // row. "Oldest" is the smallest name-row id; id-less read projections
+  // keep database order as the tiebreak.
+  const english = names.filter((entry) => entry.language_tag === "en");
+  const englishPreferred = english.find((entry) => entry.is_preferred);
+
+  if (englishPreferred !== undefined) {
+    return englishPreferred.name;
+  }
+
+  const oldestEnglish = oldestNameRowOf(english);
+
+  if (oldestEnglish !== undefined) {
+    return oldestEnglish.name;
   }
 
   const preferred = names.find((entry) => entry.is_preferred);
@@ -352,9 +413,9 @@ const pickDisplayName = (names: ReadonlyArray<PlaceNameRow>): string | null => {
     return preferred.name;
   }
 
-  const first = names[0];
+  const oldest = oldestNameRowOf(names);
 
-  return first === undefined ? null : first.name;
+  return oldest === undefined ? null : oldest.name;
 };
 
 const actorLabel = (actor: Actor): string => describeActor(actor).slice(0, 200);
@@ -523,6 +584,22 @@ export interface PlaceAdminApi {
     nameId: string,
   ) => Effect.Effect<
     { readonly removedNameId: string; readonly promotedNameId: string | null },
+    PlaceMutationError,
+    Database | Authorization | CurrentActor | RoleRepository
+  >;
+  /**
+   * Atomic rename/insert/delete of a place's names in a single
+   * transaction. Preferred-name handling is per language: every final
+   * language keeps exactly one preferred row; explicit `isPreferred: true`
+   * wins, otherwise the kept stored preferred, otherwise the oldest
+   * surviving row (auto-promotion). Any validation failure rolls back all
+   * rows and the revision write.
+   */
+  readonly savePlaceNames: (
+    placeId: string,
+    input: SavePlaceNamesInput,
+  ) => Effect.Effect<
+    ReadonlyArray<PlaceNameView>,
     PlaceMutationError,
     Database | Authorization | CurrentActor | RoleRepository
   >;
@@ -729,9 +806,9 @@ export const PlaceAdminServiceLive = Layer.effect(
         const relatedIds = [...ancestors.map((row) => row.id), ...children.map((row) => row.id)];
 
         const relatedNames =
-          relatedIds.length === 0 ? [] : yield* places.namesByPlaceIds(relatedIds);
+          relatedIds.length === 0 ? [] : yield* places.namesWithIdsByPlaceIds(relatedIds);
 
-        const namesByPlace = new Map<string, Array<PlaceNameRow>>();
+        const namesByPlace = new Map<string, Array<PlaceNameRow | PlaceNameWithIdRow>>();
 
         for (const row of [...names, ...relatedNames]) {
           const key = row.place_id.toString();
@@ -1241,6 +1318,411 @@ export const PlaceAdminServiceLive = Layer.effect(
         };
       });
 
+    const savePlaceNames: PlaceAdminApi["savePlaceNames"] = (placeId, input) =>
+      Effect.gen(function* () {
+        const actor = yield* requireFoodUpdate;
+        const id = yield* checkPlaceId(placeId);
+
+        yield* requirePlace(id, placeId);
+
+        const removeIds: Array<bigint> = [];
+
+        for (const raw of input.removeIds) {
+          removeIds.push(yield* checkPlaceId(raw));
+        }
+
+        if (new Set(removeIds.map((value) => value.toString())).size !== removeIds.length) {
+          return yield* new InvalidSearchFilter({ reason: "duplicate name id in removeIds" });
+        }
+
+        const prepared: Array<{
+          readonly nameId: bigint | null;
+          readonly languageTag: string;
+          readonly name: string;
+          readonly searchKey: string;
+          readonly isPreferred: boolean | undefined;
+        }> = [];
+
+        const seenIds = new Set<string>();
+        const seenNew = new Set<string>();
+
+        for (const entry of input.upsert) {
+          const nameId = entry.id !== undefined ? yield* checkPlaceId(entry.id) : null;
+
+          if (nameId !== null) {
+            const key = nameId.toString();
+
+            if (seenIds.has(key) || removeIds.some((candidate) => candidate === nameId)) {
+              return yield* new InvalidSearchFilter({ reason: "duplicate name id in request" });
+            }
+
+            seenIds.add(key);
+          } else {
+            const dedupe = `${entry.languageTag} ${entry.name.trim()}`;
+
+            if (seenNew.has(dedupe)) {
+              return yield* new InvalidSearchFilter({ reason: "duplicate name in request" });
+            }
+
+            seenNew.add(dedupe);
+          }
+
+          if (!isLanguageTag(entry.languageTag)) {
+            return yield* new InvalidPlaceData({
+              reason: `invalid language tag "${entry.languageTag}"`,
+            });
+          }
+
+          const trimmed = entry.name.trim();
+
+          if (trimmed.length === 0 || trimmed.length > 300) {
+            return yield* new InvalidSearchFilter({ reason: "name must be 1-300 characters" });
+          }
+
+          const key = normalizeSearchKey(trimmed);
+
+          if (key.length === 0) {
+            return yield* new InvalidSearchFilter({ reason: "name has no searchable text" });
+          }
+
+          prepared.push({
+            nameId,
+            languageTag: entry.languageTag,
+            name: trimmed,
+            searchKey: key,
+            isPreferred: entry.isPreferred,
+          });
+        }
+
+        const explicitCount = new Map<string, number>();
+
+        for (const entry of prepared) {
+          if (entry.isPreferred === true) {
+            explicitCount.set(entry.languageTag, (explicitCount.get(entry.languageTag) ?? 0) + 1);
+          }
+        }
+
+        for (const [languageTag, count] of explicitCount) {
+          if (count > 1) {
+            return yield* new InvalidSearchFilter({
+              reason: `multiple preferred names for language "${languageTag}"`,
+            });
+          }
+        }
+
+        const result = yield* withTransaction(
+          "place-admin/save-names",
+          Effect.gen(function* () {
+            const current = yield* places.namesWithIdsByPlaceIds([id]);
+            const byId = new Map(current.map((row) => [row.id.toString(), row] as const));
+
+            for (const nameId of removeIds) {
+              if (!byId.has(nameId.toString())) {
+                return yield* new InvalidSearchFilter({
+                  reason: `unknown place name id "${nameId.toString()}"`,
+                });
+              }
+            }
+
+            for (const entry of prepared) {
+              if (entry.nameId !== null) {
+                const row = byId.get(entry.nameId.toString());
+
+                if (row === undefined || row.place_id !== id) {
+                  return yield* new InvalidSearchFilter({
+                    reason: `unknown place name id "${entry.nameId.toString()}"`,
+                  });
+                }
+              }
+            }
+
+            const removedNames = new Set(removeIds.map((value) => value.toString()));
+            const survivors = current.filter((row) => !removedNames.has(row.id.toString()));
+
+            if (
+              survivors.length === 0 &&
+              prepared.filter((entry) => entry.nameId === null).length === 0
+            ) {
+              return yield* new InvalidSearchFilter({
+                reason: "a place must keep at least one name",
+              });
+            }
+
+            // Final-state identity, renames included: (language_tag,
+            // search_key) is unique per place across surviving and
+            // inserted rows. Cross-place duplicate-identity refusal (same
+            // kind + name + parent set) stays with create/updatePlace, which
+            // own kind and parent edges; this save owns only the name rows.
+            const editsById = new Map(
+              prepared.flatMap((entry) =>
+                entry.nameId === null ? [] : [[entry.nameId.toString(), entry] as const],
+              ),
+            );
+
+            const finalKeys = new Set<string>();
+
+            for (const row of survivors) {
+              const edit = editsById.get(row.id.toString());
+              const dedupe = `${edit?.languageTag ?? row.language_tag} ${edit?.searchKey ?? row.search_key}`;
+
+              if (finalKeys.has(dedupe)) {
+                return yield* new InvalidSearchFilter({ reason: "duplicate name in request" });
+              }
+
+              finalKeys.add(dedupe);
+            }
+
+            for (const entry of prepared) {
+              if (entry.nameId === null) {
+                const dedupe = `${entry.languageTag} ${entry.searchKey}`;
+
+                if (finalKeys.has(dedupe)) {
+                  return yield* new InvalidSearchFilter({ reason: "duplicate name in request" });
+                }
+
+                finalKeys.add(dedupe);
+              }
+            }
+
+            const upsertWinner = new Map<string, (typeof prepared)[number]>();
+
+            for (const entry of prepared) {
+              if (entry.isPreferred === true) {
+                upsertWinner.set(entry.languageTag, entry);
+              }
+            }
+
+            // Per-language preferred resolution over the final rows.
+            // Explicit `isPreferred: true` wins. Otherwise the kept stored
+            // preferred stays. Otherwise the oldest surviving row
+            // auto-promotes — this covers both deleting a preferred name
+            // and demoting one without a replacement, so no language is
+            // ever stranded. A brand-new language with a single insert
+            // elects that insert; several inserts require an explicit mark.
+            const finalLanguages = new Set<string>();
+
+            for (const row of survivors) {
+              finalLanguages.add(editsById.get(row.id.toString())?.languageTag ?? row.language_tag);
+            }
+
+            for (const entry of prepared) {
+              finalLanguages.add(entry.languageTag);
+            }
+
+            const finalPreferredId = new Map<string, bigint>();
+            const insertWinnerLanguages = new Set<string>();
+            const pendingInserts = new Map<string, Array<(typeof prepared)[number]>>();
+
+            for (const entry of prepared) {
+              if (entry.nameId === null) {
+                const list = pendingInserts.get(entry.languageTag) ?? [];
+
+                list.push(entry);
+                pendingInserts.set(entry.languageTag, list);
+              }
+            }
+
+            for (const languageTag of finalLanguages) {
+              const winner = upsertWinner.get(languageTag);
+
+              if (winner !== undefined) {
+                if (winner.nameId !== null) {
+                  finalPreferredId.set(languageTag, winner.nameId);
+                } else {
+                  // Winner is an insert: no id to record, but the kept
+                  // stored preferred below must not claim this language —
+                  // the insert takes it, and the language needs a demote.
+                  insertWinnerLanguages.add(languageTag);
+                }
+
+                continue;
+              }
+
+              const kept = survivors.find((row) => {
+                const edit = editsById.get(row.id.toString());
+
+                if ((edit?.languageTag ?? row.language_tag) !== languageTag) {
+                  return false;
+                }
+
+                return edit?.isPreferred ?? row.is_preferred;
+              });
+
+              if (kept !== undefined) {
+                finalPreferredId.set(languageTag, kept.id);
+
+                continue;
+              }
+
+              const survivorsOfLang = survivors.filter((row) => {
+                if (
+                  (editsById.get(row.id.toString())?.languageTag ?? row.language_tag) !==
+                  languageTag
+                ) {
+                  return false;
+                }
+
+                // An explicit demote vetoes this row: oldest-fallback must
+                // promote a sibling, never crown the demoted row itself.
+                return editsById.get(row.id.toString())?.isPreferred !== false;
+              });
+
+              const oldest = survivorsOfLang.toSorted(comparePlaceNameRowsById)[0];
+
+              if (oldest !== undefined) {
+                finalPreferredId.set(languageTag, oldest.id);
+
+                continue;
+              }
+
+              const inserts = pendingInserts.get(languageTag) ?? [];
+
+              if (inserts.length === 1) {
+                continue;
+              }
+
+              return yield* new InvalidSearchFilter({
+                reason: `language "${languageTag}" adds several names; mark one preferred in the same request`,
+              });
+            }
+
+            // Clear winner languages first so the partial unique index
+            // (place_id, language_tag WHERE is_preferred) never observes
+            // two preferred rows mid-transaction.
+            const changed = new Set<string>();
+
+            for (const [languageTag, preferredId] of finalPreferredId) {
+              const stored = survivors.find(
+                (row) => row.language_tag === languageTag && row.is_preferred,
+              );
+
+              if (stored === undefined || stored.id !== preferredId) {
+                changed.add(languageTag);
+              }
+            }
+
+            for (const languageTag of insertWinnerLanguages) {
+              changed.add(languageTag);
+            }
+
+            for (const languageTag of changed) {
+              yield* places.demoteNames({ placeId: id, languageTag });
+            }
+
+            let upserted = 0;
+
+            for (const entry of prepared) {
+              if (entry.nameId !== null) {
+                const preferredId = finalPreferredId.get(entry.languageTag);
+
+                let isPreferred: boolean;
+
+                if (preferredId !== undefined && preferredId === entry.nameId) {
+                  isPreferred = true;
+                } else if (preferredId !== undefined) {
+                  isPreferred = false;
+                } else {
+                  isPreferred = entry.isPreferred ?? false;
+                }
+
+                const updated = yield* places.updateName({
+                  id: entry.nameId,
+                  placeId: id,
+                  languageTag: entry.languageTag,
+                  name: entry.name,
+                  isPreferred,
+                  searchKey: entry.searchKey,
+                });
+
+                if (updated === null) {
+                  return yield* new InvalidPlaceData({
+                    reason: `place name "${entry.name}" changed during the request; retry`,
+                  });
+                }
+
+                upserted += 1;
+              }
+            }
+
+            for (const entry of prepared) {
+              if (entry.nameId === null) {
+                const preferredId = finalPreferredId.get(entry.languageTag);
+
+                const isWinnerInsert =
+                  upsertWinner.get(entry.languageTag) === entry ||
+                  (preferredId === undefined &&
+                    (pendingInserts.get(entry.languageTag) ?? []).length === 1);
+
+                yield* places.insertName({
+                  placeId: id,
+                  languageTag: entry.languageTag,
+                  name: entry.name,
+                  isPreferred: isWinnerInsert,
+                  searchKey: entry.searchKey,
+                });
+
+                upserted += 1;
+              }
+            }
+
+            // Resolution can select an untouched survivor (auto-promoted
+            // oldest after a preferred delete/demote, or a keeper whose
+            // language was cleared above). Edits and inserts already carry
+            // their final flags; only such rows still need a write.
+            for (const [, preferredId] of finalPreferredId) {
+              if (editsById.has(preferredId.toString())) {
+                continue;
+              }
+
+              const row = byId.get(preferredId.toString());
+
+              if (row === undefined || row.is_preferred) {
+                continue;
+              }
+
+              const promoted = yield* places.promoteName({ id: preferredId, placeId: id });
+
+              if (promoted === null) {
+                return yield* new InvalidPlaceData({
+                  reason: "place name changed during the request; retry",
+                });
+              }
+            }
+
+            let removed = 0;
+
+            for (const nameId of removeIds) {
+              const deleted = yield* places.deleteName({ id: nameId, placeId: id });
+
+              removed += deleted === null ? 0 : 1;
+            }
+
+            // The place_revisions CHECK vocabulary has no dedicated
+            // "names_saved" operation, so the atomic save lands under
+            // `name_upserted` with exact upsert/remove counts — no migration
+            // needed for this workstream.
+            yield* places.insertRevision({
+              placeId: id,
+              actor: actorLabel(actor),
+              operation: "name_upserted",
+              summary: `saved ${current.length} place name(s): ${upserted} upserted, ${removed} removed on ${placeId}`,
+            });
+
+            return yield* places.namesWithIdsByPlaceIds([id]);
+          }),
+        ).pipe(
+          Effect.catchTag("PersistenceConflict", (failure) =>
+            Effect.fail(
+              new ConflictingPlace({
+                reason: `place name conflicts with an existing record (${failure.constraint ?? "unique constraint"})`,
+              }),
+            ),
+          ),
+        );
+
+        return result.map(toNameView);
+      });
+
     const setPlaceParent: PlaceAdminApi["setPlaceParent"] = (placeId, parentPlaceId) =>
       Effect.gen(function* () {
         const actor = yield* requireFoodUpdate;
@@ -1478,6 +1960,7 @@ export const PlaceAdminServiceLive = Layer.effect(
       deletePlace,
       upsertPlaceNames,
       removePlaceName,
+      savePlaceNames,
       setPlaceParent,
       removePlaceParent,
       resolvePlaceRef,

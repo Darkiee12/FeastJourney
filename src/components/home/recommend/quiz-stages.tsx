@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { discoveryCityLabelFor } from "@/components/home/discovery-location";
 import {
   DEFAULT_PROVENANCE_LABELS,
   didPreciseFixArrive,
@@ -30,7 +31,7 @@ import {
   fallbackOptionsFor,
   type PreciseStatus,
 } from "@/components/home/recommend/use-precise-location";
-import { searchCitiesFn } from "@/modules/food-discovery/food.functions";
+import { nearestCityFn, searchCitiesFn } from "@/modules/food-discovery/food.functions";
 import {
   type MealOccasion,
   type RecommendationMood,
@@ -42,6 +43,16 @@ export interface CountryOption {
   readonly code: string;
   readonly label: string;
 }
+
+/**
+ * Auto-retry cadence for transient geolocation failures (timeout or
+ * temporarily unavailable): while the near-you lane stays selected, a
+ * failed attempt re-fires on this interval without needing another tap.
+ * Denied stays manual — the browser remembers the denial, so re-firing
+ * could never succeed until the visitor changes site settings.
+ * Unsupported/insecure environments fail identically, so they never retry.
+ */
+export const PRECISE_AUTO_RETRY_MS = 10_000;
 
 export interface DetectedRegion {
   /** Trusted ISO country code, or null when no detection is available. */
@@ -476,6 +487,66 @@ export function WhereStep({
 
   const failed = fallbackOptionsFor(precise.status, detected.country);
 
+  // Stable aliases for the effects and queries below (the binding object
+  // itself is a fresh literal each render).
+  const preciseStatus = precise.status;
+  const requestPrecise = precise.request;
+
+  /**
+   * Nearest catalog city to a settled fix, for the status line ("Exploring
+   * Hanoi, Vietnam" instead of a bare "Near you"). Display-only: the
+   * recommendation scope stays precise, and a null (nothing close enough
+   * or a failed lookup) keeps the plain wording. Keyed on the rounded
+   * fix coordinates the locator already normalizes.
+   */
+  const nearestCity = useQuery({
+    queryKey: [
+      "catalog",
+      "nearest-city",
+      lang,
+      preciseFix?.latitude ?? null,
+      preciseFix?.longitude ?? null,
+    ],
+    queryFn: () =>
+      nearestCityFn({
+        data: {
+          latitude: preciseFix?.latitude ?? 0,
+          longitude: preciseFix?.longitude ?? 0,
+          locale: lang,
+        },
+      }),
+    enabled: choice === "precise" && preciseStatus === "success" && preciseFix !== null,
+    retry: 1,
+    staleTime: 30 * 60_000,
+  });
+
+  const nearestLabel =
+    nearestCity.data?.name === undefined || nearestCity.data.name === ""
+      ? null
+      : (discoveryCityLabelFor({
+          name: nearestCity.data.name,
+          context: nearestCity.data.context,
+        }) ?? nearestCity.data.name);
+
+  // Transient geolocation failures retry on their own while the lane stays
+  // selected: one interval owns the re-fire, and leaving the lane or
+  // unmounting clears it via effect cleanup. Success, manual retry, and
+  // lane changes all re-evaluate the guard, so no stray timer can fire
+  // after the outcome is settled.
+  useEffect(() => {
+    if (choice !== "precise" || (preciseStatus !== "timeout" && preciseStatus !== "unavailable")) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      requestPrecise();
+    }, PRECISE_AUTO_RETRY_MS);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [choice, preciseStatus, requestPrecise]);
+
   const showAlternatives =
     choice === "precise" &&
     (precise.status === "denied" ||
@@ -589,9 +660,13 @@ export function WhereStep({
           {precise.status === "locating" ? (
             <p className="text-sm font-semibold text-muted">{copy.recWhereLocating}</p>
           ) : null}
-          {precise.status === "success" && precise.fix !== null ? (
+          {preciseStatus === "success" && preciseFix !== null ? (
             <div className="flex flex-wrap items-center gap-3">
-              <output className="block text-sm font-bold text-ink">{copy.recWhereNearYou}</output>
+              <output className="block text-sm font-bold text-ink">
+                {nearestLabel === null
+                  ? copy.recWhereNearYou
+                  : formatTemplate(copy.recWhereExploring, nearestLabel)}
+              </output>
               <button
                 type="button"
                 onClick={precise.request}

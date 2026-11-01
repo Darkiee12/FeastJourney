@@ -232,6 +232,98 @@ const parentFilterDetailSchema = z.object({
   parents: z.array(z.object({ displayName: z.string().nullable() })),
 });
 
+function ParentFilterOption({
+  active,
+  hit,
+  lang,
+  listboxId,
+  onPick,
+}: {
+  readonly active: boolean;
+  readonly hit: PlaceSearchHit;
+  readonly lang: Locale;
+  readonly listboxId: string;
+  readonly onPick: (hit: PlaceSearchHit) => void;
+}): ReactNode {
+  const hitLabel = formatPlaceContext({
+    name: hit.name,
+    parentName: hit.parentName,
+    iso: hit.iso,
+    placeId: hit.id,
+    lang,
+  });
+
+  // WAI-ARIA combobox pattern: async search hits carry per-hit metadata
+  // (kind) that a native `<option>` cannot host, so the option role is
+  // explicit on the list item. Its accessible name mirrors the button text
+  // announced as a single option.
+  return (
+    <li
+      key={hit.id}
+      id={`${listboxId}-${hit.id}`}
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role, jsx-a11y/no-noninteractive-element-to-interactive-role
+      role="option"
+      aria-selected={active}
+      aria-label={hitLabel}
+    >
+      <button
+        type="button"
+        onMouseDown={(event) => {
+          event.preventDefault();
+        }}
+        onClick={() => {
+          onPick(hit);
+        }}
+        className={`flex min-h-11 w-full min-w-0 cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-sm outline-none hover:bg-cream focus-visible:bg-cream ${active ? "bg-cream" : ""}`}
+      >
+        <span className="min-w-0 truncate font-semibold">{hitLabel}</span>
+        <span className="shrink-0 text-xs text-muted">{hit.kind}</span>
+      </button>
+    </li>
+  );
+}
+
+function ParentFilterResults({
+  activeIndex,
+  copy,
+  hits,
+  lang,
+  listboxId,
+  onPick,
+  searching,
+}: {
+  readonly activeIndex: number;
+  readonly copy: Messages;
+  readonly hits: ReadonlyArray<PlaceSearchHit>;
+  readonly lang: Locale;
+  readonly listboxId: string;
+  readonly onPick: (hit: PlaceSearchHit) => void;
+  readonly searching: boolean;
+}): ReactNode {
+  if (searching) {
+    return <li className="px-3 py-2 text-sm text-muted">{copy.settingsSaving}</li>;
+  }
+
+  if (hits.length === 0) {
+    return <li className="px-3 py-2 text-sm text-muted">{copy.adminNoResults}</li>;
+  }
+
+  return (
+    <>
+      {hits.map((hit, index) => (
+        <ParentFilterOption
+          key={hit.id}
+          active={index === activeIndex}
+          hit={hit}
+          lang={lang}
+          listboxId={listboxId}
+          onPick={onPick}
+        />
+      ))}
+    </>
+  );
+}
+
 function ParentFilterSelector({
   copy,
   id,
@@ -268,7 +360,7 @@ function ParentFilterSelector({
   // explicit `Place #id` fallback — never a blank control.
   useEffect(() => {
     if (value === "" || !isCanonicalPlaceId(value)) {
-      return;
+      return () => undefined;
     }
 
     const known = labels.get(value);
@@ -278,7 +370,7 @@ function ParentFilterSelector({
         setText(known);
       }
 
-      return;
+      return () => undefined;
     }
 
     let cancelled = false;
@@ -300,7 +392,8 @@ function ParentFilterSelector({
         }
 
         const nearest = parsed.data.parents.at(0);
-        const label = formatPlaceContext({
+
+        const resolvedLabel = formatPlaceContext({
           name: parsed.data.displayName,
           parentName: nearest?.displayName ?? null,
           iso: parsed.data.iso3166,
@@ -308,10 +401,10 @@ function ParentFilterSelector({
           lang,
         });
 
-        setLabels((previous) => new Map(previous).set(value, label));
+        setLabels((previous) => new Map(previous).set(value, resolvedLabel));
 
         if (!focusedRef.current) {
-          setText(label);
+          setText(resolvedLabel);
         }
       },
       () => {
@@ -338,7 +431,7 @@ function ParentFilterSelector({
   // fast typing can never show results for an older query.
   useEffect(() => {
     if (!searchAvailable) {
-      return;
+      return () => undefined;
     }
 
     const query = text.trim();
@@ -348,7 +441,7 @@ function ParentFilterSelector({
       setSearching(false);
       setOpen(false);
 
-      return;
+      return () => undefined;
     }
 
     setSearching(true);
@@ -386,7 +479,7 @@ function ParentFilterSelector({
   }, [text, searchAvailable]);
 
   const pick = (hit: PlaceSearchHit): void => {
-    const label = formatPlaceContext({
+    const hitLabel = formatPlaceContext({
       name: hit.name,
       parentName: hit.parentName,
       iso: hit.iso,
@@ -394,9 +487,9 @@ function ParentFilterSelector({
       lang,
     });
 
-    setLabels((previous) => new Map(previous).set(hit.id, label));
+    setLabels((previous) => new Map(previous).set(hit.id, hitLabel));
     onChange(hit.id);
-    setText(label);
+    setText(hitLabel);
     setOpen(false);
   };
 
@@ -470,6 +563,7 @@ function ParentFilterSelector({
   };
 
   const activeHit = hits.at(activeIndex);
+
   const activeDescendant =
     open && activeHit !== undefined ? `${listboxId}-${activeHit.id}` : undefined;
 
@@ -511,46 +605,24 @@ function ParentFilterSelector({
         {searchAvailable && open ? (
           <ul
             id={listboxId}
+            // WAI-ARIA combobox pattern: async search hits with per-hit
+            // metadata cannot live in a native `<select>`/`<datalist>`, so
+            // the listbox role is explicit here. Absolutely positioned, so
+            // it never shifts toolbar layout or escapes horizontally.
+            // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role, jsx-a11y/no-noninteractive-element-to-interactive-role
             role="listbox"
             aria-label={label}
             className="absolute inset-x-0 top-full z-30 mt-1 max-h-56 min-w-0 overflow-y-auto rounded-lg border border-border-soft bg-white py-1 shadow-lg"
           >
-            {searching ? (
-              <li className="px-3 py-2 text-sm text-muted">{copy.settingsSaving}</li>
-            ) : hits.length === 0 ? (
-              <li className="px-3 py-2 text-sm text-muted">{copy.adminNoResults}</li>
-            ) : (
-              hits.map((hit, index) => (
-                <li
-                  key={hit.id}
-                  id={`${listboxId}-${hit.id}`}
-                  role="option"
-                  aria-selected={index === activeIndex}
-                >
-                  <button
-                    type="button"
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                    }}
-                    onClick={() => {
-                      pick(hit);
-                    }}
-                    className={`flex min-h-11 w-full min-w-0 cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-sm outline-none hover:bg-cream focus-visible:bg-cream ${index === activeIndex ? "bg-cream" : ""}`}
-                  >
-                    <span className="min-w-0 truncate font-semibold">
-                      {formatPlaceContext({
-                        name: hit.name,
-                        parentName: hit.parentName,
-                        iso: hit.iso,
-                        placeId: hit.id,
-                        lang,
-                      })}
-                    </span>
-                    <span className="shrink-0 text-xs text-muted">{hit.kind}</span>
-                  </button>
-                </li>
-              ))
-            )}
+            <ParentFilterResults
+              activeIndex={activeIndex}
+              copy={copy}
+              hits={hits}
+              lang={lang}
+              listboxId={listboxId}
+              onPick={pick}
+              searching={searching}
+            />
           </ul>
         ) : null}
       </div>

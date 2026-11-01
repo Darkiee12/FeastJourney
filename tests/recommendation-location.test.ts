@@ -265,6 +265,33 @@ describe("recommendation location (phase 1 geography)", () => {
     expect(options.map((option) => option.choice)).toEqual(["precise", "destination", "worldwide"]);
   });
 
+  test("a hanging implementation stays locating with no browser timer to arm", () => {
+    let calls = 0;
+
+    const env: LocatorEnvironment = {
+      geolocation: {
+        getCurrentPosition: () => {
+          calls += 1;
+        },
+      },
+      secureContext: true,
+    };
+
+    const locator = new PreciseLocator(env);
+
+    locator.request();
+
+    // Bun has no window: the watchdog is skipped, the attempt stays
+    // in-flight, and nothing throws. In a browser the same hang trips
+    // the watchdog to timeout, which the lane auto-retries.
+    expect(locator.getSnapshot().status).toBe("locating");
+    expect(calls).toBe(1);
+
+    locator.reset();
+
+    expect(locator.getSnapshot().status).toBe("idle");
+  });
+
   test("unsupported contexts fail without a retry that would fail identically", () => {
     const locator = new PreciseLocator({ geolocation: null, secureContext: true });
 

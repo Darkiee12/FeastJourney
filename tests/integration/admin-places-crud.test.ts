@@ -771,4 +771,332 @@ describe("place admin CRUD", () => {
 
     expect(failure).toBeInstanceOf(InsufficientPermissions);
   });
+
+  test("renames a place by name-row id: place and row ids stable, old text gone", async () => {
+    const province = track(
+      await runAs(
+        adminUserId,
+        Effect.flatMap(PlaceAdminService, (service) =>
+          service.createPlace({
+            kind: "province",
+            names: [{ languageTag: "en", name: `E2E Renameprov ${stamp}` }],
+          }),
+        ),
+      ),
+    );
+
+    const view = track(
+      await runAs(
+        adminUserId,
+        Effect.flatMap(PlaceAdminService, (service) =>
+          service.createPlace({
+            kind: "locality",
+            names: [
+              { languageTag: "en", name: `E2E Hanoi ${stamp}` },
+              { languageTag: "vi", name: `E2E Ha Noi Vi ${stamp}` },
+            ],
+            parentIds: [province],
+          }),
+        ),
+      ),
+    );
+
+    const before = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) => service.placeDetail(view)),
+    );
+
+    const englishId = before.names.find((entry) => entry.languageTag === "en")?.id ?? "";
+
+    expect(englishId).toMatch(/^[0-9]+$/);
+
+    // A dish link proves renames never touch place identity or links.
+    const slug = `e2e-rename-link-${stamp}`;
+
+    ownedSlugs.push(slug);
+
+    const dish = await run(
+      Effect.flatMap(AdminService, (service) =>
+        service.createDish(ACTOR, {
+          slug,
+          status: "draft",
+          names: [{ languageTag: "en", name: `E2E Rename Dish ${stamp}`, nameKind: "localized" }],
+        }),
+      ),
+    );
+
+    await run(
+      Effect.flatMap(AdminService, (service) =>
+        service.linkDishPlace(ACTOR, dish.id, view, "associated", false),
+      ),
+    );
+
+    const saved = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.savePlaceNames(view, {
+          upsert: [{ id: englishId, languageTag: "en", name: `E2E Ha Noi ${stamp}` }],
+          removeIds: [],
+        }),
+      ),
+    );
+
+    expect(saved).toHaveLength(2);
+    expect(saved.find((entry) => entry.id === englishId)?.name).toBe(`E2E Ha Noi ${stamp}`);
+    expect(saved.some((entry) => entry.name === `E2E Hanoi ${stamp}`)).toBe(false);
+
+    const after = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) => service.placeDetail(view)),
+    );
+
+    expect(after.place.id).toBe(view);
+    expect(after.names.find((entry) => entry.id === englishId)?.searchKey).toBe(
+      `e2e ha noi ${stamp}`,
+    );
+    expect(after.parents.map((entry) => entry.id)).toEqual([province]);
+    expect(after.dishCounts.total).toBe(1);
+
+    const found = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.listPlaces({ query: `Ha Noi ${stamp}`, page: 0 }),
+      ),
+    );
+
+    expect(found.items.map((entry) => entry.id)).toContain(view);
+
+    const stale = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.listPlaces({ query: `E2E Hanoi ${stamp}`, page: 0 }),
+      ),
+    );
+
+    expect(stale.items.map((entry) => entry.id)).not.toContain(view);
+
+    const revisions = await query(
+      (sql) =>
+        sql<
+          Array<{ operation: string; summary: string }>
+        >`SELECT operation, summary FROM feastjourney.place_revisions WHERE actor = ${adminLabel} AND summary LIKE ${`%${view}%`} ORDER BY id DESC LIMIT 5`,
+    );
+
+    expect(revisions.some((row) => row.operation === "name_upserted")).toBe(true);
+
+    await query((sql) => sql`DELETE FROM feastjourney.dishes WHERE slug = ${slug}`);
+  });
+
+  test("savePlaceNames rolls back every row when any entry is invalid", async () => {
+    const view = track(
+      await runAs(
+        adminUserId,
+        Effect.flatMap(PlaceAdminService, (service) =>
+          service.createPlace({
+            kind: "locality",
+            names: [
+              { languageTag: "en", name: `E2E Atomic ${stamp}` },
+              { languageTag: "en", name: `E2E Atomic Alias ${stamp}` },
+              { languageTag: "vi", name: `E2E Nguyen Ban ${stamp}` },
+            ],
+          }),
+        ),
+      ),
+    );
+
+    const snapshot = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) => service.placeDetail(view)),
+    );
+
+    const preferred = snapshot.names.find(
+      (entry) => entry.languageTag === "en" && entry.isPreferred,
+    );
+
+    const alias = snapshot.names.find((entry) => entry.languageTag === "en" && !entry.isPreferred);
+
+    // Rename colliding with the surviving preferred text.
+    const duplicate = await runAsFailure(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.savePlaceNames(view, {
+          upsert: [{ id: alias?.id ?? "0", languageTag: "en", name: preferred?.name ?? "" }],
+          removeIds: [],
+        }),
+      ),
+    );
+
+    expect(duplicate).toBeInstanceOf(InvalidSearchFilter);
+
+    // Valid rename mixed with an unknown delete id.
+    const unknownDelete = await runAsFailure(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.savePlaceNames(view, {
+          upsert: [
+            {
+              id: preferred?.id ?? "0",
+              languageTag: "en",
+              name: `E2E Atomic Renamed ${stamp}`,
+            },
+          ],
+          removeIds: ["199999999999"],
+        }),
+      ),
+    );
+
+    expect(unknownDelete).toBeInstanceOf(InvalidSearchFilter);
+
+    // Two preferred marks for one language.
+    const twoPreferred = await runAsFailure(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.savePlaceNames(view, {
+          upsert: [
+            { languageTag: "fr", name: `E2E Atomique A ${stamp}`, isPreferred: true },
+            { languageTag: "fr", name: `E2E Atomique B ${stamp}`, isPreferred: true },
+          ],
+          removeIds: [],
+        }),
+      ),
+    );
+
+    expect(twoPreferred).toBeInstanceOf(InvalidSearchFilter);
+
+    // Removing every name without an insert replacement.
+    const stripAll = await runAsFailure(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.savePlaceNames(view, {
+          upsert: [],
+          removeIds: snapshot.names.map((entry) => entry.id),
+        }),
+      ),
+    );
+
+    expect(stripAll).toBeInstanceOf(InvalidSearchFilter);
+
+    const after = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) => service.placeDetail(view)),
+    );
+
+    expect(after.names).toEqual(snapshot.names);
+  });
+
+  test("savePlaceNames keeps one preferred name per language across en, vi, and fr", async () => {
+    const view = track(
+      await runAs(
+        adminUserId,
+        Effect.flatMap(PlaceAdminService, (service) =>
+          service.createPlace({
+            kind: "locality",
+            names: [
+              { languageTag: "en", name: `E2E Langtown ${stamp}` },
+              { languageTag: "vi", name: `E2E Langtown Vi ${stamp}` },
+            ],
+          }),
+        ),
+      ),
+    );
+
+    // A new language without a flag elects its single insert; en/vi keep theirs.
+    const withFr = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.savePlaceNames(view, {
+          upsert: [{ languageTag: "fr", name: `E2E Langville ${stamp}` }],
+          removeIds: [],
+        }),
+      ),
+    );
+
+    expect(withFr.filter((entry) => entry.isPreferred)).toHaveLength(3);
+
+    // Preferred swap stays inside English; vi/fr keep their preferred rows.
+    const swapped = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.savePlaceNames(view, {
+          upsert: [{ languageTag: "en", name: `E2E Langalias ${stamp}`, isPreferred: true }],
+          removeIds: [],
+        }),
+      ),
+    );
+
+    const englishPreferred = swapped.filter(
+      (entry) => entry.languageTag === "en" && entry.isPreferred,
+    );
+
+    expect(englishPreferred).toHaveLength(1);
+    expect(englishPreferred[0]?.name).toBe(`E2E Langalias ${stamp}`);
+    expect(swapped.filter((entry) => entry.languageTag === "vi" && entry.isPreferred)).toHaveLength(
+      1,
+    );
+    expect(swapped.filter((entry) => entry.languageTag === "fr" && entry.isPreferred)).toHaveLength(
+      1,
+    );
+
+    // Two vi aliases, then remove the vi preferred: the oldest sibling promotes.
+    const withAliases = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.savePlaceNames(view, {
+          upsert: [
+            { languageTag: "vi", name: `E2E Langtown Vi B ${stamp}` },
+            { languageTag: "vi", name: `E2E Langtown Vi A ${stamp}` },
+          ],
+          removeIds: [],
+        }),
+      ),
+    );
+
+    const viPreferredId =
+      withAliases.find((entry) => entry.languageTag === "vi" && entry.isPreferred)?.id ?? "";
+
+    const viSurvivorIds = withAliases
+      .filter((entry) => entry.languageTag === "vi" && entry.id !== viPreferredId)
+      .map((entry) => entry.id)
+      .toSorted();
+
+    const afterRemove = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.savePlaceNames(view, { upsert: [], removeIds: [viPreferredId] }),
+      ),
+    );
+
+    const viFinal = afterRemove.filter((entry) => entry.languageTag === "vi");
+
+    expect(viFinal).toHaveLength(2);
+    expect(viFinal.filter((entry) => entry.isPreferred)).toHaveLength(1);
+    expect(viFinal.find((entry) => entry.isPreferred)?.id).toBe(viSurvivorIds[0]);
+
+    // Demoting the remaining vi preferred without a replacement promotes the sibling.
+    const remainingPreferred = viFinal.find((entry) => entry.isPreferred)?.id ?? "";
+
+    const afterDemote = await runAs(
+      adminUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.savePlaceNames(view, {
+          upsert: [
+            {
+              id: remainingPreferred,
+              languageTag: "vi",
+              name:
+                viFinal.find((entry) => entry.id === remainingPreferred)?.name ??
+                `E2E Langtown Vi ${stamp}`,
+              isPreferred: false,
+            },
+          ],
+          removeIds: [],
+        }),
+      ),
+    );
+
+    const viDemoted = afterDemote.filter((entry) => entry.languageTag === "vi");
+
+    expect(viDemoted.filter((entry) => entry.isPreferred)).toHaveLength(1);
+    expect(viDemoted.find((entry) => entry.isPreferred)?.id).not.toBe(remainingPreferred);
+  });
 });

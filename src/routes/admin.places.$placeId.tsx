@@ -172,15 +172,15 @@ function AdminPlaceDetail() {
     place.displayName ?? (lang === "vi" ? `Địa điểm #${place.id}` : `Place #${place.id}`);
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-3">
       <PlaceBreadcrumbs copy={copy} lang={lang} backSearch={backSearch} current={title} />
       <AdminPageHeader
         lang={lang}
         title={title}
-        description={`place:${place.id} · ${place.kind}`}
+        description={`${place.kind} · place:${place.id}`}
       />
 
-      <div className="grid min-w-0 gap-4 md:grid-cols-2">
+      <div className="grid min-w-0 gap-3 md:grid-cols-2">
         <AdminSection
           title={copy.adminNames}
           action={<PlaceNamesEditor copy={copy} lang={lang} onSaved={refresh} place={place} />}
@@ -188,10 +188,10 @@ function AdminPlaceDetail() {
           <PlaceNamesRead copy={copy} place={place} />
         </AdminSection>
         <AdminSection
-          title={copy.adminKind}
+          title={copy.adminPlaceDetails}
           action={<PlaceMetadataEditor copy={copy} onSaved={refresh} place={place} />}
         >
-          <dl className="flex min-w-0 flex-col gap-2 text-sm">
+          <dl className="flex min-w-0 flex-col gap-1.5 text-sm">
             <div className="min-w-0">
               <dt className="font-semibold">{copy.adminKind}</dt>
               <dd className="min-w-0 break-words">{place.kind}</dd>
@@ -216,7 +216,7 @@ function AdminPlaceDetail() {
         </AdminSection>
       </div>
 
-      <div className="grid min-w-0 gap-4 md:grid-cols-2">
+      <div className="grid min-w-0 gap-3 md:grid-cols-2">
         <AdminSection
           title={copy.adminHierarchy}
           action={<PlaceParentEditor copy={copy} lang={lang} onSaved={refresh} place={place} />}
@@ -506,7 +506,7 @@ function PlaceCreateForm({
         />
         <AdminField
           id="new-place-name"
-          label={copy.adminPlaces}
+          label={copy.adminNameLabel}
           value={name}
           onChange={(event) => {
             setName(event.target.value);

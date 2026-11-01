@@ -13,11 +13,14 @@ import {
   DiscoveryLocation,
   discoveryCityLabelFor,
   discoveryHeadingFor,
+  discoveryLocationCopyFor,
   discoveryServedScopeFor,
   discoverySubtitleFor,
   type DiscoveryCityOption,
   type DiscoveryServedScope,
 } from "@/components/home/discovery-location";
+import { useMobileHomeOptional } from "@/components/home/mobile/mobile-home-context";
+import { MobileLocationPicker } from "@/components/home/mobile/mobile-location-picker";
 import { isCityPlaceId, sanitizeCountryCode } from "@/components/home/recommend/quiz-model";
 import { usePreciseLocation } from "@/components/home/recommend/use-precise-location";
 import { getLocalCarouselFn, listCountriesFn } from "@/modules/food-discovery/food.functions";
@@ -55,8 +58,18 @@ function countryNameFor(
  * region — because headings follow the last served response, not the
  * pending request.
  */
-export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale }) {
+export function DiscoverySection({
+  copy,
+  lang,
+  variant = "page",
+}: {
+  copy: Messages;
+  lang: Locale;
+  variant?: "page" | "sheet";
+}) {
   const { session } = rootRoute.useRouteContext();
+  const mobile = useMobileHomeOptional();
+  const inSheet = variant === "sheet";
 
   // Precise location is explicit-only: the shared locator never prompts on
   // mount or on render. Coordinates never enter query keys, logs, or
@@ -347,11 +360,69 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
     worldwide: scopeKey === "world" || servedScopeName === "worldwide",
   });
 
+  const countryOptions = (countriesQuery.data ?? []).flatMap((entry) =>
+    entry.iso3166 === null
+      ? []
+      : [{ code: entry.iso3166, label: entry.displayName ?? entry.iso3166 }],
+  );
+
+  const chooseCountry = (code: string): void => {
+    precise.reset();
+    setCity(null);
+    setDestination(code);
+    setWorldwide(false);
+  };
+
+  const chooseCity = (option: DiscoveryCityOption): void => {
+    precise.reset();
+    setDestination(null);
+    setCity(option);
+    setWorldwide(false);
+  };
+
+  const exploreWorldwide = (): void => {
+    setCity(null);
+    setWorldwide(true);
+  };
+
+  const backToRegion = (): void => {
+    precise.reset();
+    setCity(null);
+    setWorldwide(false);
+  };
+
+  const usePrecise = (): void => {
+    setCity(null);
+    precise.request();
+  };
+
+  if (inSheet && mobile?.state.mode === "location") {
+    return (
+      <MobileLocationPicker
+        countries={countryOptions}
+        countriesLoading={countriesQuery.isPending}
+        lang={lang}
+        locating={precise.status === "locating"}
+        onBack={mobile.back}
+        onChooseCity={chooseCity}
+        onChooseCountry={chooseCountry}
+        onDone={mobile.back}
+        onExploreWorldwide={exploreWorldwide}
+        onUsePrecise={usePrecise}
+        preciseDenied={preciseDenied}
+        preciseDisabled={preciseDisabled}
+        selectedCity={servedCity ?? city}
+        selectedCountry={countryRadio}
+        selection={selection}
+      />
+    );
+  }
+
   return (
     <section
       id="discover"
       aria-labelledby="discover-heading"
-      className="scroll-mt-18 bg-cream px-5 py-16 sm:px-8"
+      className={inSheet ? "bg-cream px-4 py-4" : "scroll-mt-18 bg-cream px-5 py-16 sm:px-8"}
     >
       <div className="mx-auto max-w-6xl">
         <h2
@@ -364,49 +435,49 @@ export function DiscoverySection({ copy, lang }: { copy: Messages; lang: Locale 
         <p className="mb-8 max-w-[60ch] text-lg text-muted">{subtitle}</p>
 
         <div className="mb-8">
-          <DiscoveryLocation
-            countries={(countriesQuery.data ?? []).flatMap((entry) =>
-              entry.iso3166 === null
-                ? []
-                : [{ code: entry.iso3166, label: entry.displayName ?? entry.iso3166 }],
-            )}
-            countriesLoading={countriesQuery.isPending}
-            currentLabel={servedRegionName ?? requestedRegionName ?? copy.discoverAroundWorld}
-            disabled={false}
-            lang={lang}
-            locating={precise.status === "locating"}
-            preciseDenied={preciseDenied}
-            preciseDisabled={preciseDisabled}
-            selectedCountry={countryRadio}
-            selection={selection}
-            selectedCity={servedCity ?? city}
-            showBackToRegion={showBackToRegion}
-            onBackToRegion={() => {
-              precise.reset();
-              setCity(null);
-              setWorldwide(false);
-            }}
-            onChooseCountry={(code) => {
-              precise.reset();
-              setCity(null);
-              setDestination(code);
-              setWorldwide(false);
-            }}
-            onChooseCity={(option) => {
-              precise.reset();
-              setDestination(null);
-              setCity(option);
-              setWorldwide(false);
-            }}
-            onExploreWorldwide={() => {
-              setCity(null);
-              setWorldwide(true);
-            }}
-            onUsePrecise={() => {
-              setCity(null);
-              precise.request();
-            }}
-          />
+          {inSheet && mobile !== null ? (
+            <button
+              type="button"
+              onClick={mobile.openLocationPicker}
+              className="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink"
+            >
+              <span className="min-w-0 flex-1 truncate text-left">
+                {servedRegionName ??
+                  requestedRegionName ??
+                  (preciseFix !== null
+                    ? discoveryLocationCopyFor(lang).headingNearby
+                    : copy.discoverAroundWorld)}
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>{lang === "vi" ? "Đổi vị trí" : "Change location"}</span>
+            </button>
+          ) : (
+            <DiscoveryLocation
+              countries={countryOptions}
+              countriesLoading={countriesQuery.isPending}
+              currentLabel={
+                servedRegionName ??
+                requestedRegionName ??
+                (preciseFix !== null
+                  ? discoveryLocationCopyFor(lang).headingNearby
+                  : copy.discoverAroundWorld)
+              }
+              disabled={false}
+              lang={lang}
+              locating={precise.status === "locating"}
+              preciseDenied={preciseDenied}
+              preciseDisabled={preciseDisabled}
+              selectedCountry={countryRadio}
+              selection={selection}
+              selectedCity={servedCity ?? city}
+              showBackToRegion={showBackToRegion}
+              onBackToRegion={backToRegion}
+              onChooseCountry={chooseCountry}
+              onChooseCity={chooseCity}
+              onExploreWorldwide={exploreWorldwide}
+              onUsePrecise={usePrecise}
+            />
+          )}
         </div>
 
         {fallbackState === "loading" ? <DiscoveryLoadingState copy={copy} /> : null}

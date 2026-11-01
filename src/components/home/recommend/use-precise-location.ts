@@ -138,6 +138,11 @@ export class PreciseLocator {
   private readonly listeners = new Set<() => void>();
   private requestId = 0;
   private completedRequests = 0;
+  /**
+   * Watchdog for the in-flight attempt. Cleared on every settle and on
+   * reset; a stale fire is additionally disarmed by the requestId guard.
+   */
+  private attemptTimer: number | null = null;
 
   constructor(private readonly env: LocatorEnvironment) {}
 
@@ -168,6 +173,13 @@ export class PreciseLocator {
     }
   }
 
+  private clearAttemptTimer(): void {
+    if (this.attemptTimer !== null) {
+      clearTimeout(this.attemptTimer);
+      this.attemptTimer = null;
+    }
+  }
+
   request(): void {
     if (this.snapshot.status === "locating") {
       return;
@@ -189,12 +201,32 @@ export class PreciseLocator {
     this.requestId = attempt;
     this.setSnapshot({ status: "locating", fix: null });
 
+    // Watchdog for implementations that never settle (e.g. an ignored
+    // permission prompt leaves the lane on "locating" forever): without
+    // it the timeout alternatives — and the auto-retry below — can never
+    // engage. Fires past the browser's own timeout so genuine browser
+    // errors still win the race. Skipped outside a browser (SSR/tests)
+    // where no timer exists; a stale fire is disarmed by the requestId
+    // guard as well as the explicit clear on settle and reset.
+    if (typeof window !== "undefined") {
+      this.clearAttemptTimer();
+      this.attemptTimer = window.setTimeout(() => {
+        if (attempt !== this.requestId) {
+          return;
+        }
+
+        this.attemptTimer = null;
+        this.setSnapshot({ status: "timeout", fix: null });
+      }, GEO_TIMEOUT_MS + 1000);
+    }
+
     this.env.geolocation.getCurrentPosition(
       (position) => {
         if (attempt !== this.requestId) {
           return;
         }
 
+        this.clearAttemptTimer();
         const { latitude, longitude, accuracy } = position.coords;
 
         if (
@@ -226,6 +258,7 @@ export class PreciseLocator {
           return;
         }
 
+        this.clearAttemptTimer();
         this.setSnapshot({ status: classifyGeoError(reason.code), fix: null });
       },
       {
@@ -238,6 +271,7 @@ export class PreciseLocator {
 
   reset(): void {
     this.requestId += 1;
+    this.clearAttemptTimer();
     this.setSnapshot(initialLocatorSnapshot);
   }
 }

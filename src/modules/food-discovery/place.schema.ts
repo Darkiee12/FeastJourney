@@ -50,6 +50,12 @@ const placeNameInputSchema = z.object({
   languageTag: languageTagSchema,
   name: z.string().trim().min(1).max(300),
   isPreferred: z.boolean().optional(),
+  /**
+   * Name-row identity for ID-preserving renames. Absent inserts a new
+   * row. Scoped to the place by `savePlaceNames`; a row from another
+   * place is rejected as unknown.
+   */
+  id: placeIdSchema.optional(),
 });
 
 export type PlaceNameInput = z.infer<typeof placeNameInputSchema>;
@@ -91,6 +97,20 @@ export const adminPlaceNamesSchema = z.discriminatedUnion("action", [
 ]);
 
 export type AdminPlaceNames = z.infer<typeof adminPlaceNamesSchema>;
+
+/**
+ * Atomic place-name save: renames reference rows by `id`, entries
+ * without `id` insert, and `removeIds` delete — all in one transaction.
+ * Upsert may be empty for a deletes-only save; the service refuses a save
+ * that would leave the place nameless.
+ */
+export const adminPlaceNamesSaveSchema = z.object({
+  placeId: placeIdSchema,
+  upsert: z.array(placeNameInputSchema).max(20),
+  removeIds: z.array(placeIdSchema).max(20).default([]),
+});
+
+export type AdminPlaceNamesSave = z.infer<typeof adminPlaceNamesSaveSchema>;
 
 export const adminPlaceParentSchema = z.object({
   placeId: placeIdSchema,

@@ -8,6 +8,7 @@ import {
   dishSearchQuerySchema,
   localeSchema,
   nameSearchQuerySchema,
+  nearestCityQuerySchema,
   carouselQuerySchema,
   placeQuerySchema,
   recommendationQuerySchema,
@@ -240,6 +241,30 @@ export const listCountriesFn = createServerFn({ method: "GET" })
         ),
       ),
       "fn/countries/list",
+      15000,
+      "server-fn",
+    );
+  });
+
+/**
+ * Nearest catalog city to a coordinate pair, for the honest near-you
+ * status line. Returns one canonical city or null when nothing city-scale
+ * is close enough — never free text, never a far-away guess.
+ */
+export const nearestCityFn = createServerFn({ method: "GET" })
+  .validator(nearestCityQuerySchema)
+  .handler(async ({ data }) => {
+    const [effects, _dish, { CatalogService }, { Actor }, { withActor }, { runApp }] =
+      await loadServer();
+
+    return runApp(
+      withActor(
+        Actor.Guest(),
+        effects.Effect.flatMap(CatalogService, (service) =>
+          service.nearestCity(data.latitude, data.longitude, data.locale),
+        ),
+      ),
+      "fn/cities/nearest",
       15000,
       "server-fn",
     );

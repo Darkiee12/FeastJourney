@@ -163,6 +163,13 @@ export const countryQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(300).default(250),
 });
 
+/** Nearest-city lookup bound: one coordinate pair, one locale, one city at most. */
+export const nearestCityQuerySchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  locale: localeSchema,
+});
+
 export const placeDishesQuerySchema = z.object({
   locale: localeSchema,
   association: z.enum(["origin", "associated", "popular"]).optional(),

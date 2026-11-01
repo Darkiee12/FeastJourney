@@ -166,7 +166,7 @@ function AppLayout() {
         {copy.skipContent}
       </a>
 
-      <div className="flex min-h-dvh flex-col">
+      <div className="app-shell flex min-h-dvh flex-col">
         <header className="site-header sticky top-0 z-50 border-b border-white/10 bg-space-deep">
           {/* Compact single-row app bar: never wraps, even on 320px phones.
               Public links collapse into a Menu entry below 480px; account and

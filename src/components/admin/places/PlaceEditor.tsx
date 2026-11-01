@@ -12,8 +12,8 @@ import { PlaceSelector } from "@/components/admin/places/PlaceSelector";
 import { AdminSelectField } from "@/components/admin/select";
 import { AdminDialog, AdminField, AdminGhostButton } from "@/components/admin/ui";
 import {
-  adminPlaceNamesFn,
   adminPlaceParentFn,
+  adminSavePlaceNamesFn,
   adminUpdatePlaceFn,
 } from "@/modules/food-discovery/place.functions";
 import type { PlaceKind } from "@/modules/food-discovery/place.schema";
@@ -289,49 +289,32 @@ interface PlaceNameDraft {
   readonly isPreferred: boolean;
 }
 
-interface PlaceNameSaveRow {
+interface PlaceNameSaveUpsert {
+  readonly id?: string;
   readonly languageTag: string;
   readonly name: string;
-  readonly isPreferred: boolean;
+  readonly isPreferred?: boolean;
 }
 
-const savePlaceNames = async (input: {
+/**
+ * Atomic place-name save via `adminSavePlaceNamesFn`:
+ * `{ data: { placeId, upsert: [{id?, languageTag, name, isPreferred}], removeIds } }`.
+ * Renames carry the name-row `id`, inserts omit it, deletes go in
+ * `removeIds` — one service transaction. Domain failures arrive as
+ * client-safe `{ok:false,reason}` and surface verbatim; edits stay for
+ * retry and only success closes the dialog.
+ */
+const savePlaceNamesAtomic = async (input: {
+  readonly data: {
+    readonly placeId: string;
+    readonly upsert: Array<PlaceNameSaveUpsert>;
+    readonly removeIds: Array<string>;
+  };
   readonly failureMessage: string;
-  readonly placeId: string;
-  readonly removed: ReadonlyArray<string>;
-  readonly upsert: ReadonlyArray<PlaceNameSaveRow>;
 }): Promise<string | null> => {
-  if (input.upsert.length > 0) {
-    const upserted = await adminPlaceNamesFn({
-      data: {
-        placeId: input.placeId,
-        action: "upsert",
-        names: input.upsert.map((row) => ({ ...row })),
-      },
-    });
+  const outcome = await adminSavePlaceNamesFn({ data: input.data });
 
-    const failure = readMutationFailure(upserted, input.failureMessage);
-
-    if (failure !== null) {
-      return failure;
-    }
-  }
-
-  const removals = await Promise.all(
-    input.removed.map((nameId) =>
-      adminPlaceNamesFn({ data: { placeId: input.placeId, action: "remove", nameId } }),
-    ),
-  );
-
-  for (const outcome of removals) {
-    const failure = readMutationFailure(outcome, input.failureMessage);
-
-    if (failure !== null) {
-      return failure;
-    }
-  }
-
-  return null;
+  return readMutationFailure(outcome, input.failureMessage);
 };
 
 export function PlaceNamesEditor({
@@ -365,7 +348,15 @@ export function PlaceNamesEditor({
     (row) => row.name.trim() === "" || row.name.length > 300 || !LANG_PATTERN.test(row.languageTag),
   );
 
-  const preferredCount = rows.filter((row) => row.isPreferred).length;
+  const preferredByLang = new Map<string, number>();
+
+  for (const row of rows) {
+    if (row.isPreferred) {
+      preferredByLang.set(row.languageTag, (preferredByLang.get(row.languageTag) ?? 0) + 1);
+    }
+  }
+
+  const duplicatePreferred = [...preferredByLang.values()].some((count) => count > 1);
 
   const dirty =
     removed.length > 0 ||
@@ -379,8 +370,27 @@ export function PlaceNamesEditor({
     setOpen(true);
   };
 
+  const handleClose = (): void => {
+    // Cancel restores the snapshot so a reopened dialog never shows a
+    // discarded draft; failed saves keep edits (only success closes).
+    setRows(snapshot);
+    setRemoved([]);
+    setError(null);
+    setOpen(false);
+  };
+
   const patchRow = (key: string, patch: Partial<PlaceNameDraft>): void => {
     setRows((previous) => previous.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+  };
+
+  const removeRow = (row: PlaceNameDraft): void => {
+    setRows((previous) => previous.filter((entry) => entry.key !== row.key));
+
+    const removedId = row.id;
+
+    if (removedId !== undefined) {
+      setRemoved((previous) => [...previous, removedId]);
+    }
   };
 
   const upsertRows = rows.filter((row) => {
@@ -395,27 +405,31 @@ export function PlaceNamesEditor({
   });
 
   const handleSave = (): void => {
-    if (invalid || preferredCount > 1 || !dirty || pending) {
+    if (invalid || duplicatePreferred || !dirty || pending) {
       return;
     }
 
     setPending(true);
     setError(null);
 
-    void savePlaceNames({
+    void savePlaceNamesAtomic({
+      data: {
+        placeId: place.id,
+        upsert: upsertRows.map((row) => ({
+          id: row.id,
+          languageTag: row.languageTag,
+          name: row.name.trim(),
+          isPreferred: row.isPreferred,
+        })),
+        removeIds: [...removed],
+      },
       failureMessage: copy.adminSaveFailed,
-      placeId: place.id,
-      removed,
-      upsert: upsertRows.map((row) => ({
-        languageTag: row.languageTag,
-        name: row.name.trim(),
-        isPreferred: row.isPreferred,
-      })),
     }).then(
       (failure) => {
         setPending(false);
 
         if (failure !== null) {
+          // Verbatim domain reason; edits stay for retry.
           setError(failure);
 
           return;
@@ -443,22 +457,20 @@ export function PlaceNamesEditor({
           copy={copy}
           dirty={dirty}
           error={error}
-          onClose={() => {
-            setOpen(false);
-          }}
+          onClose={handleClose}
           onSave={handleSave}
           open={open}
           pending={pending}
           title={copy.adminNames}
-          valid={!invalid && preferredCount <= 1}
+          valid={!invalid && !duplicatePreferred}
         >
-          <ul className="flex min-w-0 flex-col gap-4">
+          <ul className="flex min-w-0 flex-col gap-3">
             {rows.map((row) => (
               <li
                 key={row.key}
                 className="flex min-w-0 flex-col gap-2 rounded-xl border border-border-soft p-3"
               >
-                <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-[8rem_minmax(0,1fr)]">
                   <AdminField
                     id={`place-name-tag-${row.key}`}
                     label={copy.adminLanguageTag}
@@ -470,7 +482,7 @@ export function PlaceNamesEditor({
                   />
                   <AdminField
                     id={`place-name-value-${row.key}`}
-                    label={copy.adminPlaces}
+                    label={copy.adminNameLabel}
                     value={row.name}
                     onChange={(event) => {
                       patchRow(row.key, { name: event.target.value });
@@ -493,17 +505,15 @@ export function PlaceNamesEditor({
                       className="h-5 w-5 shrink-0"
                     />
                     {copy.adminPreferred}
+                    <span className="rounded-full bg-cream px-2 py-0.5 text-xs font-bold text-food-orange-dark">
+                      {row.languageTag}
+                    </span>
                   </label>
                   <AdminGhostButton
                     type="button"
+                    aria-label={`${copy.adminRemove} ${row.name.trim() === "" ? row.languageTag : row.name.trim()}`}
                     onClick={() => {
-                      setRows((previous) => previous.filter((entry) => entry.key !== row.key));
-
-                      const removedId = row.id;
-
-                      if (removedId !== undefined) {
-                        setRemoved((previous) => [...previous, removedId]);
-                      }
+                      removeRow(row);
                     }}
                   >
                     {copy.adminRemove}
@@ -512,6 +522,11 @@ export function PlaceNamesEditor({
               </li>
             ))}
           </ul>
+          {duplicatePreferred ? (
+            <p role="alert" className="text-sm font-semibold text-red-800">
+              {copy.adminPreferredSingle}
+            </p>
+          ) : null}
           <div>
             <AdminGhostButton
               type="button"

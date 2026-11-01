@@ -5,6 +5,7 @@ import type * as EffectModule from "effect";
 import {
   adminDeletePlaceSchema,
   adminPlaceDetailSchema,
+  adminPlaceNamesSaveSchema,
   adminPlaceNamesSchema,
   adminPlaceParentSchema,
   adminPlacesListSchema,
@@ -392,6 +393,41 @@ export const adminPlaceNamesFn = createServerFn({ method: "POST" })
           (outcome) => (outcome.ok ? { ok: true as const, names: outcome.value } : outcome),
         );
       },
+    );
+  });
+
+/**
+ * Atomic place-name save transport: renames by name-row `id`, inserts
+ * without `id`, and `removeIds` deletes apply in one service
+ * transaction. Enforces `food:update` here AND inside
+ * `PlaceAdminService.savePlaceNames`; route guards stay navigation hints.
+ */
+export const adminSavePlaceNamesFn = createServerFn({ method: "POST" })
+  .validator(adminPlaceNamesSaveSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadServer();
+    const { effects, server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    return withPlaceService(
+      loaded,
+      headers,
+      { resource: "food", actions: ["update"] },
+      "fn/admin/place-names-save",
+      requestId,
+      (service) =>
+        effects.Effect.map(
+          settlePlaceTask(
+            effects,
+            service.savePlaceNames(data.placeId, {
+              upsert: data.upsert,
+              removeIds: data.removeIds,
+            }),
+          ),
+          (outcome) => (outcome.ok ? { ok: true as const, names: outcome.value } : outcome),
+        ),
     );
   });
 
