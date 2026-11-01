@@ -4,6 +4,7 @@ import {
   LocateFixedIcon,
   MapPinIcon,
   PlaneIcon,
+  RotateCcwIcon,
   SearchIcon,
   XIcon,
 } from "lucide-react";
@@ -672,9 +673,11 @@ export function WhereStep({
               <button
                 type="button"
                 onClick={precise.request}
-                className="inline-flex min-h-10 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-4 text-xs font-bold text-ink transition hover:border-ink"
+                aria-label={copy.recRetry}
+                title={copy.recRetry}
+                className="inline-flex min-h-10 min-w-10 cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white text-ink transition hover:border-ink"
               >
-                {copy.recRetry}
+                <RotateCcwIcon aria-hidden="true" className="size-4" />
               </button>
             </div>
           ) : null}
