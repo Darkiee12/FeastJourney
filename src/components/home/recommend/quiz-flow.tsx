@@ -26,6 +26,7 @@ import {
   formatTemplate,
   isCityPlaceId,
   isExplicitRegionChoice,
+  needsAccountPrefill,
   parseCommaList,
   persistPrefs,
   PREFS_STORAGE_KEY,
@@ -34,7 +35,9 @@ import {
   readStoredPrefs,
   regionOriginFor,
   removeSavedPrefs,
+  resolvePersistedExclusions,
   sanitizeCountryCode,
+  shouldShowImportBanner,
   termLengthError,
   textOriginFor,
   toCoarseSnapshot,
@@ -243,7 +246,7 @@ export function RecommendSection() {
   const userId = session.status === "signed-in" ? session.user.id : null;
   const queryClient = useQueryClient();
 
-  /** Guest-storage mirror of persisted exclusions; every submit writes through here. */
+  /** Guest-storage mirror of persisted exclusions; guest submits write through here. Signed-in submits write the account instead and leave this copy independent for explicit import. */
   const [guestExclusions, setGuestExclusions] = useState<ReadonlyArray<string>>(
     () => savedInitial?.excludedIngredients ?? [],
   );
@@ -274,11 +277,23 @@ export function RecommendSection() {
       saveFoodPreferencesFn({ data: { excluded_ingredients: excluded } }),
   });
 
-  /** Fire-and-forget account save; a failure surfaces an inline retry only. */
+  /** Fire-and-forget account save; a failure surfaces an inline retry only.
+   * On success the account-scoped cache is updated so Skip, the import
+   * banner, and later submits all observe the saved values (never stale). */
   const saveAccountPrefs = (excluded: ReadonlyArray<string>): void => {
-    accountSave.mutate([...excluded], {
+    if (userId === null) {
+      return;
+    }
+
+    const memberId = userId;
+    const next = [...excluded];
+
+    accountSave.mutate(next, {
       onSuccess: () => {
         setAccountSaveError(null);
+        queryClient.setQueryData(["user", "food-preferences", memberId], {
+          excludedIngredients: next,
+        });
       },
       onError: () => {
         setAccountSaveError(copy.recError);
@@ -288,15 +303,16 @@ export function RecommendSection() {
 
   /**
    * Persisted exclusions source of truth: the loaded account prefs when
-   * signed in, otherwise guest storage.
+   * signed in, otherwise guest storage. Delegates to the pure resolver so
+   * the branching is unit-tested (see quiz-prefs-lifecycle tests).
    */
-  const persistedExclusions = (): Array<string> => {
-    if (userId !== null && accountPrefsQuery.data !== undefined) {
-      return [...(accountPrefsQuery.data?.excludedIngredients ?? [])];
-    }
-
-    return [...guestExclusions];
-  };
+  const persistedExclusions = (): Array<string> =>
+    resolvePersistedExclusions({
+      userId,
+      accountLoaded: accountPrefsQuery.data !== undefined,
+      account: accountPrefsQuery.data?.excludedIngredients ?? null,
+      guest: guestExclusions,
+    });
 
   /** Adopt the guest-storage exclusions into the draft and save them to the account. */
   const importGuestPrefs = (): void => {
@@ -305,9 +321,14 @@ export function RecommendSection() {
     setExcludedTouched(true);
 
     if (userId !== null) {
+      const memberId = userId;
+
       accountSave.mutate(guest, {
         onSuccess: () => {
           setAccountSaveError(null);
+          queryClient.setQueryData(["user", "food-preferences", memberId], {
+            excludedIngredients: guest,
+          });
           setImportDismissed(true);
         },
         onError: () => {
@@ -447,25 +468,23 @@ export function RecommendSection() {
    */
   const prefilledAccountRef = useRef<string | null>(null);
   useEffect(() => {
-    if (userId === null) {
-      return;
-    }
-
-    if (prefilledAccountRef.current === userId) {
-      return;
-    }
-
-    if (accountPrefsQuery.data === undefined) {
+    if (
+      !needsAccountPrefill({
+        signedIn: userId !== null,
+        prefilledForUserId: prefilledAccountRef.current,
+        userId,
+        accountLoaded: accountPrefsQuery.data !== undefined,
+        excludedTouched,
+        accountNonEmpty: (accountPrefsQuery.data?.excludedIngredients.length ?? 0) > 0,
+      })
+    ) {
       return;
     }
 
     prefilledAccountRef.current = userId;
 
     const account = accountPrefsQuery.data?.excludedIngredients ?? [];
-
-    if (!excludedTouched && account.length > 0) {
-      setDraft((previous) => ({ ...previous, excludedRaw: account.join(", ") }));
-    }
+    setDraft((previous) => ({ ...previous, excludedRaw: account.join(", ") }));
   }, [userId, accountPrefsQuery.data, excludedTouched]);
 
   /**
@@ -567,28 +586,35 @@ export function RecommendSection() {
   const startSearch = (payload: RecommendPayload, remember: boolean): void => {
     const transport = toTransportPayload(payload);
     const excluded = [...transport.excludedIngredients];
-    persistPrefs({
-      rememberDestination: remember,
-      excludedIngredients: excluded,
-      country: transport.country,
-      city:
-        draft.cityId !== null && isCityPlaceId(draft.cityId)
-          ? { placeId: draft.cityId, label: draft.cityLabel, country: draft.cityCountry }
-          : undefined,
-    });
-    setGuestExclusions(excluded);
-    setHasSaved(remember);
+
+    // Persistence is source-separated: guests write versioned localStorage
+    // only; signed-in submissions write only the member's account prefs.
+    // Account values must never mirror into guest storage (the guest copy
+    // stays independent for explicit import), and guest writes must never
+    // run for members.
+    if (userId === null) {
+      persistPrefs({
+        rememberDestination: remember,
+        excludedIngredients: excluded,
+        country: transport.country,
+        city:
+          draft.cityId !== null && isCityPlaceId(draft.cityId)
+            ? { placeId: draft.cityId, label: draft.cityLabel, country: draft.cityCountry }
+            : undefined,
+      });
+      setGuestExclusions(excluded);
+    } else {
+      // Signed-in account save never blocks the recommendation: the dishes
+      // still load from the submitted terms; a save failure only surfaces an
+      // inline retry while the form input is preserved untouched.
+      saveAccountPrefs(excluded);
+    }
+
+    setHasSaved(remember || excluded.length > 0);
     setSubmitted(payload);
     setStepError(null);
     setShowResults(true);
     recommend.mutate(transport);
-
-    // Signed-in account save never blocks the recommendation: the dishes
-    // still load from the submitted terms; a save failure only surfaces an
-    // inline retry while the form input is preserved untouched.
-    if (userId !== null) {
-      saveAccountPrefs(excluded);
-    }
   };
 
   const currentPayload = (seed: number): RecommendPayload =>
@@ -747,6 +773,7 @@ export function RecommendSection() {
       removeSavedPrefs(() => window.localStorage.removeItem(PREFS_STORAGE_KEY));
     }
 
+    setGuestExclusions([]);
     clearJourneySnapshot();
 
     recommend.reset();
@@ -765,6 +792,27 @@ export function RecommendSection() {
     setMoodTouched(false);
     setExcludedTouched(false);
     explicitRegionRef.current = false;
+
+    // Signed-in members clear the account-backed list through the
+    // authenticated server operation and refresh the account-scoped cache,
+    // so cleared values cannot reappear via Skip, reload, or the import
+    // banner. The in-memory draft above is already empty, so an inline
+    // retry after a failure correctly re-saves the empty list.
+    if (userId !== null) {
+      const memberId = userId;
+
+      accountSave.mutate([], {
+        onSuccess: () => {
+          setAccountSaveError(null);
+          queryClient.setQueryData(["user", "food-preferences", memberId], {
+            excludedIngredients: [],
+          });
+        },
+        onError: () => {
+          setAccountSaveError(copy.recError);
+        },
+      });
+    }
   };
 
   const retry = (): void => {
@@ -881,14 +929,22 @@ export function RecommendSection() {
    * Not now dismisses for the visit. Never shows for guests or while the
    * account prefs are still loading.
    */
-  const accountExclusions = accountPrefsQuery.data?.excludedIngredients ?? null;
+  const accountExclusions: ReadonlyArray<string> | null =
+    accountPrefsQuery.data?.excludedIngredients ?? null;
 
-  const showImportBanner =
-    userId !== null &&
-    accountPrefsQuery.data !== undefined &&
-    !importDismissed &&
-    guestExclusions.length > 0 &&
-    JSON.stringify(guestExclusions) !== JSON.stringify(accountExclusions ?? []);
+  const accountHasPrefs = (accountExclusions?.length ?? 0) > 0;
+
+  /** Clear affordance covers guest storage, the in-memory mirrors, and the
+   * loaded account prefs — whichever source actually holds values. */
+  const hasSavedVisible = hasSaved || (userId !== null && accountHasPrefs);
+
+  const showImportBanner = shouldShowImportBanner({
+    signedIn: userId !== null,
+    accountLoaded: accountPrefsQuery.data !== undefined,
+    dismissed: importDismissed,
+    guest: guestExclusions,
+    account: accountExclusions,
+  });
 
   const renderImportBanner = (): ReactNode =>
     showImportBanner ? (
@@ -1243,7 +1299,7 @@ export function RecommendSection() {
                 prefs={{
                   accountSaveError,
                   checked: draft.remember,
-                  hasSaved,
+                  hasSaved: hasSavedVisible,
                   onChange: (next) => {
                     setDraft({ ...draft, remember: next });
                   },
@@ -1513,7 +1569,7 @@ export function RecommendSection() {
                 prefs={{
                   accountSaveError,
                   checked: draft.remember,
-                  hasSaved,
+                  hasSaved: hasSavedVisible,
                   onChange: (next) => {
                     setDraft({ ...draft, remember: next });
                   },

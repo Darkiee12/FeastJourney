@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
@@ -149,11 +149,23 @@ function AccountSettings() {
     },
   });
 
+  const queryClient = useQueryClient();
+
   const saveFoodPrefs = useMutation({
     mutationFn: (input: { excluded: Array<string> }) =>
       saveFoodPreferencesFn({ data: { excluded_ingredients: input.excluded } }),
-    onSuccess: () => {
+    onSuccess: (_data, input) => {
       setFoodPrefsLocalError(null);
+      // The quiz reads the same account-scoped cache: refresh it so a
+      // later quiz visit (or Skip) observes the settings-side save instead
+      // of a stale list. Guest localStorage is untouched — the two sources
+      // stay independent.
+      queryClient.setQueryData(
+        ["user", "food-preferences", routeContext.user?.id ?? "signed-out"],
+        {
+          excludedIngredients: [...input.excluded],
+        },
+      );
     },
   });
 

@@ -827,6 +827,95 @@ export const removeSavedPrefs = (remove: () => void): void => {
 };
 
 /**
+ * Preference-lifecycle decisions as pure functions so guest → sign-in →
+ * edit → sign-out, account switching, save → Skip, and clear → reload are
+ * unit-testable without a DOM. The component owns the React Query cache and
+ * storage I/O; these functions own the branching.
+ */
+
+export interface PersistedExclusionsInput {
+  /** Authenticated member id, or null for guests. */
+  readonly userId: string | null;
+  /** True once the account prefs query has resolved (success or empty). */
+  readonly accountLoaded: boolean;
+  /** Loaded account exclusions (null when absent). */
+  readonly account: ReadonlyArray<string> | null;
+  /** Guest-storage mirror (in-memory copy of the v2 key). */
+  readonly guest: ReadonlyArray<string>;
+}
+
+/**
+ * Which persisted list a submit or Skip should use. Signed-in members with
+ * loaded account prefs use the account list; everyone else — including a
+ * member whose account prefs are still loading — uses the guest mirror,
+ * which is what the visible draft was initialized from.
+ */
+export const resolvePersistedExclusions = (input: PersistedExclusionsInput): Array<string> => {
+  if (input.userId !== null && input.accountLoaded) {
+    return [...(input.account ?? [])];
+  }
+
+  return [...input.guest];
+};
+
+export interface AccountPrefillInput {
+  readonly signedIn: boolean;
+  /** Member id the draft was already prefilled for (re-arm per account). */
+  readonly prefilledForUserId: string | null;
+  readonly userId: string | null;
+  readonly accountLoaded: boolean;
+  readonly excludedTouched: boolean;
+  readonly accountNonEmpty: boolean;
+}
+
+/**
+ * Whether the loaded account prefs may adopt the draft. Exactly one
+ * adoption per sign-in: newer user edits (touched draft) and repeat loads
+ * never overwrite. An empty account never wipes guest-restored text.
+ */
+export const needsAccountPrefill = (input: AccountPrefillInput): boolean =>
+  input.signedIn &&
+  input.prefilledForUserId !== input.userId &&
+  input.accountLoaded &&
+  !input.excludedTouched &&
+  input.accountNonEmpty;
+
+/** Order-insensitive comparison so a reorder never nags for an import. */
+export const sameExclusionSet = (
+  left: ReadonlyArray<string>,
+  right: ReadonlyArray<string>,
+): boolean => {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const sortedLeft = [...left].toSorted();
+  const sortedRight = [...right].toSorted();
+
+  return sortedLeft.every((term, index) => term === sortedRight[index]);
+};
+
+export interface ImportBannerInput {
+  readonly signedIn: boolean;
+  readonly accountLoaded: boolean;
+  readonly dismissed: boolean;
+  readonly guest: ReadonlyArray<string>;
+  readonly account: ReadonlyArray<string> | null;
+}
+
+/**
+ * Whether to offer the guest → account import. Never shows for guests or
+ * while account prefs are loading, and never nags after an explicit
+ * dismissal or when both sides already agree.
+ */
+export const shouldShowImportBanner = (input: ImportBannerInput): boolean =>
+  input.signedIn &&
+  input.accountLoaded &&
+  !input.dismissed &&
+  input.guest.length > 0 &&
+  !sameExclusionSet(input.guest, input.account ?? []);
+
+/**
  * Tab-scoped journey snapshot: preserves the in-progress quiz (meal, mood,
  * draft, step, submitted payload, results flag, surprise seed) across dish
  * detail visits within the same tab. In-memory only, never written to disk.
