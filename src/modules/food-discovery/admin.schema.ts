@@ -384,31 +384,49 @@ const splitList = (value: string): Array<string> =>
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
 
+/**
+ * Places-cell splitter: entries are separated by `;` or `,`.
+ * Only the `places` column uses this — other list columns keep `;` so
+ * commas inside ingredient names stay intact. Place entries (`ISO`,
+ * `place:<id>`, `City@Parent`) never contain commas themselves.
+ */
+const splitPlaceList = (value: string): Array<string> =>
+  value
+    .split(/[;,]/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
 const PLACE_ASSOCIATIONS: ReadonlySet<string> = new Set(["origin", "associated", "popular"]);
 
 /**
- * One parsed `places` cell entry: either an ISO code or an internal registry
- * place id, plus its place association. Exactly one of `iso`/`place_id` is
+ * One parsed `places` cell entry: an ISO code, an internal registry place
+ * id, or a city/locality display name optionally scoped by a parent ISO —
+ * plus its place association. Exactly one of `iso`/`place_id`/`city` is
  * set; validation resolves the reference downstream and reports unknown
- * ids/isos as review issues.
+ * ids/isos/cities as actionable review issues (never silent fallbacks).
  */
 interface CsvPlaceEntry {
   readonly iso?: string;
   readonly place_id?: string;
+  readonly city?: string;
+  readonly parent_iso?: string;
   readonly association: string;
 }
 
 const PLACE_ID_PREFIX = "place:";
+const ISO_PATTERN = /^[A-Za-z]{2}(-[A-Za-z0-9]{1,3})?$/;
 
 /**
- * One `places` cell entry: `ISO[:association]` or `place:<id>[:association]`.
- * A bare ISO code or bare `place:<id>` claims no origin — both default to
- * `associated`; only an explicit `:origin` suffix records an origin claim.
- * City-level links always use the `place:<id>` form with the registry id;
- * free-text city names never match. The association match is
- * case-insensitive and surrounding whitespace is ignored. `sheetRow` is the
- * 1-based spreadsheet row (header is row 1) so errors point at the offending
- * line.
+ * One `places` cell entry: `ISO[:association]`, `place:<id>[:association]`,
+ * `City@ParentISO[:association]`, or a bare city name `City[:association]`.
+ * A bare target of any form claims no origin — all default to `associated`;
+ * only an explicit `:origin` suffix records an origin claim. City-level
+ * links may use the registry id (`place:<id>`) or the portable
+ * `City@Parent` form (e.g. `Hanoi@VN:popular`); bare city names must resolve
+ * unambiguously at validation or are reported as review issues. The
+ * association match is case-insensitive and surrounding whitespace is
+ * ignored. `sheetRow` is the 1-based spreadsheet row (header is row 1) so
+ * errors point at the offending line.
  */
 const parsePlaceEntry = (entry: string, sheetRow: number): CsvPlaceEntry => {
   if (entry.trim().toLowerCase().startsWith(PLACE_ID_PREFIX)) {
@@ -416,16 +434,11 @@ const parsePlaceEntry = (entry: string, sheetRow: number): CsvPlaceEntry => {
   }
 
   const separator = entry.indexOf(":");
+  const head = (separator === -1 ? entry : entry.slice(0, separator)).trim();
+  const rawAssociation = separator === -1 ? "" : entry.slice(separator + 1).trim();
+  const association = rawAssociation === "" ? "associated" : rawAssociation.toLowerCase();
 
-  if (separator === -1) {
-    return { iso: entry, association: "associated" };
-  }
-
-  const iso = entry.slice(0, separator).trim();
-  const rawAssociation = entry.slice(separator + 1).trim();
-  const association = rawAssociation.toLowerCase();
-
-  if (iso.length === 0) {
+  if (head.length === 0) {
     throw new Error(`row ${sheetRow}: invalid place entry "${entry}"`);
   }
 
@@ -433,7 +446,24 @@ const parsePlaceEntry = (entry: string, sheetRow: number): CsvPlaceEntry => {
     throw new Error(`row ${sheetRow}: unsupported place association "${rawAssociation}"`);
   }
 
-  return { iso, association };
+  const atSign = head.lastIndexOf("@");
+
+  if (atSign !== -1) {
+    const city = head.slice(0, atSign).trim();
+    const parentIso = head.slice(atSign + 1).trim();
+
+    if (city.length === 0 || parentIso.length === 0) {
+      throw new Error(`row ${sheetRow}: invalid place entry "${entry}"`);
+    }
+
+    return { city, parent_iso: parentIso, association };
+  }
+
+  if (ISO_PATTERN.test(head)) {
+    return { iso: head, association };
+  }
+
+  return { city: head, association };
 };
 
 /**
@@ -477,13 +507,12 @@ const parsePlaceIdEntry = (entry: string, sheetRow: number): CsvPlaceEntry => {
  * Columns: slug,status,parent_slug,name,language_tag,name_kind,
  * description,ingredients,places,cuisines,categories,editorial_note.
  * Multi-value cells use `;` separators (ingredient names, place entries,
- * cuisine/category slugs). Each `places` entry is `ISO[:association]` or
- * `place:<id>[:association]` where association is one of `origin`,
- * `associated`, or `popular`; a bare ISO code or bare `place:<id>` means
- * `associated`, never `origin`. City-level links must use the `place:<id>`
- * form with the registry id — free-text city names never match.
- * Unknown ingredients, places, cuisines, or
- * categories are reported as review issues by validation, not silently
+ * cuisine/category slugs); the `places` cell additionally accepts `,`.
+ * Each `places` entry is `ISO[:association]`, `place:<id>[:association]`,
+ * `City@ParentISO[:association]`, or a bare city name, where association is
+ * one of `origin`, `associated`, or `popular`; a bare target of any form
+ * means `associated`, never `origin`. Unknown ingredients, places, cuisines,
+ * or categories are reported as review issues by validation, not silently
  * dropped.
  */
 export const csvToRecords = (text: string): Array<unknown> => {
@@ -581,7 +610,7 @@ export const csvToRecords = (text: string): Array<unknown> => {
       record.ingredients = ingredients.map((name) => ({ name, role: "common" }));
     }
 
-    const places = splitList(cell("places"));
+    const places = splitPlaceList(cell("places"));
 
     if (places.length > 0) {
       record.places = places.map((entry) => parsePlaceEntry(entry, rowNumber + 2));
@@ -692,7 +721,8 @@ export const FEASTJOURNEY_JSON_TEMPLATE = `{
         { "name": "beef", "role": "core" }
       ],
       "places": [
-        { "iso": "VN", "association": "origin" }
+        { "iso": "VN", "association": "origin" },
+        { "city": "Hanoi", "parent_iso": "VN", "association": "popular" }
       ],
       "cuisines": ["vietnamese"],
       "categories": ["noodles"],
@@ -701,3 +731,123 @@ export const FEASTJOURNEY_JSON_TEMPLATE = `{
   ]
 }
 `;
+
+/**
+ * Dish-editing transport schemas (curator dish editor). Every mutation uses
+ * explicit `{ upsert, remove }` semantics: rows carry their record ids, so
+ * an edit never inserts a duplicate and a removal never recreates the dish.
+ * Place targets reuse the canonical `placeRefSchema` contract
+ * (`place.schema.ts`): registry id, ISO code, or city name with optional
+ * parent-ISO scoping. All mutations enforce `food:update` at the server
+ * boundary; status transitions to `published` additionally require
+ * `food:publish`, exactly like the dish-status endpoint.
+ */
+
+const dishIdInputSchema = z.string().regex(/^[0-9]+$/, "dish id must be a decimal id string");
+
+const dishSlugInputSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "slug must be lowercase alphanumeric with hyphens")
+  .max(120);
+
+const dishNameKindSchema = z.enum(["native", "localized", "alias", "transliteration"]);
+
+const dishLanguageTagSchema = z
+  .string()
+  .regex(/^[a-z]{2,3}(-[A-Za-z]{2,8})?$/, "language_tag must be a BCP 47 tag");
+
+const dishIsoInputSchema = z.string().trim().min(1).max(10);
+
+const dishPlaceRefSchema = z.union([
+  z.object({ placeId: dishIdInputSchema }),
+  z.object({ iso: dishIsoInputSchema }),
+  z.object({
+    city: z.string().trim().min(1).max(300),
+    parentIso: dishIsoInputSchema.optional(),
+  }),
+]);
+
+export type AdminDishPlaceRef = z.infer<typeof dishPlaceRefSchema>;
+
+export const adminUpdateDishFieldsSchema = z.object({
+  dishId: dishIdInputSchema,
+  slug: dishSlugInputSchema.optional(),
+  parentSlug: dishSlugInputSchema.nullish(),
+  status: z.enum(["draft", "review", "published", "archived"]).optional(),
+});
+
+export type AdminUpdateDishFields = z.infer<typeof adminUpdateDishFieldsSchema>;
+
+const dishNameUpsertSchema = z.object({
+  id: dishIdInputSchema.optional(),
+  languageTag: dishLanguageTagSchema,
+  name: z.string().trim().min(1).max(300),
+  nameKind: dishNameKindSchema,
+  isPreferred: z.boolean().optional(),
+});
+
+export const adminUpdateDishNamesSchema = z.object({
+  dishId: dishIdInputSchema,
+  upsert: z.array(dishNameUpsertSchema).max(50).default([]),
+  removeIds: z.array(dishIdInputSchema).max(50).default([]),
+});
+
+export type AdminUpdateDishNames = z.infer<typeof adminUpdateDishNamesSchema>;
+
+const dishDescriptionUpsertSchema = z.object({
+  languageTag: dishLanguageTagSchema,
+  description: z.string().min(1).max(20000),
+  summary: z.string().max(1000).nullable().default(null),
+});
+
+export const adminUpdateDishDescriptionsSchema = z.object({
+  dishId: dishIdInputSchema,
+  upsert: z.array(dishDescriptionUpsertSchema).max(50).default([]),
+  removeLanguageTags: z.array(dishLanguageTagSchema).max(50).default([]),
+});
+
+export type AdminUpdateDishDescriptions = z.infer<typeof adminUpdateDishDescriptionsSchema>;
+
+const dishIngredientUpsertSchema = z.object({
+  ingredientId: dishIdInputSchema,
+  role: z.enum(["core", "common", "optional", "garnish"]),
+});
+
+export const adminUpdateDishIngredientsSchema = z.object({
+  dishId: dishIdInputSchema,
+  upsert: z.array(dishIngredientUpsertSchema).max(50).default([]),
+  removeIngredientIds: z.array(dishIdInputSchema).max(50).default([]),
+});
+
+export type AdminUpdateDishIngredients = z.infer<typeof adminUpdateDishIngredientsSchema>;
+
+const taxonomySlugSchema = z
+  .string()
+  .trim()
+  .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "slug must be lowercase alphanumeric with hyphens")
+  .max(80);
+
+export const adminUpdateDishTaxonomySchema = z.object({
+  dishId: dishIdInputSchema,
+  cuisineUpsert: z.array(taxonomySlugSchema).max(50).default([]),
+  cuisineRemove: z.array(taxonomySlugSchema).max(50).default([]),
+  categoryUpsert: z.array(taxonomySlugSchema).max(50).default([]),
+  categoryRemove: z.array(taxonomySlugSchema).max(50).default([]),
+});
+
+export type AdminUpdateDishTaxonomy = z.infer<typeof adminUpdateDishTaxonomySchema>;
+
+const dishPlaceUpsertSchema = z.object({
+  place: dishPlaceRefSchema,
+  association: z.enum(["origin", "associated", "popular"]).optional(),
+  isDisputed: z.boolean().optional(),
+  note: z.string().max(2000).nullable().optional(),
+});
+
+export const adminUpdateDishPlacesSchema = z.object({
+  dishId: dishIdInputSchema,
+  upsert: z.array(dishPlaceUpsertSchema).max(50).default([]),
+  removePlaceIds: z.array(dishIdInputSchema).max(50).default([]),
+});
+
+export type AdminUpdateDishPlaces = z.infer<typeof adminUpdateDishPlacesSchema>;

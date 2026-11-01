@@ -69,7 +69,7 @@ export type AdminBreadcrumbItem =
     }
   | {
       readonly label: string;
-      readonly to: "/admin" | "/admin/imports" | "/admin/imports/new";
+      readonly to: "/admin" | "/admin/imports" | "/admin/imports/new" | "/admin/places";
       readonly search: { readonly lang: Locale };
     }
   | { readonly label: string; readonly to?: undefined };

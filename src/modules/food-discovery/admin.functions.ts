@@ -16,12 +16,22 @@ import {
   adminImportUploadSchema,
   adminJobQuerySchema,
   adminReviewsQuerySchema,
+  adminUpdateDishDescriptionsSchema,
+  adminUpdateDishFieldsSchema,
+  adminUpdateDishIngredientsSchema,
+  adminUpdateDishNamesSchema,
+  adminUpdateDishPlacesSchema,
+  adminUpdateDishTaxonomySchema,
   csvToRecords,
   jsonToRecords,
   MAX_IMPORT_FILE_BYTES,
   needsLicenseReview,
 } from "@/modules/food-discovery/admin.schema";
 import { localeSchema } from "@/modules/food-discovery/food.schema";
+import type {
+  AdminServiceApi,
+  AdminServiceError,
+} from "@/modules/food-discovery/server/operations/admin-service";
 import type {
   DishMediaError,
   DishMediaRepository,
@@ -1375,5 +1385,241 @@ export const adminPublicationCheckFn = createServerFn({ method: "GET" })
       "fn/admin/publication-check",
       15000,
       requestId,
+    );
+  });
+
+/**
+ * Dish-editing transport: curator updates to slug/parent/status, names,
+ * descriptions, ingredients, taxonomy, and place links.
+ *
+ * Every mutation enforces `food:update` at the server boundary; a status
+ * transition to `published` additionally requires `food:publish`, exactly
+ * like the dish-status endpoint. Route guards are navigation hints only;
+ * these checks are the real authorization.
+ *
+ * Update shapes use explicit `{ upsert, remove }` semantics: upsert entries
+ * carry record ids for in-place edits (an edit never inserts a duplicate),
+ * removals name the records to delete (never delete-and-recreate the dish).
+ * Dish-place upserts always carry the full link state: an omitted
+ * `association` defaults to `associated` (origin claims must be explicit),
+ * an omitted `isDisputed` resets to false, and an omitted `note` clears the
+ * stored note. The `(dish_id, place_id)` pair is the link key: changing
+ * association/disputed/note updates the row in place.
+ */
+const loadDishAdminServer = async () => {
+  const [effects, server, dishes, authorization, session, actor, currentActor, runtime] =
+    await Promise.all([
+      import("effect"),
+      import("@tanstack/react-start/server"),
+      import("@/modules/food-discovery/server/operations/admin-service"),
+      import("@/modules/user/server/operations/authorization"),
+      import("@/server/auth/session"),
+      import("@/server/auth/actor"),
+      import("@/server/auth/current-actor"),
+      import("@/server/runtime"),
+    ]);
+
+  return { effects, server, dishes, authorization, session, actor, currentActor, runtime };
+};
+
+const withDishAdminService = async <A>(
+  loaded: Awaited<ReturnType<typeof loadDishAdminServer>>,
+  headers: Headers,
+  permissions: PermissionRequest | ReadonlyArray<PermissionRequest>,
+  operation: string,
+  requestId: string,
+  task: (
+    service: AdminServiceApi,
+    actorLabel: string,
+  ) => Effect.Effect<A, AdminServiceError, Database>,
+): Promise<A> => {
+  const { effects, session, actor, currentActor, runtime } = loaded;
+
+  await requireSurface(loaded, headers, operation, requestId);
+
+  const trusted = await runtime.runApp(
+    session.requirePermission(headers, permissions),
+    operation,
+    15000,
+    requestId,
+  );
+
+  const actorLabel = `admin:${trusted.userId}`;
+
+  return runtime.runApp(
+    currentActor.withActor(
+      actor.Actor.Member({ userId: trusted.userId }),
+      effects.Effect.flatMap(loaded.dishes.AdminService, (service) => task(service, actorLabel)),
+    ),
+    operation,
+    15000,
+    requestId,
+  );
+};
+
+const dishUpdatePermissions = (status: string | undefined): ReadonlyArray<PermissionRequest> =>
+  status === "published"
+    ? [
+        { resource: "food", actions: ["update"] },
+        { resource: "food", actions: ["publish"] },
+      ]
+    : [{ resource: "food", actions: ["update"] }];
+
+export const adminUpdateDishFieldsFn = createServerFn({ method: "POST" })
+  .validator(adminUpdateDishFieldsSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadDishAdminServer();
+    const { server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    return withDishAdminService(
+      loaded,
+      headers,
+      dishUpdatePermissions(data.status),
+      "fn/admin/dish-update-fields",
+      requestId,
+      (service, actorLabel) =>
+        service.updateDishFields(actorLabel, data.dishId, {
+          slug: data.slug,
+          parentSlug: data.parentSlug,
+          status: data.status,
+        }),
+    );
+  });
+
+export const adminUpdateDishNamesFn = createServerFn({ method: "POST" })
+  .validator(adminUpdateDishNamesSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadDishAdminServer();
+    const { server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    return withDishAdminService(
+      loaded,
+      headers,
+      dishUpdatePermissions(undefined),
+      "fn/admin/dish-update-names",
+      requestId,
+      (service, actorLabel) =>
+        service.updateDishNames(actorLabel, data.dishId, {
+          upsert: data.upsert.map((entry) => ({
+            id: entry.id,
+            languageTag: entry.languageTag,
+            name: entry.name,
+            nameKind: entry.nameKind,
+            isPreferred: entry.isPreferred,
+          })),
+          removeIds: data.removeIds,
+        }),
+    );
+  });
+
+export const adminUpdateDishDescriptionsFn = createServerFn({ method: "POST" })
+  .validator(adminUpdateDishDescriptionsSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadDishAdminServer();
+    const { server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    return withDishAdminService(
+      loaded,
+      headers,
+      dishUpdatePermissions(undefined),
+      "fn/admin/dish-update-descriptions",
+      requestId,
+      (service, actorLabel) =>
+        service.updateDishDescriptions(actorLabel, data.dishId, {
+          upsert: data.upsert.map((entry) => ({
+            languageTag: entry.languageTag,
+            description: entry.description,
+            summary: entry.summary,
+          })),
+          removeLanguageTags: data.removeLanguageTags,
+        }),
+    );
+  });
+
+export const adminUpdateDishIngredientsFn = createServerFn({ method: "POST" })
+  .validator(adminUpdateDishIngredientsSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadDishAdminServer();
+    const { server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    return withDishAdminService(
+      loaded,
+      headers,
+      dishUpdatePermissions(undefined),
+      "fn/admin/dish-update-ingredients",
+      requestId,
+      (service, actorLabel) =>
+        service.updateDishIngredients(actorLabel, data.dishId, {
+          upsert: data.upsert.map((entry) => ({
+            ingredientId: entry.ingredientId,
+            role: entry.role,
+          })),
+          removeIngredientIds: data.removeIngredientIds,
+        }),
+    );
+  });
+
+export const adminUpdateDishTaxonomyFn = createServerFn({ method: "POST" })
+  .validator(adminUpdateDishTaxonomySchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadDishAdminServer();
+    const { server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    return withDishAdminService(
+      loaded,
+      headers,
+      dishUpdatePermissions(undefined),
+      "fn/admin/dish-update-taxonomy",
+      requestId,
+      (service, actorLabel) =>
+        service.updateDishTaxonomy(actorLabel, data.dishId, {
+          cuisineUpsert: data.cuisineUpsert,
+          cuisineRemove: data.cuisineRemove,
+          categoryUpsert: data.categoryUpsert,
+          categoryRemove: data.categoryRemove,
+        }),
+    );
+  });
+
+export const adminUpdateDishPlacesFn = createServerFn({ method: "POST" })
+  .validator(adminUpdateDishPlacesSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadDishAdminServer();
+    const { server } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    return withDishAdminService(
+      loaded,
+      headers,
+      dishUpdatePermissions(undefined),
+      "fn/admin/dish-update-places",
+      requestId,
+      (service, actorLabel) =>
+        service.updateDishPlaces(actorLabel, data.dishId, {
+          upsert: data.upsert.map((entry) => ({
+            place: entry.place,
+            association: entry.association,
+            isDisputed: entry.isDisputed,
+            note: entry.note,
+          })),
+          removePlaceIds: data.removePlaceIds,
+        }),
     );
   });

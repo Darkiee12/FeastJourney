@@ -8,10 +8,12 @@ import type { Locale, Messages } from "@/shared/i18n";
 const pick = (lang: Locale, en: string, vi: string): string => (lang === "vi" ? vi : en);
 
 export function DishIngredients({
+  action,
   dish,
   lang,
   copy,
 }: {
+  readonly action?: ReactNode;
   readonly dish: DishProfile;
   readonly lang: Locale;
   readonly copy: Messages;
@@ -20,6 +22,7 @@ export function DishIngredients({
     <CollapsiblePanel
       title={copy.adminIngredients}
       defaultOpen
+      action={action}
       badge={
         <span className="rounded-full bg-cream px-2 py-0.5 text-xs font-bold text-food-orange-dark">
           {dish.ingredients.length}
@@ -48,10 +51,12 @@ export function DishIngredients({
 }
 
 export function DishPlaces({
+  action,
   dish,
   lang,
   copy,
 }: {
+  readonly action?: ReactNode;
   readonly dish: DishProfile;
   readonly lang: Locale;
   readonly copy: Messages;
@@ -60,6 +65,7 @@ export function DishPlaces({
     <CollapsiblePanel
       title={copy.adminPlaces}
       defaultOpen
+      action={action}
       badge={
         <span className="rounded-full bg-cream px-2 py-0.5 text-xs font-bold text-food-orange-dark">
           {dish.places.length}
@@ -95,10 +101,12 @@ export function DishPlaces({
 }
 
 export function DishTaxonomy({
+  action,
   dish,
   lang,
   copy,
 }: {
+  readonly action?: ReactNode;
   readonly dish: DishProfile;
   readonly lang: Locale;
   readonly copy: Messages;
@@ -109,6 +117,7 @@ export function DishTaxonomy({
     <CollapsiblePanel
       title={`${copy.adminCuisines} · ${copy.adminCategories}`}
       defaultOpen
+      action={action}
       badge={
         <span className="rounded-full bg-cream px-2 py-0.5 text-xs font-bold text-food-orange-dark">
           {total}

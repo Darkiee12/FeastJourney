@@ -1,17 +1,19 @@
 # Administration dashboard and import studio (implemented)
 
-**Status: Implemented** on PR #3 (`feat/food-discovery`). Admin surface
-for catalog curation; all mutations gated by session RBAC, never
-published automatically. Dish detail also allows status editing with a
-server-checked publication checklist; publishing stays a `food:publish`
-decision.
+**Status: Implemented** on PR #3 (`feat/food-discovery`), extended with
+dish editing, place registry management, and city-level import links (see
+below). Admin surface for catalog curation; all mutations gated by session
+RBAC, never published automatically. Dish detail also allows status editing
+with a server-checked publication checklist; publishing stays a
+`food:publish` decision.
 
 ## Routes (`src/routes/`)
 
 | Route | Responsibility |
 | --- | --- |
 | `/admin` | Editorial overview: attention queue, health counts, recent imports/dishes |
-| `/admin/dishes`, `/admin/dishes/$dishId` | Status-filtered catalog list; curation detail (names, descriptions, links, provenance, notes, revisions) |
+| `/admin/dishes`, `/admin/dishes/$dishId` | Status-filtered catalog list; curation detail with section editors (identity, names, descriptions, ingredients, taxonomy, places) |
+| `/admin/places`, `/admin/places/$placeId` | Place registry: searchable/filterable list (kind, parent, query), detail with names, metadata, hierarchy, linked dishes |
 | `/admin/imports`, `/admin/imports/new`, `/admin/imports/$jobId` | Import history, 7-stage studio wizard, deep-linkable job detail |
 | `/admin/reviews` | Review queue (status `review` dishes) |
 | `/admin/users`, `/admin/roles` | Existing pages, now children of the shared `admin.tsx` shell |
@@ -34,10 +36,13 @@ convenience only. Every page `beforeLoad` requires a session plus
 
 ## RBAC mapping
 
-Surface read + `food:read` (stats, dishes); `moderation:read` (reviews);
-`food:import` (import reads, validate, apply).mutations never run without
-`food:import`. `DishService.getDishForCuration` is the status-agnostic read
-for curation; public `getDish` still resolves published dishes only.
+Surface read + `food:read` (stats, dishes, places); `moderation:read`
+(reviews); `food:import` (import reads, validate, apply). Dish/place
+mutations require `food:update` at the server boundary AND inside the
+domain service (defense in depth); reads are policy-free, transport
+enforces `food:read`. `DishService.getDishForCuration` is the
+status-agnostic read for curation; public `getDish` still resolves
+published dishes only.
 
 ## Persistence
 
@@ -67,6 +72,51 @@ for curation; public `getDish` still resolves published dishes only.
   `import-records-pending-by-job` (apply window, `valid` only),
   `import-records-page-by-job` (keyset issues page),
   `import-records-count-by-job`, `import-record-insert-staged`.
+- `V20261101_001`/`V20261101_002` add a place-scoped audit trail:
+  `place_revisions` (`place_id` NULL-able so a `deleted` tombstone survives
+  its place; live rows CASCADE, mirroring `catalog_revisions` for dishes).
+  Every place mutation writes one revision row in-transaction.
+- `V20261101_003` converges `dish_places` on the `(dish_id, place_id)`
+  pair key: legacy dual `origin`+`popular` rows on one country collapse to
+  `origin`, then the PK narrows from `(dish_id, place_id, association)`.
+  The admin editor already treated the pair as the link key (update in
+  place, never duplicates); the database now enforces it.
+
+## Dish editing (implemented)
+
+`/admin/dishes/$dishId` keeps read-only cards with small per-section Edit
+actions: inline editing for simple fields, a section dialog for complex
+forms. Every update returns the saved rows so the UI re-renders without a
+second fetch; list filters/pagination survive the round trip.
+
+- `admin.functions.ts` — `adminUpdateDishFieldsFn` (slug, parent slug,
+  status), `adminUpdateDishNamesFn`, `adminUpdateDishDescriptionsFn`,
+  `adminUpdateDishIngredientsFn` (registry-id only), `adminUpdateDishTaxonomyFn`
+  (cuisine/category upsert/remove diffs), `adminUpdateDishPlacesFn`.
+- `admin.schema.ts` — matching `{upsert, remove}` Zod schemas; edits carry
+  record ids and preserve publication checks plus audit revisions.
+- `admin-service.ts` — transactional ops with uniqueness checks; dish↔place
+  updates key on `(dish_id, place_id)` (association/disputed/note updated in
+  place, removal by place id), request-level duplicates rejected, linking
+  defaults to `associated` (origin claims must be explicit).
+
+## Place registry (implemented)
+
+- `place.schema.ts` / `place.functions.ts` — Zod boundary plus seven
+  server functions: list (query/kind/parent/page), detail (hierarchy,
+  dish counts), create, update, names upsert/remove, parent set/remove,
+  delete. A city is `kind: 'locality'` with NULL ISO; coordinates
+  nullable both-or-neither with range checks; one preferred name per
+  (place, language).
+- `place-admin-service.ts` — `PlaceAdminService` with typed refusals
+  (`PlaceHasChildren`, `PlaceHasDishLinks`, `ConflictingPlace`,
+  `AmbiguousPlace`, `PlaceNotFound`); cycle guard client-side plus the
+  existing DB trigger; `resolvePlaceRef` accepts `{placeId}` | `{iso}` |
+  `{city, parentIso?}` with preferred-first matching and parent scoping.
+- List search is token-AND over the normalized search key: every query word
+  must appear in the same name row, so `Listville 2024` matches
+  `Listville Alpha 2024`. Reads are policy-free; the nav entry is gated by
+  the `dishes` capability (curators manage dishes and places together).
 
 ## Import lifecycle (current scope)
 
@@ -85,17 +135,37 @@ reload-safe; detail polls every 5 s while the job is open. Large datasets
 follow the same lifecycle through the batched protocol below — the only
 differences are cursor-driven staging/applying and paginated issues.
 
-CSV places use `ISO[:association]` (`origin` | `associated` |
-`popular`); a bare code means `associated`, never `origin`. CSV parsing
-rejects duplicate headers, ragged rows, and misplaced quotes with
-row numbers. Server-side UTF-8 byte length (not client metadata)
-enforces the 16 MiB upload cap; every user-facing size message uses the
-shared `formatFileSize` binary formatter (`src/shared/format-file-size.ts`),
-never raw bytes as the primary label. Blocking upload failures render in
-the reusable `GlobalNotification` portal banner
-(`src/components/ui/global-notification.tsx`, `role="alert"`, `z-[70]`
-above dialogs and the skip link) plus a concise field-level hint with no
-second live region.
+Import `places` entries use one grammar in CSV cells and JSON arrays:
+`target[:association]` where `association` is `origin` | `associated` |
+`popular` (case-insensitive) and a missing association always means
+`associated`, never `origin`. Targets:
+
+- `<ISO3166>` — existing country/subdivision code (`VN`, `IN-KA`);
+- `"place:"<numeric id>` — canonical registry id (`place:45`);
+- `<city name>"@"<parent ISO>` — city/province scoped by its parent
+  (`Hanoi@VN`, `Bengaluru@IN-KA`);
+- `<bare city name>` — allowed but must resolve unambiguously; otherwise it
+  is reported ambiguous.
+
+CSV cells split entries on `;` (documented, backward compatible) and `,`
+(`"Hanoi@VN:popular, Bengaluru@IN-KA;VN:origin"`). JSON keeps `{iso}` and
+`{place_id}`, adds the `{city, parent_iso}` object form plus the
+`association` field, and supports arrays (multiple associations per dish).
+Resolution mirrors the place workstream: preferred names then aliases,
+scoped by the parent; ambiguous names list candidates with geographic
+context (`"Name (Province, CC)" [place:<id>]`) so the curator refines with
+`City@Parent` or `place:<id>`; unknown names (or unknown parents) are
+actionable issues naming the Place Manager path. Never a silent country
+fallback, never an auto-created place from untrusted input, never an
+inferred origin. CSV parsing rejects duplicate headers, ragged rows, and
+misplaced quotes with row numbers. Server-side UTF-8 byte length (not
+client metadata) enforces the 16 MiB upload cap; every user-facing size
+message uses the shared `formatFileSize` binary formatter
+(`src/shared/format-file-size.ts`), never raw bytes as the primary label.
+Blocking upload failures render in the reusable `GlobalNotification` portal
+banner (`src/components/ui/global-notification.tsx`, `role="alert"`,
+`z-[70]` above dialogs and the skip link) plus a concise field-level hint
+with no second live region.
 
 - `V20261030_003` adds batching progress without new lifecycle states:
   `catalog_import_jobs` gains `staged_count` (doubles as the stage cursor),

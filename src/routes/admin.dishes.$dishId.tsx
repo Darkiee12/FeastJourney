@@ -2,9 +2,15 @@ import { createFileRoute, getRouteApi, redirect } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { z } from "zod";
 
+import { DishDescriptionsEditor } from "@/components/admin/dish/dish-descriptions-editor";
+import { DishIdentityEditor } from "@/components/admin/dish/dish-identity-editor";
+import { DishIngredientsEditor } from "@/components/admin/dish/dish-ingredients-editor";
+import { DishNamesEditor } from "@/components/admin/dish/dish-names-editor";
+import { DishPlacesEditor } from "@/components/admin/dish/dish-places-editor";
+import { DishTaxonomyEditor } from "@/components/admin/dish/dish-taxonomy-editor";
 import { DishIngredients, DishPlaces, DishTaxonomy } from "@/components/admin/dish/DishDetailsGrid";
 import { DishHeader } from "@/components/admin/dish/DishHeader";
-import { DishIdentity } from "@/components/admin/dish/DishIdentity";
+import { DishDescriptions, DishIdentity, DishNames } from "@/components/admin/dish/DishIdentity";
 import { DishNotes, type DishNoteItem } from "@/components/admin/dish/DishNotes";
 import { DishProvenance } from "@/components/admin/dish/DishProvenance";
 import { DishStatusEditor } from "@/components/admin/dish/DishStatusEditor";
@@ -308,13 +314,83 @@ function AdminDishDetail() {
       <DishPhotosPanel dishId={dish.id} lang={lang} />
 
       <div className="grid min-w-0 gap-4 md:grid-cols-2">
-        <DishIdentity dish={dish} lang={lang} copy={copy} />
-        <DishIngredients dish={dish} lang={lang} copy={copy} />
+        <DishIdentity
+          dish={dish}
+          lang={lang}
+          copy={copy}
+          action={
+            <DishIdentityEditor
+              copy={copy}
+              dishId={dish.id}
+              lang={lang}
+              parentSlug={dish.parent?.slug ?? null}
+              slug={dish.slug}
+            />
+          }
+        />
+        <DishIngredients
+          dish={dish}
+          lang={lang}
+          copy={copy}
+          action={
+            <DishIngredientsEditor
+              copy={copy}
+              dishId={dish.id}
+              ingredients={dish.ingredients}
+              lang={lang}
+            />
+          }
+        />
+      </div>
+
+      <div className="grid min-w-0 gap-4 md:grid-cols-2">
+        <DishNames
+          dish={dish}
+          lang={lang}
+          copy={copy}
+          action={
+            <DishNamesEditor copy={copy} dishId={dish.id} lang={lang} names={dish.nativeNames} />
+          }
+        />
+        <DishDescriptions
+          dish={dish}
+          lang={lang}
+          copy={copy}
+          action={
+            <DishDescriptionsEditor
+              copy={copy}
+              description={dish.description}
+              descriptionLanguage={dish.descriptionLanguage}
+              dishId={dish.id}
+              lang={lang}
+            />
+          }
+        />
       </div>
 
       <div className="grid min-w-0 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <DishPlaces dish={dish} lang={lang} copy={copy} />
-        <DishTaxonomy dish={dish} lang={lang} copy={copy} />
+        <DishPlaces
+          dish={dish}
+          lang={lang}
+          copy={copy}
+          action={
+            <DishPlacesEditor copy={copy} dishId={dish.id} lang={lang} places={dish.places} />
+          }
+        />
+        <DishTaxonomy
+          dish={dish}
+          lang={lang}
+          copy={copy}
+          action={
+            <DishTaxonomyEditor
+              categories={dish.categories}
+              copy={copy}
+              cuisines={dish.cuisines}
+              dishId={dish.id}
+              lang={lang}
+            />
+          }
+        />
         <DishProvenance dish={dish} lang={lang} copy={copy} />
       </div>
 

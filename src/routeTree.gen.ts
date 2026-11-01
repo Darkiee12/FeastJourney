@@ -20,6 +20,7 @@ import { Route as VerifyEmailRouteImport } from './routes/verify-email'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminDishesRouteImport } from './routes/admin.dishes'
 import { Route as AdminImportsRouteImport } from './routes/admin.imports'
+import { Route as AdminPlacesRouteImport } from './routes/admin.places'
 import { Route as AdminReviewsRouteImport } from './routes/admin.reviews'
 import { Route as AdminRolesRouteImport } from './routes/admin.roles'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
@@ -31,6 +32,7 @@ import { Route as SettingsSecurityRouteImport } from './routes/settings.security
 import { Route as AdminDishesDishIdRouteImport } from './routes/admin.dishes.$dishId'
 import { Route as AdminImportsJobIdRouteImport } from './routes/admin.imports.$jobId'
 import { Route as AdminImportsNewRouteImport } from './routes/admin.imports.new'
+import { Route as AdminPlacesPlaceIdRouteImport } from './routes/admin.places.$placeId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiV1CategoriesRouteImport } from './routes/api/v1/categories'
 import { Route as ApiV1CuisinesRouteImport } from './routes/api/v1/cuisines'
@@ -114,6 +116,11 @@ const AdminImportsRoute = AdminImportsRouteImport.update({
   path: '/imports',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminPlacesRoute = AdminPlacesRouteImport.update({
+  id: '/places',
+  path: '/places',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminReviewsRoute = AdminReviewsRouteImport.update({
   id: '/reviews',
   path: '/reviews',
@@ -168,6 +175,11 @@ const AdminImportsNewRoute = AdminImportsNewRouteImport.update({
   id: '/new',
   path: '/new',
   getParentRoute: () => AdminImportsRoute,
+} as any)
+const AdminPlacesPlaceIdRoute = AdminPlacesPlaceIdRouteImport.update({
+  id: '/$placeId',
+  path: '/$placeId',
+  getParentRoute: () => AdminPlacesRoute,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
@@ -325,6 +337,7 @@ export interface FileRoutesByFullPath {
   '/verify-email': typeof VerifyEmailRoute
   '/admin/dishes': typeof AdminDishesRouteWithChildren
   '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/places': typeof AdminPlacesRouteWithChildren
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
@@ -337,6 +350,7 @@ export interface FileRoutesByFullPath {
   '/admin/dishes/$dishId': typeof AdminDishesDishIdRoute
   '/admin/imports/$jobId': typeof AdminImportsJobIdRoute
   '/admin/imports/new': typeof AdminImportsNewRoute
+  '/admin/places/$placeId': typeof AdminPlacesPlaceIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/v1/categories': typeof ApiV1CategoriesRoute
   '/api/v1/cuisines': typeof ApiV1CuisinesRoute
@@ -375,6 +389,7 @@ export interface FileRoutesByTo {
   '/verify-email': typeof VerifyEmailRoute
   '/admin/dishes': typeof AdminDishesRouteWithChildren
   '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/places': typeof AdminPlacesRouteWithChildren
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
@@ -387,6 +402,7 @@ export interface FileRoutesByTo {
   '/admin/dishes/$dishId': typeof AdminDishesDishIdRoute
   '/admin/imports/$jobId': typeof AdminImportsJobIdRoute
   '/admin/imports/new': typeof AdminImportsNewRoute
+  '/admin/places/$placeId': typeof AdminPlacesPlaceIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/v1/categories': typeof ApiV1CategoriesRoute
   '/api/v1/cuisines': typeof ApiV1CuisinesRoute
@@ -427,6 +443,7 @@ export interface FileRoutesById {
   '/verify-email': typeof VerifyEmailRoute
   '/admin/dishes': typeof AdminDishesRouteWithChildren
   '/admin/imports': typeof AdminImportsRouteWithChildren
+  '/admin/places': typeof AdminPlacesRouteWithChildren
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
   '/admin/users': typeof AdminUsersRoute
@@ -439,6 +456,7 @@ export interface FileRoutesById {
   '/admin/dishes/$dishId': typeof AdminDishesDishIdRoute
   '/admin/imports/$jobId': typeof AdminImportsJobIdRoute
   '/admin/imports/new': typeof AdminImportsNewRoute
+  '/admin/places/$placeId': typeof AdminPlacesPlaceIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/v1/categories': typeof ApiV1CategoriesRoute
   '/api/v1/cuisines': typeof ApiV1CuisinesRoute
@@ -480,6 +498,7 @@ export interface FileRouteTypes {
     | '/verify-email'
     | '/admin/dishes'
     | '/admin/imports'
+    | '/admin/places'
     | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
@@ -492,6 +511,7 @@ export interface FileRouteTypes {
     | '/admin/dishes/$dishId'
     | '/admin/imports/$jobId'
     | '/admin/imports/new'
+    | '/admin/places/$placeId'
     | '/api/auth/$'
     | '/api/v1/categories'
     | '/api/v1/cuisines'
@@ -530,6 +550,7 @@ export interface FileRouteTypes {
     | '/verify-email'
     | '/admin/dishes'
     | '/admin/imports'
+    | '/admin/places'
     | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
@@ -542,6 +563,7 @@ export interface FileRouteTypes {
     | '/admin/dishes/$dishId'
     | '/admin/imports/$jobId'
     | '/admin/imports/new'
+    | '/admin/places/$placeId'
     | '/api/auth/$'
     | '/api/v1/categories'
     | '/api/v1/cuisines'
@@ -581,6 +603,7 @@ export interface FileRouteTypes {
     | '/verify-email'
     | '/admin/dishes'
     | '/admin/imports'
+    | '/admin/places'
     | '/admin/reviews'
     | '/admin/roles'
     | '/admin/users'
@@ -593,6 +616,7 @@ export interface FileRouteTypes {
     | '/admin/dishes/$dishId'
     | '/admin/imports/$jobId'
     | '/admin/imports/new'
+    | '/admin/places/$placeId'
     | '/api/auth/$'
     | '/api/v1/categories'
     | '/api/v1/cuisines'
@@ -729,6 +753,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminImportsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/places': {
+      id: '/admin/places'
+      path: '/places'
+      fullPath: '/admin/places'
+      preLoaderRoute: typeof AdminPlacesRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/reviews': {
       id: '/admin/reviews'
       path: '/reviews'
@@ -805,6 +836,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/imports/new'
       preLoaderRoute: typeof AdminImportsNewRouteImport
       parentRoute: typeof AdminImportsRoute
+    }
+    '/admin/places/$placeId': {
+      id: '/admin/places/$placeId'
+      path: '/$placeId'
+      fullPath: '/admin/places/$placeId'
+      preLoaderRoute: typeof AdminPlacesPlaceIdRouteImport
+      parentRoute: typeof AdminPlacesRoute
     }
     '/api/auth/$': {
       id: '/api/auth/$'
@@ -1024,9 +1062,22 @@ const AdminImportsRouteWithChildren = AdminImportsRoute._addFileChildren(
   AdminImportsRouteChildren,
 )
 
+interface AdminPlacesRouteChildren {
+  AdminPlacesPlaceIdRoute: typeof AdminPlacesPlaceIdRoute
+}
+
+const AdminPlacesRouteChildren: AdminPlacesRouteChildren = {
+  AdminPlacesPlaceIdRoute: AdminPlacesPlaceIdRoute,
+}
+
+const AdminPlacesRouteWithChildren = AdminPlacesRoute._addFileChildren(
+  AdminPlacesRouteChildren,
+)
+
 interface AdminRouteChildren {
   AdminDishesRoute: typeof AdminDishesRouteWithChildren
   AdminImportsRoute: typeof AdminImportsRouteWithChildren
+  AdminPlacesRoute: typeof AdminPlacesRouteWithChildren
   AdminReviewsRoute: typeof AdminReviewsRoute
   AdminRolesRoute: typeof AdminRolesRoute
   AdminUsersRoute: typeof AdminUsersRoute
@@ -1036,6 +1087,7 @@ interface AdminRouteChildren {
 const AdminRouteChildren: AdminRouteChildren = {
   AdminDishesRoute: AdminDishesRouteWithChildren,
   AdminImportsRoute: AdminImportsRouteWithChildren,
+  AdminPlacesRoute: AdminPlacesRouteWithChildren,
   AdminReviewsRoute: AdminReviewsRoute,
   AdminRolesRoute: AdminRolesRoute,
   AdminUsersRoute: AdminUsersRoute,

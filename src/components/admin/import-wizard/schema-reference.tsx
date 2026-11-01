@@ -217,6 +217,18 @@ const tabLabel = (copy: Messages, tab: SchemaTab): string => {
   return copy.adminImportSchemaTabJson;
 };
 
+/**
+ * Place-reference grammar preview for the field reference tab. Mirrors the
+ * server `parsePlaceEntry` contract plus the new `City@ISO` form: a bare
+ * reference means associated, only `:origin` claims origin.
+ */
+const PLACE_REF_EXAMPLES = `VN                   associated with Vietnam
+VN:origin            origin: Vietnam
+place:45             associated with registry place 45
+place:45:popular     popular in registry place 45
+Hanoi@VN             associated with Hanoi, Vietnam
+Hanoi@VN:associated  associated with Hanoi, Vietnam`;
+
 export function SchemaReference({ copy }: { readonly copy: Messages }): ReactNode {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<SchemaTab>("json");
@@ -358,6 +370,12 @@ export function SchemaReference({ copy }: { readonly copy: Messages }): ReactNod
                 type: column.detail,
               }))}
             />
+
+            <h3 className="mt-5 text-base font-bold">{copy.adminPlaceGrammarTitle}</h3>
+            <p className="mt-2 text-sm">{copy.adminImportPlacesFormat}</p>
+            <p className="mt-1 text-sm">{copy.adminPlaceGrammarIntro}</p>
+            <p className="mt-1 text-sm text-muted">{copy.adminPlaceGrammarCity}</p>
+            <CodeExample code={PLACE_REF_EXAMPLES} />
 
             <h3 className="mt-5 text-base font-bold">{copy.adminImportSchemaSourcesTitle}</h3>
             <ul className="mt-2 space-y-1.5 text-sm">
