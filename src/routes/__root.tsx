@@ -128,16 +128,6 @@ function AppLayout() {
         : routeIds.some((routeId) => routeId === entry.to || routeId.startsWith(`${entry.to}/`)),
     );
 
-  const hasAdminSurface =
-    capabilities.admin ||
-    capabilities.overview ||
-    capabilities.dishes ||
-    capabilities.imports ||
-    capabilities.reviews ||
-    capabilities.members ||
-    capabilities.roles ||
-    capabilities.restaurants;
-
   // First visit only: default to the browser's language when it is a fully
   // translated UI locale. Manual picks are remembered and never overridden;
   // an explicit ?lang= URL wins over detection.
@@ -290,16 +280,6 @@ function AppLayout() {
                   >
                     {copy.navScanMenu}
                   </Link>
-                  {hasAdminSurface ? (
-                    <Link
-                      to="/admin"
-                      search={{ lang }}
-                      activeOptions={{ exact: false }}
-                      className="hidden min-h-11 flex-none items-center rounded-full px-3 text-sm font-semibold whitespace-nowrap text-mango no-underline hover:bg-white/10 hover:text-white aria-[current=page]:bg-white/10 aria-[current=page]:text-white min-[480px]:inline-flex"
-                    >
-                      {copy.adminWorkspace}
-                    </Link>
-                  ) : null}
                   <DropdownMenu modal={false}>
                     <DropdownMenuTrigger className="inline-flex min-h-11 flex-none items-center rounded-full px-3 text-sm font-semibold text-white/85 hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-white min-[480px]:hidden">
                       Menu
@@ -335,13 +315,6 @@ function AppLayout() {
                           {copy.navScanMenu}
                         </Link>
                       </DropdownMenuItem>
-                      {hasAdminSurface ? (
-                        <DropdownMenuItem asChild>
-                          <Link to="/admin" search={{ lang }} activeOptions={{ exact: false }}>
-                            {copy.adminWorkspace}
-                          </Link>
-                        </DropdownMenuItem>
-                      ) : null}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </>
