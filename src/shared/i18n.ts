@@ -503,6 +503,7 @@ const english = {
   recWarningsLabel: "Heads up",
   recReasonsHeading: "Why no dishes?",
   recResultsHeading: "Your picks",
+  recRecommendationsHeading: "Recommendations",
   recTermTooLong: "Keep each item to 100 characters or fewer.",
   recViewDish: "View dish",
   recCuisineLoading: "Loading cuisines…",
@@ -564,11 +565,14 @@ const english = {
   recSummaryChange: "Change {name}",
   recPrefsImportNo: "Not now",
   recPrefsImportYes: "Import",
-  recPrefsImportBody: "This device has saved exclusions that differ from your account. Import them?",
+  recPrefsImportBody:
+    "This device has saved exclusions that differ from your account. Import them?",
   recPrefsImportTitle: "Use your saved ingredients here?",
-  recExclusionsAutoSaved: "Saved automatically — on this device, or to your account when signed in.",
+  recExclusionsAutoSaved:
+    "Saved automatically — on this device, or to your account when signed in.",
   recRememberDestination: "Remember my destination on this device",
-  recExcludedNote: "Ingredient information may be incomplete. Confirm allergies with the restaurant.",
+  recExcludedNote:
+    "Ingredient information may be incomplete. Confirm allergies with the restaurant.",
   recExcludedPlaceholder: "e.g. peanuts, pork, cilantro",
   recExcludedLabel: "Ingredients to avoid · Optional",
   recEmptySuggest: "Try removing a filter or two, or pick a different destination.",
@@ -1122,6 +1126,7 @@ const vietnamese: Messages = {
   recWarningsLabel: "Lưu ý",
   recReasonsHeading: "Vì sao không có món nào?",
   recResultsHeading: "Món dành cho bạn",
+  recRecommendationsHeading: "Món gợi ý",
   recTermTooLong: "Mỗi mục tối đa 100 ký tự.",
   recViewDish: "Xem món ăn",
   recCuisineLoading: "Đang tải danh sách ẩm thực…",
@@ -1183,7 +1188,8 @@ const vietnamese: Messages = {
   recSummaryChange: "Đổi {name}",
   recPrefsImportNo: "Để sau",
   recPrefsImportYes: "Nhập",
-  recPrefsImportBody: "Thiết bị này có danh sách loại trừ khác với tài khoản của bạn. Nhập vào nhé?",
+  recPrefsImportBody:
+    "Thiết bị này có danh sách loại trừ khác với tài khoản của bạn. Nhập vào nhé?",
   recPrefsImportTitle: "Dùng nguyên liệu đã lưu ở đây?",
   recExclusionsAutoSaved: "Tự động lưu — trên thiết bị này, hoặc vào tài khoản khi bạn đăng nhập.",
   recRememberDestination: "Ghi nhớ điểm đến trên thiết bị này",
@@ -1740,6 +1746,7 @@ const hindi: Messages = {
   recWarningsLabel: "Heads up",
   recReasonsHeading: "Why no dishes?",
   recResultsHeading: "Your picks",
+  recRecommendationsHeading: "Recommendations",
   // Translator TODO: recommend strings below are English placeholders.
   recTermTooLong: "Keep each item to 100 characters or fewer.",
   // Translator TODO: rec/dish strings below are English placeholders.
@@ -1803,11 +1810,14 @@ const hindi: Messages = {
   recSummaryChange: "Change {name}",
   recPrefsImportNo: "Not now",
   recPrefsImportYes: "Import",
-  recPrefsImportBody: "This device has saved exclusions that differ from your account. Import them?",
+  recPrefsImportBody:
+    "This device has saved exclusions that differ from your account. Import them?",
   recPrefsImportTitle: "Use your saved ingredients here?",
-  recExclusionsAutoSaved: "Saved automatically — on this device, or to your account when signed in.",
+  recExclusionsAutoSaved:
+    "Saved automatically — on this device, or to your account when signed in.",
   recRememberDestination: "Remember my destination on this device",
-  recExcludedNote: "Ingredient information may be incomplete. Confirm allergies with the restaurant.",
+  recExcludedNote:
+    "Ingredient information may be incomplete. Confirm allergies with the restaurant.",
   recExcludedPlaceholder: "e.g. peanuts, pork, cilantro",
   recExcludedLabel: "Ingredients to avoid · Optional",
   recEmptySuggest: "Try removing a filter or two, or pick a different destination.",
@@ -2361,6 +2371,7 @@ const spanish: Messages = {
   recWarningsLabel: "Heads up",
   recReasonsHeading: "Why no dishes?",
   recResultsHeading: "Your picks",
+  recRecommendationsHeading: "Recommendations",
   // Translator TODO: recommend strings below are English placeholders.
   recTermTooLong: "Keep each item to 100 characters or fewer.",
   // Translator TODO: rec/dish strings below are English placeholders.
@@ -2424,11 +2435,14 @@ const spanish: Messages = {
   recSummaryChange: "Change {name}",
   recPrefsImportNo: "Not now",
   recPrefsImportYes: "Import",
-  recPrefsImportBody: "This device has saved exclusions that differ from your account. Import them?",
+  recPrefsImportBody:
+    "This device has saved exclusions that differ from your account. Import them?",
   recPrefsImportTitle: "Use your saved ingredients here?",
-  recExclusionsAutoSaved: "Saved automatically — on this device, or to your account when signed in.",
+  recExclusionsAutoSaved:
+    "Saved automatically — on this device, or to your account when signed in.",
   recRememberDestination: "Remember my destination on this device",
-  recExcludedNote: "Ingredient information may be incomplete. Confirm allergies with the restaurant.",
+  recExcludedNote:
+    "Ingredient information may be incomplete. Confirm allergies with the restaurant.",
   recExcludedPlaceholder: "e.g. peanuts, pork, cilantro",
   recExcludedLabel: "Ingredients to avoid · Optional",
   recEmptySuggest: "Try removing a filter or two, or pick a different destination.",
@@ -2981,6 +2995,7 @@ const chinese: Messages = {
   recWarningsLabel: "Heads up",
   recReasonsHeading: "Why no dishes?",
   recResultsHeading: "Your picks",
+  recRecommendationsHeading: "Recommendations",
   // Translator TODO: recommend strings below are English placeholders.
   recTermTooLong: "Keep each item to 100 characters or fewer.",
   // Translator TODO: rec/dish strings below are English placeholders.
@@ -3044,11 +3059,14 @@ const chinese: Messages = {
   recSummaryChange: "Change {name}",
   recPrefsImportNo: "Not now",
   recPrefsImportYes: "Import",
-  recPrefsImportBody: "This device has saved exclusions that differ from your account. Import them?",
+  recPrefsImportBody:
+    "This device has saved exclusions that differ from your account. Import them?",
   recPrefsImportTitle: "Use your saved ingredients here?",
-  recExclusionsAutoSaved: "Saved automatically — on this device, or to your account when signed in.",
+  recExclusionsAutoSaved:
+    "Saved automatically — on this device, or to your account when signed in.",
   recRememberDestination: "Remember my destination on this device",
-  recExcludedNote: "Ingredient information may be incomplete. Confirm allergies with the restaurant.",
+  recExcludedNote:
+    "Ingredient information may be incomplete. Confirm allergies with the restaurant.",
   recExcludedPlaceholder: "e.g. peanuts, pork, cilantro",
   recExcludedLabel: "Ingredients to avoid · Optional",
   recEmptySuggest: "Try removing a filter or two, or pick a different destination.",

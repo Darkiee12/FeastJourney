@@ -155,7 +155,11 @@ describe("compact loading reserves the drawer card footprint", () => {
 
     expect(html).not.toContain(copyEn.recRailHeading);
     expect(html).not.toContain("<li");
-    expect(html).not.toContain("h-11 w-11");
+    expect(html).not.toContain("mt-4 flex flex-wrap items-center gap-3");
+    // Title-aligned 44px icon actions live inside the card: two round
+    // placeholders, never full-width pills below it.
+    expect(countOccurrences(html, "h-11 w-11")).toBe(2);
+    expect(html).not.toContain("mt-2 flex gap-2");
   });
 
   test("compact keeps the single sr-only announcement with no live region", () => {

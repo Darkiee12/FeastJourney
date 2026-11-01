@@ -1,18 +1,12 @@
 import { Link } from "@tanstack/react-router";
+import { MapPinned } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { SURPRISE_DISH_EVENT } from "@/components/home/globe/food-locations";
 import { GlobeCanvas } from "@/components/home/globe/globe-canvas";
-import { openQuizDrawer } from "@/components/home/recommend/quiz-drawer";
+import { QUIZ_DRAWER_OPEN_EVENT, openQuizDrawer } from "@/components/home/recommend/quiz-drawer";
+import { QUIZ_DRAWER_CLOSE_EVENT } from "@/components/home/recommend/quiz-flow";
 import type { Locale, Messages } from "@/shared/i18n";
-
-function CompassIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className="h-5 w-5 flex-none">
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
-      <path d="M15.5 8.5l-2.2 4.8-4.8 2.2 2.2-4.8z" fill="currentColor" />
-    </svg>
-  );
-}
 
 function UtensilsIcon() {
   return (
@@ -54,9 +48,33 @@ function surprise() {
 }
 
 export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
+  // Drawer-signal mirror for the motion workstream: open sets the flag,
+  // close clears it. The hero never drives the drawer from here — it only
+  // exposes `data-quiz-open` so CSS can dim the globe under the sheet.
+  const [quizOpen, setQuizOpen] = useState(false);
+
+  useEffect(() => {
+    const onOpen = (): void => {
+      setQuizOpen(true);
+    };
+
+    const onClose = (): void => {
+      setQuizOpen(false);
+    };
+
+    window.addEventListener(QUIZ_DRAWER_OPEN_EVENT, onOpen);
+    window.addEventListener(QUIZ_DRAWER_CLOSE_EVENT, onClose);
+
+    return () => {
+      window.removeEventListener(QUIZ_DRAWER_OPEN_EVENT, onOpen);
+      window.removeEventListener(QUIZ_DRAWER_CLOSE_EVENT, onClose);
+    };
+  }, []);
+
   return (
     <section
       aria-label={copy.globeLabel}
+      data-quiz-open={quizOpen ? "true" : undefined}
       className="hero relative isolate flex min-h-[max(36rem,calc(100dvh-4rem))] flex-col overflow-hidden"
     >
       <div aria-hidden="true" className="hero-stars" />
@@ -102,7 +120,7 @@ export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
             resetScroll={false}
             className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full border-2 border-mango bg-transparent px-6 text-base font-bold text-mango transition hover:bg-mango/10 sm:min-h-13 sm:px-8 sm:text-lg"
           >
-            <CompassIcon />
+            <MapPinned aria-hidden="true" className="h-5 w-5 flex-none" />
             {copy.ctaExplore}
           </Link>
         </div>

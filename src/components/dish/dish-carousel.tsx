@@ -407,9 +407,32 @@ export function DishCarousel({
                       />
                     </div>
                     <div className="flex min-w-0 flex-1 flex-col gap-1 py-0.5">
-                      <h3 className="font-display text-[1.35rem] leading-tight tracking-wide text-balance">
-                        {title}
-                      </h3>
+                      <div className="flex min-w-0 items-start gap-2">
+                        <h3 className="font-display min-w-0 flex-1 text-[1.35rem] leading-tight tracking-wide text-balance break-words">
+                          {title}
+                        </h3>
+                        <div className="flex flex-none items-center gap-1.5">
+                          <Link
+                            to="/dishes/$dishId"
+                            params={{ dishId: dish.slug }}
+                            search={{ lang }}
+                            tabIndex={shown ? undefined : -1}
+                            aria-label={copy.carouselExploreDish}
+                            title={copy.carouselExploreDish}
+                            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full bg-food-orange-strong text-white transition hover:bg-food-orange-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                          >
+                            <ArrowUpRightIcon aria-hidden="true" className="size-4 flex-none" />
+                          </Link>
+                          <SaveDishButton
+                            compact
+                            dishId={dish.id}
+                            lang={lang}
+                            returnTo="/"
+                            session={session}
+                            status={statusForDish(favoriteStatus, dish.id)}
+                          />
+                        </div>
+                      </div>
                       {dish.nativeName !== undefined ? (
                         <p
                           lang={dish.nativeLanguageTag}
@@ -429,26 +452,6 @@ export function DishCarousel({
                         <p className="text-xs text-muted italic">{copy.carouselNoDescription}</p>
                       )}
                     </div>
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                    <Link
-                      to="/dishes/$dishId"
-                      params={{ dishId: dish.slug }}
-                      search={{ lang }}
-                      tabIndex={shown ? undefined : -1}
-                      className="inline-flex min-h-10 items-center gap-1 rounded-full bg-food-orange-strong px-4 text-[13px] font-bold text-white transition hover:bg-food-orange-dark"
-                    >
-                      <ArrowUpRightIcon aria-hidden="true" className="size-4 flex-none" />
-                      {copy.recExploreShort}
-                    </Link>
-                    <SaveDishButton
-                      compact
-                      dishId={dish.id}
-                      lang={lang}
-                      returnTo="/"
-                      session={session}
-                      status={statusForDish(favoriteStatus, dish.id)}
-                    />
                   </div>
                 </article>
               );
@@ -618,14 +621,14 @@ export function DishCarouselCompactSkeleton(): ReactNode {
         <div className="flex gap-3">
           <div className="min-h-28 w-28 flex-none animate-pulse rounded-xl bg-border-soft motion-reduce:animate-none min-[400px]:w-32" />
           <div className="flex min-w-0 flex-1 flex-col gap-2 py-0.5" aria-hidden="true">
-            <div className="h-6 w-3/4 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
+            <div className="flex min-w-0 items-start gap-2">
+              <div className="h-6 min-w-0 flex-1 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
+              <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+              <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+            </div>
             <div className="h-3.5 w-1/2 animate-pulse rounded bg-cream motion-reduce:animate-none" />
             <div className="h-3.5 w-full animate-pulse rounded bg-cream motion-reduce:animate-none" />
           </div>
-        </div>
-        <div className="mt-2 flex gap-2">
-          <div className="h-10 w-28 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
-          <div className="h-10 w-24 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
         </div>
       </div>
     </div>

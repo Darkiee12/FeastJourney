@@ -294,35 +294,6 @@ const saveLabel = (state: SaveButtonState, loading: boolean, copy: Messages): st
   return copy.saveDishSave;
 };
 
-/**
- * Compact labels for the drawer-first dish card: short Save/Saved wording
- * with a Bookmark icon. Transient states reuse the existing strings (all
- * short); only the steady states switch to the compact copy.
- */
-const saveLabelShort = (state: SaveButtonState, loading: boolean, copy: Messages): string => {
-  if (state.pending === "save") {
-    return copy.saveDishSaving;
-  }
-
-  if (state.pending === "unsave") {
-    return copy.saveDishRemoving;
-  }
-
-  if (state.confirmed === true) {
-    return copy.saveDishSavedShort;
-  }
-
-  if (state.failedAction !== null) {
-    return copy.saveDishRetry;
-  }
-
-  if (loading || state.confirmed === undefined) {
-    return copy.saveDishLoading;
-  }
-
-  return copy.saveDishSaveShort;
-};
-
 export interface SaveButtonStatus {
   /** Authoritative membership from the list-level status query. */
   readonly saved: boolean | undefined;
@@ -416,14 +387,16 @@ function GuestSaveSheetButton({
         onClick={() => {
           setSheetOpen(true);
         }}
+        aria-label={compact ? dishLabel : undefined}
+        title={compact ? dishLabel : undefined}
         className={
           compact
-            ? "inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-full border-2 border-ink bg-white px-4 text-[13px] font-bold text-ink transition hover:bg-ink hover:text-white md:hidden"
+            ? "inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white text-ink transition hover:bg-ink hover:text-white md:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
             : "inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white md:hidden"
         }
       >
         {compact ? <BookmarkIcon aria-hidden="true" className="size-4 flex-none" /> : null}
-        {dishLabel}
+        {compact ? null : dishLabel}
       </button>
       {sheetOpen
         ? createPortal(
@@ -669,9 +642,11 @@ export function SaveDishButton({
         disabled={pending || loading}
         aria-pressed={state.confirmed === true}
         aria-busy={pending || loading}
+        aria-label={compact ? saveLabel(state, loading, copy) : undefined}
+        title={compact ? saveLabel(state, loading, copy) : undefined}
         className={
           compact
-            ? "inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-full border-2 border-ink bg-white px-4 text-[13px] font-bold text-ink transition hover:bg-ink hover:text-white disabled:cursor-wait disabled:opacity-70 aria-pressed:border-food-orange-strong aria-pressed:bg-food-orange-strong aria-pressed:text-white"
+            ? "inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white text-ink transition hover:bg-ink hover:text-white disabled:cursor-wait disabled:opacity-70 aria-pressed:border-food-orange-strong aria-pressed:bg-food-orange-strong aria-pressed:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
             : "inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white disabled:cursor-wait disabled:opacity-70 aria-pressed:border-food-orange-strong aria-pressed:bg-food-orange-strong aria-pressed:text-white"
         }
       >
@@ -682,7 +657,7 @@ export function SaveDishButton({
             fill={state.confirmed === true ? "currentColor" : "none"}
           />
         ) : null}
-        {compact ? saveLabelShort(state, loading, copy) : saveLabel(state, loading, copy)}
+        {compact ? null : saveLabel(state, loading, copy)}
       </button>
       {refreshFailed && !pending ? (
         <span className="inline-flex items-center gap-2 text-xs font-semibold text-muted">

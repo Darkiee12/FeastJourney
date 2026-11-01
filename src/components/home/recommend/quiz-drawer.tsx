@@ -1,6 +1,7 @@
 import { XIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { usePrefersReducedMotion } from "@/components/home/globe/use-prefers-reduced-motion";
 import type { Locale } from "@/shared/i18n";
 
 /**
@@ -50,12 +51,64 @@ export function useIsMaxMd(): boolean {
 }
 
 /**
+ * Fallback close-animation length when the shared token cannot be resolved.
+ * Must stay equal to `--drawer-spring-duration` in styles.css.
+ */
+export const DRAWER_SPRING_FALLBACK_MS = 450;
+
+/**
+ * Parse a CSS duration (`450ms`, `0.45s`) into milliseconds. Pure over its
+ * input for unit-testing; anything unparsable, non-finite, or negative
+ * falls back so the close timeout can never wedge the sheet open or unmount
+ * it mid-slide.
+ */
+export function parseDrawerDurationMs(raw: string): number {
+  const match = /^([\d.]+)\s*(m?s)$/.exec(raw.trim().toLowerCase());
+
+  if (match?.[1] === undefined || match[2] === undefined) {
+    return DRAWER_SPRING_FALLBACK_MS;
+  }
+
+  const value = Number(match[1]) * (match[2] === "s" ? 1000 : 1);
+
+  if (!Number.isFinite(value) || value < 0) {
+    return DRAWER_SPRING_FALLBACK_MS;
+  }
+
+  return value;
+}
+
+/**
+ * Close-animation length, resolved live from the shared
+ * `--drawer-spring-duration` token in styles.css — the timing source of
+ * truth both the sheet exit and the globe push read. Falls back to 450ms
+ * outside a browser or when the token is missing.
+ */
+function drawerSpringDurationMs(): number {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return DRAWER_SPRING_FALLBACK_MS;
+  }
+
+  return parseDrawerDurationMs(
+    window.getComputedStyle(document.documentElement).getPropertyValue("--drawer-spring-duration"),
+  );
+}
+
+/**
  * Mobile-only bottom sheet shell for the quiz. A sibling overlay fixed to
  * the viewport bottom — the globe stays mounted and keeps spinning behind
- * it. Fixed at ~46dvh (not content-sized) so the shell never jumps between
- * steps and never covers more than half the visible globe; the options
+ * it. Fixed at ~50dvh (not content-sized) so the shell never jumps between
+ * steps and never covers more than about half the visible globe; the options
  * region scrolls internally (overscroll-contain) without moving the page,
- * and the primary action stays sticky at the bottom.
+ * and the primary action stays sticky at the bottom. The responsive clamp
+ * keeps the sheet balanced on tall phones while the short-screen cap leaves
+ * a visible globe strip on small viewports; the footer already pads for the
+ * safe area.
+ *
+ * Enter/exit share the drawer-spring timing with the hero globe push (see
+ * styles.css): the sheet slides up on open and back down on close, with a
+ * delayed unmount spanning exactly one spring duration. Reduced motion
+ * mounts/unmounts instantly with no animation and no delay.
  *
  * No dim backdrop by design: dimming would hide the globe the drawer is
  * meant to slide over. Dismissal is explicit (close button, Escape).
@@ -88,11 +141,59 @@ export function QuizDrawer({
 }) {
   const panelRef = useRef<HTMLDialogElement | null>(null);
   const previouslyFocusedRef = useRef<Element | null>(null);
+  const reducedMotion = usePrefersReducedMotion();
 
-  // Lock body scroll while open and preserve the exact scroll position on
-  // close; restore focus to whatever opened the drawer.
+  // Delayed unmount for the close slide-down: when `open` flips false the
+  // sheet keeps rendering with the exit animation for exactly one spring
+  // duration, then unmounts. State transitions below are render-phase
+  // adjustments (same pattern as the rail index reset in quiz-flow), so the
+  // exit starts synchronously in the closing commit: reopening mid-close
+  // drops the exit state and replays enter, and reduced motion skips the
+  // exit state entirely. The effect only owns the timeout (an external
+  // system); route-change unmount clears it via effect cleanup.
+  const [hasOpened, setHasOpened] = useState(open);
+  const [exiting, setExiting] = useState(false);
+
+  if (open && !hasOpened) {
+    setHasOpened(true);
+  }
+
+  if (open && exiting) {
+    setExiting(false);
+  }
+
+  if (!open && hasOpened && !reducedMotion && !exiting) {
+    setExiting(true);
+  }
+
+  if (!open && hasOpened && reducedMotion && exiting) {
+    setHasOpened(false);
+    setExiting(false);
+  }
+
   useEffect(() => {
-    if (!open) {
+    if (!exiting) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      setHasOpened(false);
+      setExiting(false);
+    }, drawerSpringDurationMs());
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [exiting]);
+
+  const rendered = open || exiting;
+
+  // Lock body scroll while rendered (including the exit animation) and
+  // preserve the exact scroll position on close; restore focus to whatever
+  // opened the drawer. Cleanup on final unmount also covers route changes,
+  // so a mid-animation navigation never leaves a stuck scroll lock.
+  useEffect(() => {
+    if (!rendered) {
       return undefined;
     }
 
@@ -124,9 +225,9 @@ export function QuizDrawer({
         previous.focus({ preventScroll: true });
       }
     };
-  }, [open, onClose]);
+  }, [rendered, onClose]);
 
-  if (!open) {
+  if (!rendered) {
     return null;
   }
 
@@ -138,7 +239,9 @@ export function QuizDrawer({
         aria-modal="true"
         aria-label={label}
         lang={lang}
-        className="pointer-events-auto m-0 flex h-[46dvh] max-h-[46dvh] w-full max-w-none flex-col overflow-hidden rounded-t-3xl border-2 border-b-0 border-border-soft bg-cream p-0 shadow-[0_-12px_32px_rgba(3,10,30,0.35)] motion-safe:animate-rec-step-enter motion-reduce:animate-none"
+        className={`pointer-events-auto m-0 flex h-[clamp(18rem,50dvh,34rem)] max-h-[calc(100dvh-3.5rem)] w-full max-w-none flex-col overflow-hidden rounded-t-3xl border-2 border-b-0 border-border-soft bg-cream p-0 shadow-[0_-12px_32px_rgba(3,10,30,0.35)] motion-reduce:animate-none ${
+          exiting ? "motion-safe:animate-drawer-exit" : "motion-safe:animate-drawer-enter"
+        }`}
       >
         <div className="mx-auto mt-2 h-1.5 w-12 flex-none rounded-full bg-border-soft" />
         <div className="flex flex-none items-center justify-between gap-2 px-4 pt-2">

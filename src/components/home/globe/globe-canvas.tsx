@@ -110,7 +110,12 @@ export function GlobeCanvas({ copy, lang }: { copy: Messages; lang: Locale }) {
   });
 
   return (
-    <div className="hero-globe pointer-events-none absolute inset-0">
+    // data-globe-lift is the stable motion hook for the synchronized
+    // globe-push: while the quiz drawer is open, styles.css lifts this whole
+    // wrapper (Canvas, overlays, pins, static fallback together) with a
+    // transform-only transition. Never animate inner scene parts from here;
+    // the rAF loop, textures and camera stay untouched.
+    <div className="hero-globe pointer-events-none absolute inset-0" data-globe-lift>
       <ClientOnly fallback={null}>
         <GlobeContent copy={copy} lang={lang} bridgeRef={bridgeRef} />
       </ClientOnly>

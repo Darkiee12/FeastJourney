@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { DishCarousel } from "@/components/dish/dish-carousel";
 import {
+  openQuizDrawer,
   QUIZ_DRAWER_OPEN_EVENT,
   QuizDrawer,
   useIsMaxMd,
@@ -82,6 +83,16 @@ import { messagesFor, type Messages } from "@/shared/i18n";
 const rootRoute = getRouteApi("__root__");
 
 const QUIZ_STEPS = 3;
+
+/**
+ * Cross-component signal for drawer dismissal. The hero owns no shared
+ * parent with this flow, so it listens for both the motion-owned open event
+ * and this close event to mirror the drawer state as `data-quiz-open` for
+ * globe dimming. Defined and dispatched here because quiz-drawer.tsx is
+ * owned by the motion workstream — same `feastjourney:` namespace, same
+ * fire-and-forget CustomEvent shape as QUIZ_DRAWER_OPEN_EVENT.
+ */
+export const QUIZ_DRAWER_CLOSE_EVENT = "feastjourney:close-quiz-drawer";
 
 type RecommendResult = Awaited<ReturnType<typeof recommendDishesFn>>;
 
@@ -529,7 +540,9 @@ export function RecommendSection() {
   // Deep-link entry: landing directly on #recommend on a phone opens the
   // drawer instead of leaving the visitor at a slim anchor section. Also
   // listens for in-app hash changes so bookmarked links keep working after
-  // the visible duplicate section was removed (drawer-first mobile).
+  // the visible duplicate section was removed (drawer-first mobile). Goes
+  // through the shared open event (not a direct state set) so the hero's
+  // mirrored drawer state — and therefore the globe push — stays in sync.
   useEffect(() => {
     if (typeof window === "undefined") {
       return undefined;
@@ -540,7 +553,7 @@ export function RecommendSection() {
         window.location.hash === "#recommend" &&
         window.matchMedia("(max-width: 767.98px)").matches
       ) {
-        setDrawerOpen(true);
+        openQuizDrawer();
       }
     };
 
@@ -1135,16 +1148,17 @@ export function RecommendSection() {
             ) : null
           }
           headingId="quiz-drawer-progress"
-          label={showResults ? copy.recResultsHeading : stepQuestion(stepIndex, copy)}
+          label={showResults ? copy.recRecommendationsHeading : stepQuestion(stepIndex, copy)}
           lang={lang}
           onClose={() => {
             setDrawerOpen(false);
+            window.dispatchEvent(new CustomEvent(QUIZ_DRAWER_CLOSE_EVENT));
           }}
           open={drawerOpen}
           progress={
             showResults ? (
-              <p className="font-display truncate text-lg leading-tight tracking-wide text-ink">
-                {copy.recResultsHeading}
+              <p className="truncate text-base font-extrabold tracking-wide text-ink">
+                {copy.recRecommendationsHeading}
               </p>
             ) : (
               <div className="min-w-0">
@@ -1171,7 +1185,7 @@ export function RecommendSection() {
         >
           <h2 ref={drawerHeadingRef} tabIndex={-1} className="sr-only">
             {showResults
-              ? copy.recResultsHeading
+              ? copy.recRecommendationsHeading
               : `${stepLabel}: ${stepQuestion(stepIndex, copy)}`}
           </h2>
           {showResults && submitted !== null ? (
@@ -1324,7 +1338,7 @@ export function RecommendSection() {
               className="order-3 min-w-0 motion-safe:animate-rec-step-enter lg:order-none"
             >
               <h2 id="rec-results-heading" ref={stepHeadingRef} tabIndex={-1} className="sr-only">
-                {copy.recResultsHeading}
+                {copy.recRecommendationsHeading}
               </h2>
               <div aria-live="polite" aria-busy={recommend.isPending} className="mt-4 lg:mt-0">
                 {renderOutcome(copy)}
@@ -1548,7 +1562,7 @@ export function RecommendSection() {
             copy={copyMessages}
             favoriteStatus={resultFavorites}
             items={carouselItems}
-            label={copyMessages.recResultsHeading}
+            label={copyMessages.recRecommendationsHeading}
             lang={lang}
             layout="compact"
             onIndexChange={setRailIndex}
@@ -1622,7 +1636,7 @@ export function RecommendSection() {
           copy={copyMessages}
           favoriteStatus={resultFavorites}
           items={carouselItems}
-          label={copyMessages.recResultsHeading}
+          label={copyMessages.recRecommendationsHeading}
           lang={lang}
           onIndexChange={setRailIndex}
           resetKey={outcomeKey}
