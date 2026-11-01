@@ -123,6 +123,7 @@ export function QuizDrawer({
   headingId,
   label,
   lang,
+  nestedDialogOpen = false,
   onClose,
   open,
   progress,
@@ -135,6 +136,8 @@ export function QuizDrawer({
   readonly headingId: string;
   readonly label: string;
   readonly lang: Locale;
+  /** True while a nested dialog (e.g. the guest sign-in sheet) owns Escape. */
+  readonly nestedDialogOpen?: boolean;
   readonly onClose: () => void;
   readonly open: boolean;
   readonly progress: ReactNode;
@@ -190,8 +193,10 @@ export function QuizDrawer({
 
   // Lock body scroll while rendered (including the exit animation) and
   // preserve the exact scroll position on close; restore focus to whatever
-  // opened the drawer. Cleanup on final unmount also covers route changes,
-  // so a mid-animation navigation never leaves a stuck scroll lock.
+  // opened the drawer. Runs once per mount cycle: nested-dialog toggles must
+  // not re-trigger scroll or focus side effects while the drawer stays open.
+  // Cleanup on final unmount also covers route changes, so a mid-animation
+  // navigation never leaves a stuck scroll lock.
   useEffect(() => {
     if (!rendered) {
       return undefined;
@@ -202,20 +207,11 @@ export function QuizDrawer({
     const scrollY = window.scrollY;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
-    document.addEventListener("keydown", onKeyDown);
     panelRef.current?.querySelector<HTMLElement>("[data-drawer-focus]")?.focus({
       preventScroll: true,
     });
 
     return () => {
-      document.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
       window.scrollTo({ top: scrollY, behavior: "auto" });
 
@@ -225,7 +221,33 @@ export function QuizDrawer({
         previous.focus({ preventScroll: true });
       }
     };
-  }, [rendered, onClose]);
+    // Mount/unmount only: re-running on nested-dialog toggles would yank
+    // focus out of the sheet and unlock/relock scrolling mid-session.
+  }, [rendered]);
+
+  // Escape closes the topmost layer only: a nested dialog (e.g. the guest
+  // sign-in sheet) owns the key while open and reports that through
+  // onSaveSheetOpenChange; both sheets listen on document, so without this
+  // guard one keypress would dismiss both layers.
+  useEffect(() => {
+    if (!rendered) {
+      return undefined;
+    }
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || nestedDialogOpen) {
+        return;
+      }
+
+      onClose();
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [rendered, nestedDialogOpen, onClose]);
 
   if (!rendered) {
     return null;

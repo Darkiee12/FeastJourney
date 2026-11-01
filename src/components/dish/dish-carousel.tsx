@@ -155,6 +155,12 @@ export interface DishCarouselProps {
   /** Index resets to the first slide whenever this value changes. */
   readonly resetKey?: string | number | undefined;
   /**
+   * Reports guest save-sheet open state upward (e.g. so a hosting drawer
+   * can defer its own Escape handling while the nested sheet owns the key).
+   * Optional; omitted callers are unaffected.
+   */
+  readonly onSaveSheetOpenChange?: ((open: boolean) => void) | undefined;
+  /**
    * Slide presentation. `full` is the featured stacked/side-by-side card
    * for desktop and discovery. `compact` is the drawer-first horizontal
    * card (fixed thumbnail left, dish details right, arrows only) sized to
@@ -185,6 +191,7 @@ export function DishCarousel({
   lang,
   layout = "full",
   onIndexChange,
+  onSaveSheetOpenChange,
   resetKey,
   session,
 }: DishCarouselProps): ReactNode {
@@ -394,7 +401,7 @@ export function DishCarousel({
                 >
                   <div className="flex gap-3">
                     <div
-                      className="relative min-h-28 w-28 flex-none self-stretch overflow-hidden rounded-xl bg-cream min-[400px]:w-32"
+                      className="relative min-h-28 w-28 flex-none self-stretch overflow-hidden rounded-xl bg-cream min-[400px]:w-32 max-[359px]:w-24"
                       title={dish.image?.attribution ?? undefined}
                     >
                       <DishMedia
@@ -407,8 +414,8 @@ export function DishCarousel({
                       />
                     </div>
                     <div className="flex min-w-0 flex-1 flex-col gap-1 py-0.5">
-                      <div className="flex min-w-0 items-start gap-2">
-                        <h3 className="font-display min-w-0 flex-1 text-[1.35rem] leading-tight tracking-wide text-balance break-words">
+                      <div className="flex min-w-0 flex-wrap items-start justify-end gap-2">
+                        <h3 className="font-display min-w-0 flex-1 basis-24 text-[1.35rem] leading-tight tracking-wide text-balance break-words">
                           {title}
                         </h3>
                         <div className="flex flex-none items-center gap-1.5">
@@ -417,8 +424,8 @@ export function DishCarousel({
                             params={{ dishId: dish.slug }}
                             search={{ lang }}
                             tabIndex={shown ? undefined : -1}
-                            aria-label={copy.carouselExploreDish}
-                            title={copy.carouselExploreDish}
+                            aria-label={copy.recExploreShort}
+                            title={copy.recExploreShort}
                             className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full bg-food-orange-strong text-white transition hover:bg-food-orange-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
                           >
                             <ArrowUpRightIcon aria-hidden="true" className="size-4 flex-none" />
@@ -426,6 +433,7 @@ export function DishCarousel({
                           <SaveDishButton
                             compact
                             dishId={dish.id}
+                            onSaveSheetOpenChange={onSaveSheetOpenChange}
                             lang={lang}
                             returnTo="/"
                             session={session}
@@ -559,6 +567,7 @@ export function DishCarousel({
                     <SaveDishButton
                       dishId={dish.id}
                       lang={lang}
+                      onSaveSheetOpenChange={onSaveSheetOpenChange}
                       returnTo="/"
                       session={session}
                       status={statusForDish(favoriteStatus, dish.id)}

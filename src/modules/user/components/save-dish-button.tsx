@@ -333,17 +333,26 @@ function GuestSaveSheetButton({
   compact = false,
   dishLabel,
   lang,
+  onOpenChange,
   returnTo,
 }: {
   readonly compact?: boolean;
   readonly dishLabel: string;
   readonly lang: Locale;
+  readonly onOpenChange?: ((open: boolean) => void) | undefined;
   readonly returnTo: string;
 }) {
   const navigate = useNavigate();
   const [sheetOpen, setSheetOpen] = useState(false);
   const panelRef = useRef<HTMLDialogElement | null>(null);
   const previouslyFocusedRef = useRef<Element | null>(null);
+
+  // Notify an interested ancestor (e.g. the quiz drawer, which defers its
+  // own Escape handling while a nested sheet owns the key) without changing
+  // this component's standalone behavior when no listener is attached.
+  useEffect(() => {
+    onOpenChange?.(sheetOpen);
+  }, [sheetOpen, onOpenChange]);
 
   useEffect(() => {
     if (!sheetOpen) {
@@ -471,6 +480,7 @@ export function SaveDishButton({
   compact = false,
   dishId,
   lang,
+  onSaveSheetOpenChange,
   returnTo,
   session,
   status,
@@ -478,6 +488,7 @@ export function SaveDishButton({
   readonly compact?: boolean;
   readonly dishId: string;
   readonly lang: Locale;
+  readonly onSaveSheetOpenChange?: ((open: boolean) => void) | undefined;
   readonly returnTo: string;
   readonly session: SessionState;
   readonly status: SaveButtonStatus;
@@ -576,6 +587,7 @@ export function SaveDishButton({
           compact={compact}
           dishLabel={compact ? copy.saveDishSaveShort : copy.saveDishSave}
           lang={lang}
+          onOpenChange={onSaveSheetOpenChange}
           returnTo={returnTo}
         />
       </>

@@ -198,6 +198,13 @@ export function RecommendSection() {
   const [confirmClear, setConfirmClear] = useState<boolean>(false);
   const [surpriseSeed, setSurpriseSeed] = useState<number>(journey?.surpriseSeed ?? 0);
   const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
+  /**
+   * Guest save-sheet visibility, reported up from the nested sheet inside
+   * the results carousel. While true the quiz drawer defers its Escape
+   * handling so one keypress closes only the topmost layer. Reset whenever
+   * the drawer closes (the sheet unmounts with it).
+   */
+  const [saveSheetOpen, setSaveSheetOpen] = useState<boolean>(false);
   const isMobile = useIsMaxMd();
 
   const [hasSaved, setHasSaved] = useState<boolean>(() => savedInitial !== null);
@@ -1150,8 +1157,10 @@ export function RecommendSection() {
           headingId="quiz-drawer-progress"
           label={showResults ? copy.recRecommendationsHeading : stepQuestion(stepIndex, copy)}
           lang={lang}
+          nestedDialogOpen={saveSheetOpen}
           onClose={() => {
             setDrawerOpen(false);
+            setSaveSheetOpen(false);
             window.dispatchEvent(new CustomEvent(QUIZ_DRAWER_CLOSE_EVENT));
           }}
           open={drawerOpen}
@@ -1566,6 +1575,7 @@ export function RecommendSection() {
             lang={lang}
             layout="compact"
             onIndexChange={setRailIndex}
+            onSaveSheetOpenChange={setSaveSheetOpen}
             resetKey={outcomeKey}
             session={session}
           />
@@ -1639,6 +1649,7 @@ export function RecommendSection() {
           label={copyMessages.recRecommendationsHeading}
           lang={lang}
           onIndexChange={setRailIndex}
+          onSaveSheetOpenChange={setSaveSheetOpen}
           resetKey={outcomeKey}
           session={session}
         />
