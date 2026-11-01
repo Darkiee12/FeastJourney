@@ -17,7 +17,7 @@ function Home() {
     <div className="home">
       <HomeHero copy={copy} lang={lang} />
       <ClientOnly
-        fallback={<output className="block text-center text-muted">{copy.recLoading}</output>}
+        fallback={<span aria-hidden="true" className="block h-0 overflow-hidden" />}
       >
         <RecommendSection />
       </ClientOnly>

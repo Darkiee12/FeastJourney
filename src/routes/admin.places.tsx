@@ -1,8 +1,9 @@
 import { Link, createFileRoute, getRouteApi, redirect, useNavigate } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { z } from "zod";
 
 import { PLACE_KINDS, type PlaceListItem } from "@/components/admin/places/place-contracts";
+import { PlaceSelector } from "@/components/admin/places/PlaceSelector";
 import { PlaceTable } from "@/components/admin/places/PlaceTable";
 import { AdminSelectField } from "@/components/admin/select";
 import {
@@ -10,8 +11,8 @@ import {
   AdminGhostButton,
   AdminPageHeading,
   AdminRouteError,
-  AdminToolbar,
 } from "@/components/admin/ui";
+import { normalizeParentId } from "@/components/admin/places/place-grammar";
 import { adminPlacesListFn } from "@/modules/food-discovery/place.functions";
 import { placeKindSchema, type AdminPlacesList } from "@/modules/food-discovery/place.schema";
 import { authorizeFn } from "@/modules/user/admin.functions";
@@ -54,14 +55,14 @@ export const Route = createFileRoute("/admin/places")({
   },
   loader: async ({ deps }): Promise<PlacesLoaderData> => {
     const kind = PLACE_KINDS.find((entry) => entry === deps.kind);
-    const parentId = /^[0-9]+$/.test(deps.parentId.trim()) ? deps.parentId.trim() : undefined;
+    const parentId = normalizeParentId(deps.parentId);
     const input: AdminPlacesList = { query: deps.query, page: deps.page - 1 };
 
     if (kind !== undefined) {
       input.kind = kind;
     }
 
-    if (parentId !== undefined) {
+    if (parentId !== null) {
       input.parentId = parentId;
     }
 
@@ -113,6 +114,14 @@ function AdminPlaces() {
   const [draftKind, setDraftKind] = useState(search.kind);
   const [draftParentId, setDraftParentId] = useState(search.parentId);
 
+  // Back/forward navigation restores URL filters; mirror them into the
+  // drafts so the toolbar never shows stale values.
+  useEffect(() => {
+    setDraftQuery(search.query);
+    setDraftKind(search.kind);
+    setDraftParentId(search.parentId);
+  }, [search.kind, search.parentId, search.query]);
+
   const applyFilters = (): void => {
     void navigate({
       search: (previous) => ({
@@ -123,6 +132,13 @@ function AdminPlaces() {
         page: 1,
       }),
     });
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    // Single submit per Enter keypress or Search click: inputs carry no
+    // key handlers of their own, so filtering can never double-fire.
+    event.preventDefault();
+    applyFilters();
   };
 
   const clearFilters = (): void => {
@@ -161,60 +177,56 @@ function AdminPlaces() {
 
       <fieldset className="rounded-2xl border border-border-soft bg-white p-4">
         <legend className="px-1 text-sm font-bold">{copy.adminSearchPlaces}</legend>
-        <AdminToolbar>
-          <label htmlFor="places-query" className="sr-only">
-            {copy.adminSearchPlaces}
-          </label>
-          <input
-            id="places-query"
-            type="search"
-            value={draftQuery}
-            placeholder={copy.adminSearchPlacesPlaceholder}
-            onChange={(event) => {
-              setDraftQuery(event.target.value);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                applyFilters();
-              }
-            }}
-            className="min-h-11 min-w-0 flex-1 rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink outline-none focus-visible:border-brand-blue focus-visible:ring-2 focus-visible:ring-brand-blue/40"
-          />
-          <AdminSelectField
-            id="places-kind"
-            label={copy.adminKind}
-            value={draftKind}
-            onValueChange={setDraftKind}
-            options={[
-              { label: copy.adminAllKinds, value: "" },
-              ...PLACE_KINDS.map((entry) => ({ label: entry, value: entry })),
-            ]}
-          />
-          <label htmlFor="places-parent" className="sr-only">
-            {copy.adminParentFilter}
-          </label>
-          <input
-            id="places-parent"
-            value={draftParentId}
-            placeholder={copy.adminParentFilter}
-            inputMode="numeric"
-            onChange={(event) => {
-              setDraftParentId(event.target.value);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                applyFilters();
-              }
-            }}
-            className="min-h-11 w-32 rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink outline-none focus-visible:border-brand-blue focus-visible:ring-2 focus-visible:ring-brand-blue/40"
-          />
-          <AdminGhostButton type="button" onClick={applyFilters}>
-            {copy.adminSearchPlaces}
-          </AdminGhostButton>
-          <AdminGhostButton type="button" onClick={clearFilters}>
-            {copy.adminImportsClearFilters}
-          </AdminGhostButton>
-        </AdminToolbar>
+        <form onSubmit={handleSubmit}>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-[minmax(0,1fr)_12rem_minmax(0,17rem)_auto] md:items-end">
+            <div className="min-w-0 sm:col-span-2 md:col-span-1">
+              <label htmlFor="places-query" className="sr-only">
+                {copy.adminSearchPlaces}
+              </label>
+              <input
+                id="places-query"
+                type="search"
+                value={draftQuery}
+                placeholder={copy.adminSearchPlacesPlaceholder}
+                onChange={(event) => {
+                  setDraftQuery(event.target.value);
+                }}
+                className="min-h-11 w-full min-w-0 rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink outline-none focus-visible:border-brand-blue focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+              />
+            </div>
+            <div className="min-w-0">
+              <AdminSelectField
+                id="places-kind"
+                label={copy.adminKind}
+                value={draftKind}
+                onValueChange={setDraftKind}
+                triggerClassName="w-full"
+                options={[
+                  { label: copy.adminAllKinds, value: "" },
+                  ...PLACE_KINDS.map((entry) => ({ label: entry, value: entry })),
+                ]}
+              />
+            </div>
+            <div className="min-w-0">
+              <PlaceSelector
+                id="places-parent"
+                label={copy.adminParentFilter}
+                copy={copy}
+                lang={lang}
+                variant="parentFilter"
+                placeholder={copy.adminSearchPlacesPlaceholder}
+                value={draftParentId}
+                onChange={setDraftParentId}
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-2 sm:col-span-2 md:col-span-1">
+              <AdminGhostButton type="submit">{copy.adminSearchPlaces}</AdminGhostButton>
+              <AdminGhostButton type="button" onClick={clearFilters}>
+                {copy.adminImportsClearFilters}
+              </AdminGhostButton>
+            </div>
+          </div>
+        </form>
       </fieldset>
 
       {data.items.length === 0 ? (

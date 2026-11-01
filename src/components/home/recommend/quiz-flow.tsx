@@ -362,15 +362,29 @@ export function RecommendSection() {
   }, []);
 
   // Deep-link entry: landing directly on #recommend on a phone opens the
-  // drawer instead of leaving the visitor at a slim anchor section.
+  // drawer instead of leaving the visitor at a slim anchor section. Also
+  // listens for in-app hash changes so bookmarked links keep working after
+  // the visible duplicate section was removed (drawer-first mobile).
   useEffect(() => {
-    if (
-      typeof window !== "undefined" &&
-      window.location.hash === "#recommend" &&
-      window.matchMedia("(max-width: 767.98px)").matches
-    ) {
-      setDrawerOpen(true);
+    if (typeof window === "undefined") {
+      return undefined;
     }
+
+    const maybeOpenFromHash = (): void => {
+      if (
+        window.location.hash === "#recommend" &&
+        window.matchMedia("(max-width: 767.98px)").matches
+      ) {
+        setDrawerOpen(true);
+      }
+    };
+
+    maybeOpenFromHash();
+    window.addEventListener("hashchange", maybeOpenFromHash);
+
+    return () => {
+      window.removeEventListener("hashchange", maybeOpenFromHash);
+    };
   }, []);
 
   // Predictable focus: each step and the results heading receive focus on
@@ -825,39 +839,19 @@ export function RecommendSection() {
   };
 
   if (isMobile) {
-    let entryLabel: string = copy.ctaRecommend;
-
-    if (showResults) {
-      entryLabel = lang === "vi" ? "Xem gợi ý của bạn" : "See your picks";
-    }
-
     return (
       <>
-        <section
+        {/* Drawer-first mobile: nonvisual anchor preserves #recommend
+            deep-links, bookmarks, and screen-reader targets without
+            reserving vertical space or rendering a second entry section.
+            Hierarchy stays: hero → globe → drawer (on demand) → Discover.
+            Desktop keeps its full visible section below. */}
+        <span
           id="recommend"
-          aria-labelledby="recommend-heading"
-          className="mx-auto w-full scroll-mt-20 px-5 pt-10 md:hidden"
-          style={{ paddingBottom: "max(4rem, env(safe-area-inset-bottom))" }}
-        >
-          <h1
-            id="recommend-heading"
-            className="font-display text-[clamp(2.25rem,7vw,3.5rem)] leading-none tracking-wide text-balance"
-          >
-            {copy.recTitle}
-          </h1>
-          <p className="mt-3 max-w-[60ch] text-lg text-muted">
-            {showResults && outcome !== null ? copy.recResultsIntro : copy.recIntro}
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              setDrawerOpen(true);
-            }}
-            className="mt-4 inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-full bg-food-orange-strong px-6 text-base font-bold text-white shadow-[0_10px_28px_rgba(194,65,12,0.35)] transition hover:bg-food-orange-dark"
-          >
-            {entryLabel}
-          </button>
-        </section>
+          aria-hidden="true"
+          tabIndex={-1}
+          className="block h-0 w-full overflow-hidden"
+        />
         <QuizDrawer
           cityChip={
             draft.cityId !== null && draft.cityLabel !== null ? (
@@ -943,7 +937,7 @@ export function RecommendSection() {
                 />
               </div>
               <div aria-live="polite" aria-busy={recommend.isPending} className="mt-3">
-                {renderOutcome(copy)}
+                {renderOutcome(copy, true)}
               </div>
             </div>
           ) : (
@@ -1176,7 +1170,7 @@ export function RecommendSection() {
     </section>
   );
 
-  function renderOutcome(copyMessages: Messages) {
+  function renderOutcome(copyMessages: Messages, compact = false) {
     if (recommend.isPending) {
       return <ResultsLoadingSkeleton copy={copyMessages} />;
     }
@@ -1190,6 +1184,56 @@ export function RecommendSection() {
     }
 
     if (outcome.mode === "uncertain" || outcome.mode === "empty") {
+      // Compact drawer-first empty state: one heading, one hint, primary +
+      // secondary location actions. Drawer footer already owns Adjust /
+      // Start over, so they are not repeated here. Detailed backend reasons
+      // stay behind an optional disclosure for troubleshooting.
+      if (compact) {
+        return (
+          <div>
+            <p className="text-base font-extrabold text-ink">{copyMessages.recReasonsHeading}</p>
+            <p className="mt-1 text-sm font-semibold text-muted">{copyMessages.recEmptySuggest}</p>
+            {outcome.mode === "empty" &&
+            (submitted?.location?.kind === "precise" || submitted?.location?.kind === "city") ? (
+              <div className="mt-3 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => editStep(0)}
+                  className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full bg-ink px-5 text-sm font-bold text-white transition hover:opacity-90"
+                >
+                  {copyMessages.recWhereAnother}
+                </button>
+                <button
+                  type="button"
+                  onClick={searchWorldwide}
+                  disabled={recommend.isPending}
+                  className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink disabled:cursor-wait disabled:opacity-70"
+                >
+                  {copyMessages.recWhereAnywhere}
+                </button>
+              </div>
+            ) : null}
+            {hasAllergies ? (
+              <div className="mt-3">
+                <AllergyNotice copy={copyMessages} />
+              </div>
+            ) : null}
+            {outcome.reasons.length > 0 ? (
+              <details className="mt-3 rounded-xl border border-border-soft bg-white px-3 py-2">
+                <summary className="cursor-pointer text-sm font-bold text-muted">
+                  {copyMessages.adminPlaceDetails}
+                </summary>
+                <ul className="mt-2 flex list-disc flex-col gap-1 pl-6 text-sm text-ink">
+                  {outcome.reasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+          </div>
+        );
+      }
+
       return (
         <div>
           <AiExplanationCard

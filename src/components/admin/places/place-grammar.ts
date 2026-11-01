@@ -20,7 +20,27 @@ const ASSOCIATIONS: ReadonlyArray<DishPlaceAssociation> = ["origin", "associated
 
 const ISO_PATTERN = /^[A-Za-z]{2}(?:-[A-Za-z0-9]{1,3})?$/;
 
-const PLACE_ID_PATTERN = /^[0-9]+$/;
+/** Canonical registry id shape (`place:<id>` payload and `parentId` filters). */
+const CANONICAL_PLACE_ID_PATTERN = /^[0-9]+$/;
+
+/** True for a trimmed decimal registry id — never grammar, ISO, or blank. */
+export const isCanonicalPlaceId = (value: string): boolean =>
+  CANONICAL_PLACE_ID_PATTERN.test(value.trim());
+
+/**
+ * Boundary normalizer for the parent filter: trims UI input and keeps only
+ * canonical decimal ids. Anything else (blank, grammar, ISO) reads as no
+ * filter so the registry listing can never receive a malformed `parentId`.
+ */
+export const normalizeParentId = (value: string): string | null => {
+  const trimmed = value.trim();
+
+  if (!isCanonicalPlaceId(trimmed)) {
+    return null;
+  }
+
+  return trimmed;
+};
 
 export type PlaceRefParseError = "required" | "invalid";
 
@@ -66,7 +86,7 @@ export const parsePlaceRef = (
     const segments = trimmed.slice("place:".length).split(":");
     const rawId = (segments[0] ?? "").trim();
 
-    if (segments.length > 2 || !PLACE_ID_PATTERN.test(rawId)) {
+    if (segments.length > 2 || !isCanonicalPlaceId(rawId)) {
       return { ok: false, error: "invalid" };
     }
 
