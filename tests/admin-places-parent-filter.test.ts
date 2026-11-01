@@ -3,12 +3,12 @@ import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { PlaceSelector } from "@/components/admin/places/PlaceSelector";
 import {
   formatPlaceContext,
   isCanonicalPlaceId,
   normalizeParentId,
 } from "@/components/admin/places/place-grammar";
+import { PlaceSelector } from "@/components/admin/places/PlaceSelector";
 import { messagesFor } from "@/shared/i18n";
 
 /**
