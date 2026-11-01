@@ -374,7 +374,8 @@ export function WhereStep({
   readonly countryOptions: ReadonlyArray<CountryOption>;
   readonly detected: DetectedRegion;
   readonly draft: QuizDraft;
-  readonly onAdvance: () => void;
+  /** Advance, optionally validating an explicit candidate (see commit). */
+  readonly onAdvance: (candidate?: QuizDraft) => void;
   readonly onDraft: (next: QuizDraft) => void;
   readonly onRetryCountries: () => void;
   readonly origin: AnswerOrigin;
@@ -395,7 +396,8 @@ export function WhereStep({
    * Single auto-advance commit site: the NEWLY picked candidate is derived
    * and validated explicitly, never the pre-update batched state. Pointer
    * taps on a changed, complete answer advance exactly once; keyboard
-   * changes (no pointer mark) only update the draft.
+   * changes (no pointer mark) only update the draft. The candidate rides
+   * along because the state update has not committed yet in this tick.
    */
   const commit = (next: QuizDraft): void => {
     const pointer = consumePointer();
@@ -404,7 +406,7 @@ export function WhereStep({
     onDraft(next);
 
     if (pointer && changed && shouldAutoAdvanceRegion(next)) {
-      onAdvance();
+      onAdvance(next);
     }
   };
 

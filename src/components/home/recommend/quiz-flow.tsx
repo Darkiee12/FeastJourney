@@ -150,28 +150,11 @@ export function RecommendSection() {
   const [moodTouched, setMoodTouched] = useState<boolean>(initial.moodTouched);
   const [excludedTouched, setExcludedTouched] = useState<boolean>(initial.excludedTouched);
   const explicitRegionRef = useRef(initial.regionTouched);
-  /**
-   * Latest region draft for same-tick readers: `commit` calls `onDraft`
-   * then `onAdvance` synchronously, so `tryAdvance` must validate the
-   * just-picked candidate instead of the pre-update render state. Mirrors
-   * `explicitRegionRef` — state lags within the tick, the ref does not.
-   * Only region funnels write it; every other draft reader runs after a
-   * commit or builds its payload from an explicit local.
-   */
-  const draftRef = useRef(initial.draft);
   const precise = usePreciseLocation();
-
-  // Keep the ref truthful for writers that bypass updateRegionDraft
-  // (reset/remember paths): the effect flushes after every commit, while
-  // the setter-site write above covers same-tick readers before it.
-  useEffect(() => {
-    draftRef.current = draft;
-  }, [draft]);
 
   /** Region edits are always explicit and must never be clobbered by async detection. */
   const updateRegionDraft = (next: QuizDraft): void => {
     explicitRegionRef.current = true;
-    draftRef.current = next;
     setRegionTouched(true);
     // A stale step error (e.g. "choose a country") never survives a new
     // region choice: validation re-runs on the next Continue instead.
@@ -643,19 +626,20 @@ export function RecommendSection() {
    * already-complete answers; this is the keyboard/assistive-tech path's
    * guard and the defensive backstop.
    */
-  const tryAdvance = (): void => {
-    // Validate the latest draft, not the render snapshot: `commit` runs
-    // this synchronously after a region pick, and the state update has
-    // not committed yet within the same tick.
-    const live = draftRef.current;
-
+  /**
+   * Step validation. The candidate defaults to the render-scope draft —
+   * fresh for every post-render caller (Continue buttons, fix-arrival
+   * effects). `commit` passes its just-picked candidate explicitly because
+   * the state update has not committed yet within the same tick.
+   */
+  const tryAdvance = (candidate: QuizDraft = draft): void => {
     if (stepIndex === 0) {
       const regionError = validateRegion(
-        live.regionMode,
-        live.country,
+        candidate.regionMode,
+        candidate.country,
         copy,
-        live.precise,
-        live.cityId,
+        candidate.precise,
+        candidate.cityId,
       );
 
       if (regionError !== null) {
@@ -1071,7 +1055,9 @@ export function RecommendSection() {
           ) : null}
           <button
             type="button"
-            onClick={tryAdvance}
+            onClick={() => {
+              tryAdvance();
+            }}
             className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
           >
             {copy.recContinue}
@@ -1389,7 +1375,9 @@ export function RecommendSection() {
                   {stepIndex < QUIZ_STEPS - 1 ? (
                     <button
                       type="button"
-                      onClick={tryAdvance}
+                      onClick={() => {
+                        tryAdvance();
+                      }}
                       className="inline-flex min-h-11 cursor-pointer items-center rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
                     >
                       {copy.recContinue}
