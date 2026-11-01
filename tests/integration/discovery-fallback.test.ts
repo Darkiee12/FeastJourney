@@ -26,13 +26,13 @@ import { appRuntime } from "@/server/runtime";
  * `tests/dish-carousel-scope.test.ts`; this file pins the end-to-end
  * observable behavior only.
  *
- * 13-row scenario table (S1..S13):
+ * 13-row scenario table (S1..S13) plus city legs (S14..S16):
  * | row | input                                  | requested | served    | fallback |
  * |-----|----------------------------------------|-----------|-----------|----------|
  * | S1  | no location (legacy service call)      | worldwide | worldwide | false [] |
  * | S2  | country with dishes                    | country   | country   | false    |
- * | S3  | empty country                        | country   | worldwide | true     |
- * |     |                                        |           | (country- | country- |
+ * | S3  | empty country                          | country   | country   | true     |
+ * |     |                                        |           | (honest   | country- |
  * |     |                                        |           |  empty)   | empty    |
  * | S4  | unknown well-formed country            | — (typed  | —         | —        |
  * |     |                                        | PlaceNot- |           |          |
@@ -43,8 +43,8 @@ import { appRuntime } from "@/server/runtime";
  * |     |                                        | Search-   |           |          |
  * |     |                                        | Filter)   |           |          |
  * | S6  | nearby with dishes in radius           | nearby    | nearby    | false    |
- * | S7  | sparse ocean coordinates, no hint      | nearby    | worldwide | true     |
- * |     |                                        |           | (nearby-  | nearby-  |
+ * | S7  | sparse ocean coordinates, no hint      | nearby    | nearby    | true     |
+ * |     |                                        |           | (honest   | nearby-  |
  * |     |                                        |           |  empty)   | empty    |
  * | S8  | nearby-empty + known country hint     | nearby    | country   | true     |
  * |     |                                        |           | (never    | nearby-  |
@@ -63,6 +63,15 @@ import { appRuntime } from "@/server/runtime";
  * | S13 | sparse nearby + known country hint     | nearby    | nearby    | false +  |
  * |     | (top-up, nearby first, no dupes)       |           | (supple-  | supple-  |
  * |     |                                        |           |  mented)  | mented   |
+ * | S14 | city with dishes                       | city      | city      | false    |
+ * | S15 | empty city, dishes in ancestor country | city      | country   | true     |
+ * |     |                                        |           |           | city-    |
+ * |     |                                        |           |           | empty    |
+ * | S16 | empty city, empty ancestor country     | city      | country   | true     |
+ * |     |                                        |           | (honest   | city-    |
+ * |     |                                        |           |  empty)   | empty-   |
+ * |     |                                        |           |           | country- |
+ * |     |                                        |           |           | empty    |
  *
  * Isolation: unique slug prefix per file run, unique fixture ISOs, no
  * TRUNCATE, no seed-count coupling. Only owned rows are deleted in afterAll
@@ -239,8 +248,11 @@ const createFixtureDish = async (
 let emptyIso = "";
 let poolIso = "";
 let poolCountryId = "";
+let poolLocalityId = "";
 let localitySlug = "";
 let noGeoSlug = "";
+let poolEmptyCityId = "";
+let emptyCityId = "";
 
 beforeAll(async () => {
   expect(process.env.DATABASE_URL).toBeDefined();
@@ -253,6 +265,13 @@ beforeAll(async () => {
   poolCountryId = pool.id;
 
   const locality = await ensureFixtureLocality(pool.id, `Fallbackport ${stamp}`);
+  poolLocalityId = locality.id;
+
+  const poolEmptyCity = await ensureFixtureLocality(pool.id, `Fallbackempty ${stamp}`);
+  poolEmptyCityId = poolEmptyCity.id;
+
+  const emptyCity = await ensureFixtureLocality(empty.id, `Emptyport ${stamp}`);
+  emptyCityId = emptyCity.id;
 
   const creations = await Promise.all(
     Array.from({ length: 6 }, (_, index) =>
@@ -311,7 +330,7 @@ describe("discovery fallback scope matrix", () => {
     expect(slugs).toContain(localitySlug);
   });
 
-  test("S3: empty country falls through to the worldwide pool, labeled honestly", async () => {
+  test("S3: empty country resolves to an honest empty, never silent worldwide", async () => {
     const output = await run(
       Effect.flatMap(DishService, (service) =>
         service.getLocalCarousel({ locale: "en", country: emptyIso, limit: 5 }),
@@ -319,10 +338,10 @@ describe("discovery fallback scope matrix", () => {
     );
 
     expect(output.requestedScope).toBe("country");
-    expect(output.scope).toBe("worldwide");
+    expect(output.scope).toBe("country");
     expect(output.fallback).toBe(true);
     expect(output.fallbackReason).toBe("country-empty");
-    expect(output.items.length).toBeGreaterThan(0);
+    expect(output.items).toEqual([]);
   });
 
   test("S4: unknown well-formed country is a typed PlaceNotFound; worldwide half is non-empty", async () => {
@@ -381,7 +400,7 @@ describe("discovery fallback scope matrix", () => {
     expect(output.items.map((item) => item.slug)).toContain(localitySlug);
   });
 
-  test("S7: sparse ocean coordinates fall through to the worldwide pool, never a far continent", async () => {
+  test("S7: sparse ocean coordinates resolve to an honest empty, never a far continent", async () => {
     const output = await run(
       Effect.flatMap(DishService, (service) =>
         service.getLocalCarousel({ locale: "en", latitude: 0, longitude: -160, limit: 5 }),
@@ -389,10 +408,10 @@ describe("discovery fallback scope matrix", () => {
     );
 
     expect(output.requestedScope).toBe("nearby");
-    expect(output.scope).toBe("worldwide");
+    expect(output.scope).toBe("nearby");
     expect(output.fallback).toBe(true);
     expect(output.fallbackReason).toBe("nearby-empty");
-    expect(output.items.length).toBeGreaterThan(0);
+    expect(output.items).toEqual([]);
   });
 
   test("S8: nearby-empty with a known country falls back labeled as country, never near-you", async () => {
@@ -460,14 +479,14 @@ describe("discovery fallback scope matrix", () => {
       ),
     );
 
-    // The served scope is data-dependent (empty bands fall through to
-    // worldwide); the requested scope is always the nearby the caller sent.
+    // The served scope is data-dependent (empty bands resolve to an honest
+    // empty); the requested scope is always the nearby the caller sent.
     for (const output of accepted) {
       expect(output.items).toBeDefined();
       expect(output.requestedScope).toBe("nearby");
 
       if (output.fallback) {
-        expect(output.scope).toBe("worldwide");
+        expect(output.items).toEqual([]);
       } else {
         expect(output.scope).toBe("nearby");
       }
@@ -586,5 +605,48 @@ describe("discovery fallback scope matrix", () => {
     const slugs = output.items.map((item) => item.slug);
 
     expect(slugs.filter((slug) => slug.startsWith(`${PREFIX}pool-`)).length).toBe(4);
+  });
+
+  test("S14: city with dishes serves the city scope", async () => {
+    const output = await run(
+      Effect.flatMap(DishService, (service) =>
+        service.getLocalCarousel({ locale: "en", place: poolLocalityId, limit: 1 }),
+      ),
+    );
+
+    expect(output.requestedScope).toBe("city");
+    expect(output.scope).toBe("city");
+    expect(output.fallback).toBe(false);
+    expect(output.supplemented).toBe(false);
+    expect(output.items.map((item) => item.slug)).toContain(localitySlug);
+  });
+
+  test("S15: empty city serves the ancestor country pool, labeled honestly", async () => {
+    const output = await run(
+      Effect.flatMap(DishService, (service) =>
+        service.getLocalCarousel({ locale: "en", place: poolEmptyCityId, limit: 20 }),
+      ),
+    );
+
+    expect(output.requestedScope).toBe("city");
+    expect(output.scope).toBe("country");
+    expect(output.scope).not.toBe("city");
+    expect(output.fallback).toBe(true);
+    expect(output.fallbackReason).toBe("city-empty");
+    expect(output.items.map((item) => item.slug)).toContain(`${PREFIX}pool-0`);
+  });
+
+  test("S16: empty city with an empty ancestor resolves to an honest empty", async () => {
+    const output = await run(
+      Effect.flatMap(DishService, (service) =>
+        service.getLocalCarousel({ locale: "en", place: emptyCityId, limit: 5 }),
+      ),
+    );
+
+    expect(output.requestedScope).toBe("city");
+    expect(output.scope).toBe("country");
+    expect(output.fallback).toBe(true);
+    expect(output.fallbackReason).toBe("city-empty-country-empty");
+    expect(output.items).toEqual([]);
   });
 });

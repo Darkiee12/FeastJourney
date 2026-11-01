@@ -45,6 +45,41 @@ The `/#discover` section shows published food immediately, country-first:
   or the illustrated catalog-empty panel. Geolocation is explicit-only
   (tapped, never auto-requested) and denial keeps existing content.
 
+## Discover geographic honesty (scoped pools never widen to worldwide)
+
+  Scoped discovery requests (country, city, precise nearby) never widen to
+  the worldwide pool. The quiz rule applies verbatim: serve the requested
+  city, then its ancestor country, then an honest empty with an explicit
+  user action to explore worldwide — never silent unrelated dishes (e.g.
+  Mexican dishes for a Vietnam selection). Concretely, in
+  `DishService.getLocalCarousel`:
+
+- Country with dishes → `country`, no fallback. Country known but empty →
+  honest empty (`scope: "country"`, `fallback: true`,
+  `fallbackReason: "country-empty"`, zero items).
+- City with dishes → `city`, no fallback; a sparse city pool is topped up
+  with distinct ancestor-country dishes (`supplemented: true`, still
+  `city`, client reads it as regional with the country named). Empty city
+  with a stocked ancestor → `country` (`fallbackReason: "city-empty"`).
+  Empty city with an empty (or missing) ancestor → honest empty
+  (`fallbackReason: "city-empty-country-empty"` or `"city-empty"`).
+- Precise nearby with dishes → `nearby` (sparse pools topped up from the
+  country hint, `supplemented: true`, still `nearby`). Empty bands with a
+  stocked country hint → `country` (`fallbackReason: "nearby-empty"`).
+  Empty bands with an empty hint — or no hint — → honest empty
+  (`fallbackReason: "nearby-empty-country-empty"` or `"nearby-empty"`).
+- Explicit worldwide (`world` / `world-auto`) is the only lane that serves
+  worldwide dishes. Unknown well-formed country codes stay typed
+  `PlaceNotFound` at the service; `getLocalCarouselFn` keeps its graceful
+  half (serves worldwide for that rewritten request, labeled worldwide).
+
+  The client needs no new strings for this: a scoped honest empty resolves
+  through the existing `region-empty` fallback state (served scope is never
+  `worldwide`, zero items), which renders `carouselRegionEmpty` with the
+  explicit `carouselExploreWorld` escape hatch. Legitimate multi-country
+  dish associations are preserved — selection expands place subtrees
+  downward and never filters by cuisine name or assumes one origin per dish.
+
 ## Provider selection (explicit, validated)
 
 `RECOMMENDATION_PROVIDER` (`deterministic` default, or `muse`) plus
@@ -75,10 +110,22 @@ preferences (Zod enums shared with the UI via recommendation.constants.ts)
   |     called)
   v
 exclusion resolution (IngredientRepository.resolveByKey)
-  |  ANY allergy term present -> Uncertain (no allergy filtering: the
-  |  catalog has no verified-completeness representation, so no positive
-  |  allergy claim is made; the response explains why and what to do)
-  |  unresolvable dislike -> warning + ignore
+  |  ONE unified list, ONE policy: every exclusion term resolves against
+  |  the ingredient registry (locale first, English fallback for
+  |  non-English locales); resolved terms become hard SQL exclusions;
+  |  each unresolvable term yields one explicit warning and is NOT
+  |  applied as a filter:
+  |    `Could not match exclusion "<term>" to a known ingredient; it was
+  |    not applied as a filter.`
+  |  The transport merges the canonical `excludedIngredients` list with
+  |  legacy `avoid` / `allergies` terms (canonical-first order, exact
+  |  dedupe). A request carrying legacy `allergies` terms appends exactly
+  |  ONE explicit warning:
+  |    `Legacy allergy terms were merged as ordinary exclusions; strict
+  |    refusal no longer applies.`
+  |  (Never a safety claim: the catalog has no verified-completeness
+  |  representation for ingredients, so matches are best-effort name
+  |  resolution. Raw terms are never logged — counts only.)
   v
 candidate SQL (published only, cuisine filter, ANY-association region
 filter — associated, NOT proof of origin; NOT EXISTS ingredient
@@ -115,11 +162,17 @@ region filter matches ANY geographic association and must be read as
 "associated with", never as proof of origin. Soft signals (mood,
 variety, occasion fit) only influence ordering.
 
-Allergies always produce `Uncertain` with per-term reasons plus the
-incomplete-data warning: without a verified-completeness representation
-in the catalog, no positive allergy claim is supportable. Dislikes are
-lenient: unresolvable terms are ignored with a warning and resolved
-terms become hard SQL exclusions.
+Allergies and dislikes share one unified exclusion policy: every term in
+`excludedIngredients` (plus legacy `avoid` / `allergies` terms merged at
+the transport) resolves against the ingredient registry, and resolved
+terms become hard SQL exclusions. Unresolvable terms are lenient: one
+explicit warning per term, no filtering for that term. There is no
+allergy-triggered `Uncertain` refusal — the `Uncertain` ADT variant and
+its `uncertain` wire mapping are retained for wire compatibility but are
+no longer constructed by this flow (a legacy caller must never assume
+safety semantics from a successful recommendation). Resolved exclusions
+apply identically to the deterministic and Muse paths, which share the
+same post-exclusion pool; only the ordering step differs.
 
 ## Muse integration (`src/server/integrations/meta-client.ts`)
 
@@ -133,6 +186,12 @@ terms become hard SQL exclusions.
 - The prompt contains candidate IDs + names + ranking metadata only: no
   user identity, sessions, email, or admin metadata. Candidate
   names/descriptions are treated as untrusted text, never instructions.
+  The ranking context also carries the diner's raw exclusion terms as one
+  user-message line (`Ingredients to avoid: <terms or "none">`) —
+  untrusted data for ordering guidance only, never system instructions —
+  and the system prompt requires the model to respect the listed
+  exclusions when ordering while never claiming safety. Eligibility
+  itself is enforced in SQL before the model is consulted.
   Prompt injection cannot mint dish IDs: membership is validated
   server-side against the candidate set.
 - Business validation is server-side in the operation, not the client:
@@ -157,7 +216,9 @@ terms become hard SQL exclusions.
 warnings, reasons}` where mode is `ai | deterministic | uncertain |
 empty`. The domain models four variants (`ReadyMuse`,
 `ReadyDeterministic`, `Uncertain`, `Empty`) with exhaustive `$match` at
-the boundary; the wire keeps the stable four-string shape. `dishes`
+the boundary; the wire keeps the stable four-string shape. `Uncertain`
+is retained for wire compatibility but is no longer constructed by the
+recommendation flow (see above). `dishes`
 reuse the published `DishSummary` card projection — no draft content, no
 internal notes, no new DTO. Uncertain/empty return HTTP 200 with reasons
 and zero dishes (an honest empty, not a fake success); invalid input is
@@ -166,10 +227,14 @@ a Zod 400; over-budget requests get HTTP 429 with `Retry-After`.
 ## Tests
 
 `tests/integration/recommendation.test.ts` (fake `MetaClient` via Layer —
-no live calls, no API spend): eligibility, hard exclusions, allergy
-refusals, fake-AI ordering + hydration + shape validation (bad IDs,
+no live calls, no API spend): eligibility, unified hard exclusions
+(single, multiple, alias resolution), per-term unresolvable warnings
+with continued recommendations, no-refusal on former allergy terms,
+fake-AI ordering + hydration + shape validation (bad IDs,
 dupes, over-limit with seed-independent fixtures, exactly-at-limit
-acceptance, malformed, empty), 401/403 auth and permanent failures with
+acceptance, malformed, empty), provider context (meal/mood/region/
+exclusions, no stale exclusions across submissions, eligible-only
+candidates), 401/403 auth and permanent failures with
 no fallback, 429/transient/invalid-output fallback to deterministic,
 misconfiguration failures, deterministic baseline properties, concurrent
 apply idempotency where relevant. `tests/unit/

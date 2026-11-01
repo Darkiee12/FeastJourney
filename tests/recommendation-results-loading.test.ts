@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { DishCarouselSkeleton } from "@/components/dish/dish-carousel";
+import { DishCarouselCompactSkeleton, DishCarouselSkeleton } from "@/components/dish/dish-carousel";
 import {
   clampResultsLoadingCount,
   RESULTS_LOADING_SKELETON_DEFAULT_CARDS,
@@ -135,5 +135,40 @@ describe("results loading honesty and a11y", () => {
     expect(copyVi.recLoading.length).toBeGreaterThan(0);
     expect(copyEn.recRailHeading.length).toBeGreaterThan(0);
     expect(copyVi.recRailHeading.length).toBeGreaterThan(0);
+  });
+});
+
+const renderCompact = (): string =>
+  renderToStaticMarkup(createElement(ResultsLoadingSkeleton, { compact: true, copy: copyEn }));
+
+describe("compact loading reserves the drawer card footprint", () => {
+  test("compact uses the shared compact skeleton, never the full one", () => {
+    const shared = renderToStaticMarkup(DishCarouselCompactSkeleton());
+    const loading = renderCompact();
+
+    expect(loading).toContain(shared);
+    expect(loading).not.toContain("md:min-h-[22rem]");
+  });
+
+  test("compact renders no rail heading, rail cards, or controls row", () => {
+    const html = renderCompact();
+
+    expect(html).not.toContain(copyEn.recRailHeading);
+    expect(html).not.toContain("<li");
+    expect(html).not.toContain("mt-4 flex flex-wrap items-center gap-3");
+    // Title-aligned 44px icon actions live inside the card: two round
+    // placeholders, never full-width pills below it.
+    expect(countOccurrences(html, "h-11 w-11")).toBe(2);
+    expect(html).not.toContain("mt-2 flex gap-2");
+  });
+
+  test("compact keeps the single sr-only announcement with no live region", () => {
+    const html = renderCompact();
+
+    expect(html).toContain(copyEn.recLoading);
+    expect(countOccurrences(html, copyEn.recLoading)).toBe(1);
+    expect(html).not.toContain("aria-live");
+    expect(html).not.toContain("<button");
+    expect(html).not.toContain("<a ");
   });
 });

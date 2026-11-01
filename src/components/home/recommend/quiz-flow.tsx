@@ -1,25 +1,40 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { SparklesIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  MapPinIcon,
+  SkipForwardIcon,
+  SlidersHorizontalIcon,
+  SparklesIcon,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { DishCarousel } from "@/components/dish/dish-carousel";
+import { useMobileHomeOptional } from "@/components/home/mobile/mobile-home-context";
+import { useIsMaxMd } from "@/components/home/recommend/quiz-drawer";
 import {
   buildRecommendPayload,
   buildSurprisePayload,
   clearJourneySnapshot,
+  draftCountryMirror,
   draftLocation,
   EMPTY_DRAFT,
   formatTemplate,
+  isCityPlaceId,
   isExplicitRegionChoice,
+  needsAccountPrefill,
+  parseCommaList,
   persistPrefs,
   PREFS_STORAGE_KEY,
   readInitialDraft,
   readJourneySnapshot,
-  readSavedPrefs,
+  readStoredPrefs,
   regionOriginFor,
   removeSavedPrefs,
+  resolvePersistedExclusions,
   sanitizeCountryCode,
+  shouldShowImportBanner,
   termLengthError,
   textOriginFor,
   toCoarseSnapshot,
@@ -40,8 +55,8 @@ import {
 } from "@/components/home/recommend/quiz-stages";
 import {
   AiExplanationCard,
-  AllergyNotice,
   QuizError,
+  rankingVariantFor,
   ResultWarnings,
 } from "@/components/home/recommend/quiz-status";
 import { RecommendationRail } from "@/components/home/recommend/recommendation-rail";
@@ -58,6 +73,7 @@ import type {
   RecommendationMood,
 } from "@/modules/food-discovery/recommendation.constants";
 import { useFavoriteStatus } from "@/modules/user/components/save-dish-button";
+import { getFoodPreferencesFn, saveFoodPreferencesFn } from "@/modules/user/profile.functions";
 import { messagesFor, type Messages } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
@@ -94,13 +110,7 @@ export function RecommendSection() {
 
   const [journey] = useState<JourneySnapshot | null>(readJourneySnapshot);
 
-  const [savedInitial] = useState<SavedRecommendPrefs | null>(() => {
-    if (typeof window === "undefined") {
-      return null;
-    }
-
-    return readSavedPrefs(() => window.localStorage.getItem(PREFS_STORAGE_KEY));
-  });
+  const [savedInitial] = useState<SavedRecommendPrefs | null>(() => readStoredPrefs());
 
   const [initial] = useState(() => {
     if (journey?.draft === undefined) {
@@ -110,8 +120,8 @@ export function RecommendSection() {
       // prefs renders with restored provenance until the visitor confirms or
       // changes it; async detection keeps its suggested provenance.
       return {
-        avoidTouched: false,
         draft: fresh,
+        excludedTouched: false,
         mealTouched: false,
         moodTouched: false,
         regionTouched: false,
@@ -124,8 +134,8 @@ export function RecommendSection() {
     const restored: QuizDraft = { ...EMPTY_DRAFT, ...journey.draft, precise: null };
 
     return {
-      avoidTouched: restored.avoidRaw !== "",
       draft: restored,
+      excludedTouched: restored.excludedRaw !== "",
       mealTouched: journey.meal !== "anything",
       moodTouched: journey.mood !== "any",
       regionTouched: isExplicitRegionChoice(restored),
@@ -138,7 +148,7 @@ export function RecommendSection() {
   const [regionTouched, setRegionTouched] = useState<boolean>(initial.regionTouched);
   const [mealTouched, setMealTouched] = useState<boolean>(initial.mealTouched);
   const [moodTouched, setMoodTouched] = useState<boolean>(initial.moodTouched);
-  const [avoidTouched, setAvoidTouched] = useState<boolean>(initial.avoidTouched);
+  const [excludedTouched, setExcludedTouched] = useState<boolean>(initial.excludedTouched);
   const explicitRegionRef = useRef(initial.regionTouched);
   const precise = usePreciseLocation();
 
@@ -146,6 +156,9 @@ export function RecommendSection() {
   const updateRegionDraft = (next: QuizDraft): void => {
     explicitRegionRef.current = true;
     setRegionTouched(true);
+    // A stale step error (e.g. "choose a country") never survives a new
+    // region choice: validation re-runs on the next Continue instead.
+    setStepError(null);
     setDraft(next);
   };
 
@@ -163,7 +176,7 @@ export function RecommendSection() {
 
   /** Exclusion edits are explicit; provenance flips from restored to normal style. */
   const updateExclusionsDraft = (next: QuizDraft): void => {
-    setAvoidTouched(true);
+    setExcludedTouched(true);
     setDraft(next);
   };
 
@@ -173,10 +186,46 @@ export function RecommendSection() {
   const [submitted, setSubmitted] = useState<RecommendPayload | null>(journey?.submitted ?? null);
   const [confirmClear, setConfirmClear] = useState<boolean>(false);
   const [surpriseSeed, setSurpriseSeed] = useState<number>(journey?.surpriseSeed ?? 0);
+  /**
+   * Guest save-sheet visibility, reported up from the nested sheet inside
+   * the results carousel. While true the quiz drawer defers its Escape
+   * handling so one keypress closes only the topmost layer. Reset whenever
+   * the drawer closes (the sheet unmounts with it).
+   */
+  const [saveSheetOpen, setSaveSheetOpen] = useState<boolean>(false);
+  const mobile = useMobileHomeOptional();
+  const embeddedMobile = mobile !== null;
+  // Legacy standalone mounts (tests/other routes) keep viewport detection;
+  // route mounts are split by MobileHome/DesktopHome so context presence is
+  // the authoritative presentation signal and only one quiz tree mounts.
+  const legacyIsMobile = useIsMaxMd();
+  const isMobile = embeddedMobile || legacyIsMobile;
+
+  const drawerOpen = embeddedMobile
+    ? mobile.state.mode === "quiz" || mobile.state.mode === "results"
+    : false;
 
   const [hasSaved, setHasSaved] = useState<boolean>(() => savedInitial !== null);
 
+  useEffect(() => {
+    mobile?.setNestedDialogOpen(saveSheetOpen);
+  }, [mobile, saveSheetOpen]);
+
+  useEffect(() => {
+    if (mobile === null) return;
+
+    if (showResults && mobile.state.mode === "quiz") {
+      mobile.showResults();
+    }
+
+    if (!showResults && mobile.state.mode === "results") {
+      mobile.openQuiz();
+    }
+  }, [mobile, showResults]);
+
   const stepHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const drawerHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const mobileBodyRef = useRef<HTMLDivElement | null>(null);
   const skipInitialFocusRef = useRef(true);
 
   const regionQuery = useQuery({
@@ -226,6 +275,114 @@ export function RecommendSection() {
     ],
     mutationFn: (payload: RecommendPayload) => recommendDishesFn({ data: payload }),
   });
+
+  const userId = session.status === "signed-in" ? session.user.id : null;
+  const queryClient = useQueryClient();
+
+  /** Guest-storage mirror of persisted exclusions; guest submits write through here. Signed-in submits write the account instead and leave this copy independent for explicit import. */
+  const [guestExclusions, setGuestExclusions] = useState<ReadonlyArray<string>>(
+    () => savedInitial?.excludedIngredients ?? [],
+  );
+
+  const [accountSaveError, setAccountSaveError] = useState<string | null>(null);
+  const [importDismissed, setImportDismissed] = useState<boolean>(false);
+
+  /**
+   * Signed-in account prefs, keyed by member id so one member's answers can
+   * never surface for another. Disabled for guests: they persist to device
+   * storage only.
+   */
+  // TQueryFnData is pinned explicitly: oxlint's type model cannot see
+  // through the server-function generics (same as the sibling prefs tests),
+  // while tsc resolves the identical shape with no errors.
+  const accountPrefsQuery = useQuery<{ readonly excludedIngredients: Array<string> } | null>({
+    queryKey: ["user", "food-preferences", userId ?? "signed-out"],
+    queryFn: () => getFoodPreferencesFn(),
+    enabled: userId !== null,
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+
+  const accountSave = useMutation({
+    // Transport is snake_case per the user module convention; the read path
+    // already maps back to camelCase.
+    mutationFn: (excluded: Array<string>) =>
+      saveFoodPreferencesFn({ data: { excluded_ingredients: excluded } }),
+  });
+
+  /** Fire-and-forget account save; a failure surfaces an inline retry only.
+   * On success the account-scoped cache is updated so Skip, the import
+   * banner, and later submits all observe the saved values (never stale). */
+  const saveAccountPrefs = (excluded: ReadonlyArray<string>): void => {
+    if (userId === null) {
+      return;
+    }
+
+    const memberId = userId;
+    const next = [...excluded];
+
+    accountSave.mutate(next, {
+      onSuccess: () => {
+        setAccountSaveError(null);
+        queryClient.setQueryData(["user", "food-preferences", memberId], {
+          excludedIngredients: next,
+        });
+      },
+      onError: () => {
+        setAccountSaveError(copy.recError);
+      },
+    });
+  };
+
+  /**
+   * Persisted exclusions source of truth: the loaded account prefs when
+   * signed in, otherwise guest storage. Delegates to the pure resolver so
+   * the branching is unit-tested (see quiz-prefs-lifecycle tests).
+   */
+  const persistedExclusions = (): Array<string> =>
+    resolvePersistedExclusions({
+      userId,
+      accountLoaded: accountPrefsQuery.data !== undefined,
+      account: accountPrefsQuery.data?.excludedIngredients ?? null,
+      guest: guestExclusions,
+    });
+
+  /** Adopt the guest-storage exclusions into the draft and save them to the account. */
+  const importGuestPrefs = (): void => {
+    const guest = [...guestExclusions];
+    setDraft({ ...draft, excludedRaw: guest.join(", ") });
+    setExcludedTouched(true);
+
+    if (userId !== null) {
+      const memberId = userId;
+
+      accountSave.mutate(guest, {
+        onSuccess: () => {
+          setAccountSaveError(null);
+          queryClient.setQueryData(["user", "food-preferences", memberId], {
+            excludedIngredients: guest,
+          });
+          setImportDismissed(true);
+        },
+        onError: () => {
+          // Stay visible so Import doubles as the retry; the adopted
+          // draft values are preserved regardless.
+          setAccountSaveError(copy.recError);
+        },
+      });
+    } else {
+      setImportDismissed(true);
+    }
+  };
+
+  /** Retry a failed account save with the currently drafted terms. */
+  const retryAccountSave = (): void => {
+    if (userId === null) {
+      return;
+    }
+
+    saveAccountPrefs(parseCommaList(draft.excludedRaw));
+  };
 
   const restoredRef = useRef(false);
   const previousLangRef = useRef(lang);
@@ -335,6 +492,60 @@ export function RecommendSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.regionMode, precise.status]);
 
+  /**
+   * Signed-in prefill: the first account-prefs load adopts the member's
+   * saved exclusions, but ONLY when the draft is still pristine (no
+   * explicit edits this visit). Guest-restored text is pristine, so the
+   * account wins as source of truth and the import banner offers the
+   * guest values back. An empty account never wipes guest-restored text.
+   */
+  const prefilledAccountRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      !needsAccountPrefill({
+        signedIn: userId !== null,
+        prefilledForUserId: prefilledAccountRef.current,
+        userId,
+        accountLoaded: accountPrefsQuery.data !== undefined,
+        excludedTouched,
+        accountNonEmpty: (accountPrefsQuery.data?.excludedIngredients.length ?? 0) > 0,
+      })
+    ) {
+      return;
+    }
+
+    prefilledAccountRef.current = userId;
+
+    const account = accountPrefsQuery.data?.excludedIngredients ?? [];
+    setDraft((previous) => ({ ...previous, excludedRaw: account.join(", ") }));
+  }, [userId, accountPrefsQuery.data, excludedTouched]);
+
+  /**
+   * Account transitions: a new sign-in re-arms the prefill and the import
+   * banner; a sign-out clears only the in-memory account prefs. Account
+   * values are never written to guest storage, and guest storage is never
+   * cleared — the in-progress draft is preserved untouched.
+   */
+  const previousUserIdRef = useRef<string | null>(userId);
+  useEffect(() => {
+    const previous = previousUserIdRef.current;
+    previousUserIdRef.current = userId;
+
+    if (previous === userId) {
+      return;
+    }
+
+    setImportDismissed(false);
+    prefilledAccountRef.current = null;
+
+    if (previous !== null && userId === null) {
+      queryClient.removeQueries({ queryKey: ["user", "food-preferences"] });
+    }
+  }, [userId, queryClient]);
+
+  // Deep links are handled by MobileHome (context owner) on mobile and by
+  // normal document anchors on desktop; no window-event coordination here.
+
   // Predictable focus: each step and the results heading receive focus on
   // entry (without scrolling), so keyboard and screen-reader users land on
   // the question. The initial mount keeps natural focus.
@@ -348,10 +559,52 @@ export function RecommendSection() {
     stepHeadingRef.current?.focus({ preventScroll: true });
   }, [stepIndex, showResults]);
 
+  // Drawer mirror of the desktop focus move: the drawer owns its own
+  // heading (the desktop one is unmounted on mobile), focused without
+  // scrolling the page behind the sheet.
+  useEffect(() => {
+    if (drawerOpen && isMobile) {
+      drawerHeadingRef.current?.focus({ preventScroll: true });
+    }
+  }, [stepIndex, showResults, drawerOpen, isMobile]);
+
+  // Results entry always starts at the top of the drawer body: moving from
+  // the final quiz step to results resets the internal scroll position
+  // without moving the page or interrupting carousel navigation.
+  useEffect(() => {
+    if (showResults && drawerOpen && isMobile) {
+      mobileBodyRef.current?.scrollTo({ top: 0 });
+    }
+  }, [showResults, drawerOpen, isMobile]);
+
   const startSearch = (payload: RecommendPayload, remember: boolean): void => {
     const transport = toTransportPayload(payload);
-    persistPrefs(remember, transport.avoid, transport.country);
-    setHasSaved(remember);
+    const excluded = [...transport.excludedIngredients];
+
+    // Persistence is source-separated: guests write versioned localStorage
+    // only; signed-in submissions write only the member's account prefs.
+    // Account values must never mirror into guest storage (the guest copy
+    // stays independent for explicit import), and guest writes must never
+    // run for members.
+    if (userId === null) {
+      persistPrefs({
+        rememberDestination: remember,
+        excludedIngredients: excluded,
+        country: transport.country,
+        city:
+          draft.cityId !== null && isCityPlaceId(draft.cityId)
+            ? { placeId: draft.cityId, label: draft.cityLabel, country: draft.cityCountry }
+            : undefined,
+      });
+      setGuestExclusions(excluded);
+    } else {
+      // Signed-in account save never blocks the recommendation: the dishes
+      // still load from the submitted terms; a save failure only surfaces an
+      // inline retry while the form input is preserved untouched.
+      saveAccountPrefs(excluded);
+    }
+
+    setHasSaved(remember || excluded.length > 0);
     setSubmitted(payload);
     setStepError(null);
     setShowResults(true);
@@ -373,9 +626,21 @@ export function RecommendSection() {
    * already-complete answers; this is the keyboard/assistive-tech path's
    * guard and the defensive backstop.
    */
-  const tryAdvance = (): void => {
+  /**
+   * Step validation. The candidate defaults to the render-scope draft —
+   * fresh for every post-render caller (Continue buttons, fix-arrival
+   * effects). `commit` passes its just-picked candidate explicitly because
+   * the state update has not committed yet within the same tick.
+   */
+  const tryAdvance = (candidate: QuizDraft = draft): void => {
     if (stepIndex === 0) {
-      const regionError = validateRegion(draft.regionMode, draft.country, copy, draft.precise);
+      const regionError = validateRegion(
+        candidate.regionMode,
+        candidate.country,
+        copy,
+        candidate.precise,
+        candidate.cityId,
+      );
 
       if (regionError !== null) {
         setStepError(regionError);
@@ -394,7 +659,7 @@ export function RecommendSection() {
   };
 
   const findDishes = (): void => {
-    const lengthError = termLengthError(draft.avoidRaw, draft.allergiesRaw, copy);
+    const lengthError = termLengthError(draft.excludedRaw, copy);
 
     if (lengthError !== null) {
       setStepError(lengthError);
@@ -402,7 +667,13 @@ export function RecommendSection() {
       return;
     }
 
-    const regionError = validateRegion(draft.regionMode, draft.country, copy, draft.precise);
+    const regionError = validateRegion(
+      draft.regionMode,
+      draft.country,
+      copy,
+      draft.precise,
+      draft.cityId,
+    );
 
     if (regionError !== null) {
       setStepError(regionError);
@@ -415,8 +686,21 @@ export function RecommendSection() {
     startSearch(currentPayload(0), draft.remember);
   };
 
+  /**
+   * Skip reverts the exclusions box to the persisted value (guest storage,
+   * or the loaded account prefs when signed in) and submits that — the
+   * persisted values are pre-validated, so no length check runs here. The
+   * region still validates: an invalid region sends the visitor back to
+   * step 0 with the error.
+   */
   const skipExclusions = (): void => {
-    const regionError = validateRegion(draft.regionMode, draft.country, copy, draft.precise);
+    const regionError = validateRegion(
+      draft.regionMode,
+      draft.country,
+      copy,
+      draft.precise,
+      draft.cityId,
+    );
 
     if (regionError !== null) {
       setStepError(regionError);
@@ -426,28 +710,35 @@ export function RecommendSection() {
       return;
     }
 
+    const persisted = persistedExclusions();
+    const reverted: QuizDraft = { ...draft, excludedRaw: persisted.join(", ") };
+    setDraft(reverted);
+    setExcludedTouched(false);
+
     startSearch(
       buildRecommendPayload({
         meal,
-        avoid: [],
-        allergies: [],
-        country: draft.regionMode === "country" ? draft.country.trim().toUpperCase() : undefined,
-        location: draftLocation(draft),
+        excludedIngredients: persisted,
+        country: draftCountryMirror(reverted),
+        location: draftLocation(reverted),
         mood,
         locale: lang,
         surpriseSeed: 0,
       }),
-      draft.remember,
+      reverted.remember,
     );
   };
 
-  /** Empty-state fallback for sparse precise coverage: search worldwide instead. */
+  /** Empty-state fallback for sparse city/precise coverage: search worldwide instead. */
   const searchWorldwide = (): void => {
     const next: QuizDraft = {
       ...draft,
       regionMode: "anywhere",
       country: "",
       countrySource: null,
+      cityId: null,
+      cityLabel: null,
+      cityCountry: null,
       precise: null,
     };
 
@@ -463,7 +754,7 @@ export function RecommendSection() {
    * Surprise keeps the current meal, mood, region, and exclusions and never
    * touches saved preferences: no persist, no clear. Each click bumps a
    * bounded seed so the server offsets a window into the eligible pool —
-   * same filters, different dishes. Allergies still refuse before ranking.
+   * same filters, different dishes.
    */
   const surprise = (): void => {
     const nextSeed = surpriseSeed + 1;
@@ -482,6 +773,7 @@ export function RecommendSection() {
       removeSavedPrefs(() => window.localStorage.removeItem(PREFS_STORAGE_KEY));
     }
 
+    setGuestExclusions([]);
     clearJourneySnapshot();
 
     recommend.reset();
@@ -498,8 +790,29 @@ export function RecommendSection() {
     setRegionTouched(false);
     setMealTouched(false);
     setMoodTouched(false);
-    setAvoidTouched(false);
+    setExcludedTouched(false);
     explicitRegionRef.current = false;
+
+    // Signed-in members clear the account-backed list through the
+    // authenticated server operation and refresh the account-scoped cache,
+    // so cleared values cannot reappear via Skip, reload, or the import
+    // banner. The in-memory draft above is already empty, so an inline
+    // retry after a failure correctly re-saves the empty list.
+    if (userId !== null) {
+      const memberId = userId;
+
+      accountSave.mutate([], {
+        onSuccess: () => {
+          setAccountSaveError(null);
+          queryClient.setQueryData(["user", "food-preferences", memberId], {
+            excludedIngredients: [],
+          });
+        },
+        onError: () => {
+          setAccountSaveError(copy.recError);
+        },
+      });
+    }
   };
 
   const retry = (): void => {
@@ -538,26 +851,26 @@ export function RecommendSection() {
     setRegionTouched(false);
     setMealTouched(false);
     setMoodTouched(false);
-    setAvoidTouched(false);
+    setExcludedTouched(false);
     explicitRegionRef.current = false;
   };
 
   const regionOrigin: AnswerOrigin = regionOriginFor({
     draft,
     savedCountry: savedInitial?.country ?? null,
+    savedCityId: savedInitial?.city?.placeId ?? null,
     touched: regionTouched,
   });
 
-  const avoidOrigin: AnswerOrigin = textOriginFor({
-    savedValue: savedInitial === null ? null : savedInitial.avoid.join(", "),
-    touched: avoidTouched,
-    value: draft.avoidRaw,
+  const excludedOrigin: AnswerOrigin = textOriginFor({
+    savedValue: savedInitial === null ? null : savedInitial.excludedIngredients.join(", "),
+    touched: excludedTouched,
+    value: draft.excludedRaw,
   });
 
   const outcome: RecommendResult | null = recommend.data ?? null;
-  const hasAllergies = submitted !== null && submitted.allergies.length > 0;
   const stepLabel = `${copy.recStep} ${stepIndex + 1} ${copy.recOf} ${QUIZ_STEPS}`;
-  const resultUserId = session.status === "signed-in" ? session.user.id : null;
+  const resultUserId = userId;
 
   const resultIds = useMemo(
     () =>
@@ -579,8 +892,10 @@ export function RecommendSection() {
           submitted.locale,
           submitted.country ?? "",
           submitted.location?.kind ?? "",
-          submitted.avoid.join("|"),
-          submitted.allergies.join("|"),
+          submitted.location !== undefined && submitted.location.kind === "city"
+            ? submitted.location.placeId
+            : "",
+          submitted.excludedIngredients.join("|"),
         ].join(":");
 
   const carouselItems = useMemo(
@@ -606,6 +921,278 @@ export function RecommendSection() {
     () => ({ approximate: copy.recApproximate, saved: copy.recSavedFromVisit }),
     [copy],
   );
+
+  /**
+   * Guest-to-account import banner: when the device holds exclusions that
+   * differ from the signed-in member's account prefs, offer a one-tap
+   * import. Import adopts the guest values and saves them to the account;
+   * Not now dismisses for the visit. Never shows for guests or while the
+   * account prefs are still loading.
+   */
+  const accountExclusions: ReadonlyArray<string> | null =
+    accountPrefsQuery.data?.excludedIngredients ?? null;
+
+  const accountHasPrefs = (accountExclusions?.length ?? 0) > 0;
+
+  /** Clear affordance covers guest storage, the in-memory mirrors, and the
+   * loaded account prefs — whichever source actually holds values. */
+  const hasSavedVisible = hasSaved || (userId !== null && accountHasPrefs);
+
+  const showImportBanner = shouldShowImportBanner({
+    signedIn: userId !== null,
+    accountLoaded: accountPrefsQuery.data !== undefined,
+    dismissed: importDismissed,
+    guest: guestExclusions,
+    account: accountExclusions,
+  });
+
+  const renderImportBanner = (): ReactNode =>
+    showImportBanner ? (
+      <div className="rounded-2xl border-2 border-border-soft bg-cream px-4 py-3">
+        <p className="text-sm font-extrabold text-ink">{copy.recPrefsImportTitle}</p>
+        <p className="mt-1 text-sm text-muted">{copy.recPrefsImportBody}</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={importGuestPrefs}
+            className="inline-flex min-h-10 cursor-pointer items-center rounded-full bg-ink px-4 text-xs font-bold text-white transition hover:opacity-90"
+          >
+            {copy.recPrefsImportYes}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setImportDismissed(true);
+            }}
+            className="inline-flex min-h-10 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-4 text-xs font-bold text-ink transition hover:border-ink"
+          >
+            {copy.recPrefsImportNo}
+          </button>
+        </div>
+      </div>
+    ) : null;
+
+  /**
+   * Shared stage renderer for the desktop card and the mobile drawer. One
+   * question per view in both; the drawer passes compact for the tighter
+   * option presentation. State and handlers are shared, so answers survive
+   * overlay round-trips.
+   */
+  const renderStages = (compact: boolean): ReactNode => (
+    <div key={stepIndex} className="motion-safe:animate-rec-step-enter">
+      {stepIndex === 0 ? (
+        <WhereStep
+          compact={compact}
+          copy={copy}
+          countriesError={countries.isError}
+          countryOptions={countryOptions}
+          detected={{ country: detectedCountry, locating: regionQuery.isPending }}
+          draft={draft}
+          onAdvance={tryAdvance}
+          onDraft={updateRegionDraft}
+          onRetryCountries={() => {
+            void countries.refetch();
+          }}
+          origin={regionOrigin}
+          lang={lang}
+          precise={{
+            fix: precise.fix,
+            request: precise.request,
+            status: precise.status,
+          }}
+          provenanceLabels={provenanceLabels}
+        />
+      ) : null}
+
+      {stepIndex === 1 ? (
+        <CravingStep
+          compact={compact}
+          copy={copy}
+          meal={meal}
+          onAdvance={tryAdvance}
+          onMeal={pickMeal}
+          touched={mealTouched}
+        />
+      ) : null}
+
+      {stepIndex === 2 ? (
+        <AvoidStep
+          compact={compact}
+          copy={copy}
+          draft={draft}
+          excludedOrigin={excludedOrigin}
+          mood={mood}
+          moodTouched={moodTouched}
+          onDraft={updateExclusionsDraft}
+          onMood={pickMood}
+          provenanceLabels={provenanceLabels}
+        />
+      ) : null}
+    </div>
+  );
+
+  /**
+   * Sticky drawer footer for quiz steps only: the single primary action per
+   * view, always a min-44px target. Mirrors the desktop card actions exactly
+   * — same handlers, same validation — only the layout is bottom-docked.
+   * Successful results deliberately have no fixed footer (the dish owns the
+   * drawer); Adjust lives as a compact header action and Start over in the
+   * secondary disclosure below the dish.
+   */
+  const renderDrawerFooter = (): ReactNode => {
+    if (stepIndex < QUIZ_STEPS - 1) {
+      return (
+        <div className="flex items-center gap-2">
+          {stepIndex > 0 ? (
+            <button
+              type="button"
+              onClick={goBack}
+              aria-label={copy.recBack}
+              className="inline-flex min-h-11 min-w-11 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-3 text-sm font-bold text-ink transition hover:border-ink"
+            >
+              <ArrowLeftIcon aria-hidden="true" className="size-4" />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => {
+              tryAdvance();
+            }}
+            className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
+          >
+            {copy.recContinue}
+            <ArrowRightIcon aria-hidden="true" className="size-4 flex-none" />
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={goBack}
+          aria-label={copy.recBack}
+          className="inline-flex min-h-11 min-w-11 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-3 text-sm font-bold text-ink transition hover:border-ink"
+        >
+          <ArrowLeftIcon aria-hidden="true" className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={skipExclusions}
+          disabled={recommend.isPending}
+          className="inline-flex min-h-11 flex-none cursor-pointer items-center gap-1.5 rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold whitespace-nowrap text-ink transition hover:border-ink disabled:cursor-wait disabled:opacity-70"
+        >
+          <SkipForwardIcon aria-hidden="true" className="size-4 flex-none" />
+          {copy.recSkipShort}
+        </button>
+        <button
+          type="button"
+          onClick={findDishes}
+          disabled={recommend.isPending}
+          className="inline-flex min-h-11 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-full bg-food-orange-strong px-4 text-sm font-bold whitespace-nowrap text-white shadow-[0_10px_28px_rgba(194,65,12,0.35)] transition hover:bg-food-orange-dark disabled:cursor-wait disabled:opacity-70"
+        >
+          <SparklesIcon aria-hidden="true" className="size-4 flex-none" />
+          {copy.recRecommendSubmit}
+        </button>
+      </div>
+    );
+  };
+
+  if (embeddedMobile) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col" data-quiz-sheet>
+        <span
+          id="recommend"
+          aria-hidden="true"
+          tabIndex={-1}
+          className="block h-0 w-full overflow-hidden"
+        />
+        <div className="flex flex-none items-center justify-between gap-2 px-4 pt-1">
+          <div className="min-w-0 flex-1">
+            {showResults ? (
+              <p className="truncate text-base font-extrabold tracking-wide text-ink">
+                {copy.recRecommendationsHeading}
+              </p>
+            ) : (
+              <div className="min-w-0">
+                <p aria-live="polite" className="truncate text-sm">
+                  <span className="font-semibold text-muted">
+                    {stepIndex + 1}/{QUIZ_STEPS}
+                  </span>
+                  <span aria-hidden="true" className="text-muted">
+                    {" "}
+                    ·{" "}
+                  </span>
+                  <span className="font-extrabold text-ink">{stepQuestion(stepIndex, copy)}</span>
+                </p>
+                <div aria-hidden="true" className="mt-1.5 flex gap-1">
+                  {[0, 1, 2].map((dot) => (
+                    <span
+                      key={dot}
+                      className={`h-1 flex-1 rounded-full ${dot <= stepIndex ? "bg-food-orange-strong" : "bg-border-soft"}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          {showResults ? (
+            <button
+              type="button"
+              onClick={backToQuiz}
+              aria-label={copy.recAdjust}
+              className="inline-flex min-h-11 min-w-11 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-3 text-sm font-bold text-ink"
+            >
+              <SlidersHorizontalIcon aria-hidden="true" className="size-4" />
+            </button>
+          ) : null}
+        </div>
+        {draft.cityId !== null && draft.cityLabel !== null ? (
+          <div className="flex-none px-4 pt-2">
+            <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border-2 border-ink bg-ink px-3 py-1 text-xs font-bold text-white">
+              <MapPinIcon aria-hidden="true" className="size-3.5 flex-none" />
+              <span className="truncate">{draft.cityLabel}</span>
+            </span>
+          </div>
+        ) : null}
+        <div
+          ref={mobileBodyRef}
+          data-drawer-body
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3"
+        >
+          <h2 ref={drawerHeadingRef} tabIndex={-1} className="sr-only">
+            {showResults
+              ? copy.recRecommendationsHeading
+              : `${stepLabel}: ${stepQuestion(stepIndex, copy)}`}
+          </h2>
+          {showResults && submitted !== null ? (
+            <div aria-live="polite" aria-busy={recommend.isPending}>
+              {renderOutcome(copy, true)}
+            </div>
+          ) : (
+            <div>
+              {renderImportBanner()}
+              <div className={showImportBanner ? "mt-3" : undefined}>{renderStages(true)}</div>
+              {stepError !== null ? (
+                <p
+                  role="alert"
+                  className="mt-3 rounded-xl border-2 border-danger bg-white px-4 py-3 text-sm font-bold text-danger"
+                >
+                  {stepError}
+                </p>
+              ) : null}
+            </div>
+          )}
+        </div>
+        {showResults ? null : (
+          <div className="flex-none border-t-2 border-border-soft bg-cream px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            {renderDrawerFooter()}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <section
@@ -707,8 +1294,9 @@ export function RecommendSection() {
               <SidebarPrefsCard
                 copy={copy}
                 prefs={{
+                  accountSaveError,
                   checked: draft.remember,
-                  hasSaved,
+                  hasSaved: hasSavedVisible,
                   onChange: (next) => {
                     setDraft({ ...draft, remember: next });
                   },
@@ -719,6 +1307,7 @@ export function RecommendSection() {
                   onDismissClear: () => {
                     setConfirmClear(false);
                   },
+                  onRetryAccountSave: retryAccountSave,
                   showConfirmClear: confirmClear,
                 }}
               />
@@ -732,7 +1321,7 @@ export function RecommendSection() {
               className="order-3 min-w-0 motion-safe:animate-rec-step-enter lg:order-none"
             >
               <h2 id="rec-results-heading" ref={stepHeadingRef} tabIndex={-1} className="sr-only">
-                {copy.recResultsHeading}
+                {copy.recRecommendationsHeading}
               </h2>
               <div aria-live="polite" aria-busy={recommend.isPending} className="mt-4 lg:mt-0">
                 {renderOutcome(copy)}
@@ -761,52 +1350,8 @@ export function RecommendSection() {
                   </div>
                 </div>
 
-                <div key={stepIndex} className="motion-safe:animate-rec-step-enter">
-                  {stepIndex === 0 ? (
-                    <WhereStep
-                      copy={copy}
-                      countriesError={countries.isError}
-                      countryOptions={countryOptions}
-                      detected={{ country: detectedCountry, locating: regionQuery.isPending }}
-                      draft={draft}
-                      onAdvance={tryAdvance}
-                      onDraft={updateRegionDraft}
-                      onRetryCountries={() => {
-                        void countries.refetch();
-                      }}
-                      origin={regionOrigin}
-                      precise={{
-                        fix: precise.fix,
-                        request: precise.request,
-                        status: precise.status,
-                      }}
-                      provenanceLabels={provenanceLabels}
-                    />
-                  ) : null}
-
-                  {stepIndex === 1 ? (
-                    <CravingStep
-                      copy={copy}
-                      meal={meal}
-                      onAdvance={tryAdvance}
-                      onMeal={pickMeal}
-                      touched={mealTouched}
-                    />
-                  ) : null}
-
-                  {stepIndex === 2 ? (
-                    <AvoidStep
-                      avoidOrigin={avoidOrigin}
-                      copy={copy}
-                      draft={draft}
-                      mood={mood}
-                      moodTouched={moodTouched}
-                      onDraft={updateExclusionsDraft}
-                      onMood={pickMood}
-                      provenanceLabels={provenanceLabels}
-                    />
-                  ) : null}
-                </div>
+                {renderImportBanner()}
+                <div className={showImportBanner ? "mt-4" : undefined}>{renderStages(false)}</div>
 
                 {stepError !== null ? (
                   <p
@@ -830,7 +1375,9 @@ export function RecommendSection() {
                   {stepIndex < QUIZ_STEPS - 1 ? (
                     <button
                       type="button"
-                      onClick={tryAdvance}
+                      onClick={() => {
+                        tryAdvance();
+                      }}
                       className="inline-flex min-h-11 cursor-pointer items-center rounded-full bg-ink px-6 text-sm font-bold text-white transition hover:opacity-90"
                     >
                       {copy.recContinue}
@@ -864,9 +1411,9 @@ export function RecommendSection() {
     </section>
   );
 
-  function renderOutcome(copyMessages: Messages) {
+  function renderOutcome(copyMessages: Messages, compact = false) {
     if (recommend.isPending) {
-      return <ResultsLoadingSkeleton copy={copyMessages} />;
+      return <ResultsLoadingSkeleton compact={compact} copy={copyMessages} />;
     }
 
     if (recommend.isError) {
@@ -878,6 +1425,58 @@ export function RecommendSection() {
     }
 
     if (outcome.mode === "uncertain" || outcome.mode === "empty") {
+      // Compact drawer-first empty state: one heading, one hint, primary +
+      // secondary location actions. Drawer footer already owns Adjust /
+      // Start over, so they are not repeated here. Detailed backend reasons
+      // stay behind an optional disclosure for troubleshooting.
+      // Explicit worldwide is opt-in only: every location-scoped empty
+      // (city, country, destination, approx, precise) offers one tap to
+      // explore worldwide; a request that already was worldwide offers none.
+      const requestedWorldwide =
+        submitted?.location !== undefined
+          ? submitted.location.kind === "worldwide"
+          : submitted?.country === undefined;
+
+      if (compact) {
+        return (
+          <div>
+            <p className="text-base font-extrabold text-ink">{copyMessages.recReasonsHeading}</p>
+            <p className="mt-1 text-sm font-semibold text-muted">{copyMessages.recEmptySuggest}</p>
+            {outcome.mode === "empty" && !requestedWorldwide ? (
+              <div className="mt-3 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => editStep(0)}
+                  className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full bg-ink px-5 text-sm font-bold text-white transition hover:opacity-90"
+                >
+                  {copyMessages.recWhereAnother}
+                </button>
+                <button
+                  type="button"
+                  onClick={searchWorldwide}
+                  disabled={recommend.isPending}
+                  className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-ink disabled:cursor-wait disabled:opacity-70"
+                >
+                  {copyMessages.recWhereAnywhere}
+                </button>
+              </div>
+            ) : null}
+            {outcome.reasons.length > 0 ? (
+              <details className="mt-3 rounded-xl border border-border-soft bg-white px-3 py-2">
+                <summary className="cursor-pointer text-sm font-bold text-muted">
+                  {copyMessages.adminPlaceDetails}
+                </summary>
+                <ul className="mt-2 flex list-disc flex-col gap-1 pl-6 text-sm text-ink">
+                  {outcome.reasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+          </div>
+        );
+      }
+
       return (
         <div>
           <AiExplanationCard
@@ -886,7 +1485,7 @@ export function RecommendSection() {
             ranking={outcome.ranking}
             reasons={outcome.reasons}
           />
-          {outcome.mode === "empty" && submitted?.location?.kind === "precise" ? (
+          {outcome.mode === "empty" && !requestedWorldwide ? (
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -905,11 +1504,106 @@ export function RecommendSection() {
               </button>
             </div>
           ) : null}
-          {hasAllergies ? (
-            <div className="mt-4">
-              <AllergyNotice copy={copyMessages} />
+        </div>
+      );
+    }
+
+    // Drawer-first compact success: the dish owns the drawer. Warnings stay
+    // prominent above it; the Muse badge is a small disclosure, never a card
+    // above the dish. Your picks, preferences, and the full AI explanation
+    // live in one optional disclosure below the dish; Start over sits there
+    // too. No rail — the two arrows navigate.
+    if (compact) {
+      const rankingVariant =
+        outcome.mode === "deterministic" ? rankingVariantFor(outcome.mode, outcome.ranking) : null;
+
+      return (
+        <div>
+          {outcome.warnings.length > 0 ? (
+            <div className="mb-2">
+              <ResultWarnings copy={copyMessages} warnings={outcome.warnings} />
             </div>
           ) : null}
+          {outcome.mode === "ai" ? (
+            <details className="mb-2 rounded-full border border-border-soft bg-white px-3 py-1.5">
+              <summary className="cursor-pointer text-xs font-bold text-ink">
+                ✦ {copyMessages.recAiNote}
+              </summary>
+              <p className="px-1 pt-1 pb-1 text-xs font-semibold text-muted">
+                {copyMessages.recAiExplainer}
+              </p>
+            </details>
+          ) : (
+            <p className="mb-2 text-xs font-semibold text-muted">
+              {rankingVariant === "degraded"
+                ? copyMessages.recFallbackNote
+                : copyMessages.recCatalogNote}
+            </p>
+          )}
+          <DishCarousel
+            activeIndex={railIndex}
+            autoplay
+            autoplayMs={5000}
+            copy={copyMessages}
+            favoriteStatus={resultFavorites}
+            items={carouselItems}
+            label={copyMessages.recRecommendationsHeading}
+            lang={lang}
+            layout="compact"
+            onIndexChange={setRailIndex}
+            onSaveSheetOpenChange={setSaveSheetOpen}
+            resetKey={outcomeKey}
+            session={session}
+          />
+          <details className="mt-2 rounded-2xl border-2 border-border-soft bg-white px-3 py-2">
+            <summary className="cursor-pointer text-sm font-bold text-ink">
+              {copyMessages.recSummaryLabel}
+            </summary>
+            <div className="mt-2 flex min-w-0 flex-col gap-2">
+              {submitted !== null ? (
+                <YourPicksCard
+                  compact
+                  copy={copyMessages}
+                  countryOptions={countryOptions}
+                  onEditStep={editStep}
+                  submitted={submitted}
+                />
+              ) : null}
+              <SidebarPrefsCard
+                compact
+                copy={copyMessages}
+                prefs={{
+                  accountSaveError,
+                  checked: draft.remember,
+                  hasSaved: hasSavedVisible,
+                  onChange: (next) => {
+                    setDraft({ ...draft, remember: next });
+                  },
+                  onClear: () => {
+                    setConfirmClear(true);
+                  },
+                  onConfirmClear: clearSaved,
+                  onDismissClear: () => {
+                    setConfirmClear(false);
+                  },
+                  onRetryAccountSave: retryAccountSave,
+                  showConfirmClear: confirmClear,
+                }}
+              />
+              <AiExplanationCard
+                copy={copyMessages}
+                mode={outcome.mode}
+                ranking={outcome.ranking}
+              />
+              <button
+                type="button"
+                onClick={startOver}
+                className="inline-flex min-h-10 cursor-pointer items-center self-start rounded-full px-2 text-xs font-bold text-muted underline decoration-2 underline-offset-4 transition hover:text-ink"
+              >
+                {copyMessages.recStartOver}
+              </button>
+            </div>
+          </details>
         </div>
       );
     }
@@ -921,11 +1615,6 @@ export function RecommendSection() {
             <ResultWarnings copy={copyMessages} warnings={outcome.warnings} />
           </div>
         ) : null}
-        {hasAllergies ? (
-          <div className="mb-3">
-            <AllergyNotice copy={copyMessages} />
-          </div>
-        ) : null}
         <DishCarousel
           activeIndex={railIndex}
           autoplay
@@ -933,9 +1622,10 @@ export function RecommendSection() {
           copy={copyMessages}
           favoriteStatus={resultFavorites}
           items={carouselItems}
-          label={copyMessages.recResultsHeading}
+          label={copyMessages.recRecommendationsHeading}
           lang={lang}
           onIndexChange={setRailIndex}
+          onSaveSheetOpenChange={setSaveSheetOpen}
           resetKey={outcomeKey}
           session={session}
         />

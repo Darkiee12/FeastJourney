@@ -47,6 +47,7 @@ export interface AdminNavEntry {
   readonly to:
     | "/admin"
     | "/admin/dishes"
+    | "/admin/places"
     | "/admin/imports"
     | "/admin/reviews"
     | "/admin/users"
@@ -70,6 +71,10 @@ export const adminNavEntries = (
     },
     {
       entry: { label: copy.adminDishes, to: "/admin/dishes", exact: false },
+      visible: capabilities.dishes,
+    },
+    {
+      entry: { label: copy.adminPlaces, to: "/admin/places", exact: false },
       visible: capabilities.dishes,
     },
     {

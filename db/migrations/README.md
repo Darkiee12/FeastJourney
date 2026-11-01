@@ -64,6 +64,10 @@ Versioned, immutable schema history for the `feastjourney` app schema:
 - `V20261031_001__country_short_names_preferred.sql` — prefer short
   English country names in choosers and cards where a formal/short pair
   exists (e.g. "United States", not "United States of America").
+- `V20261031_002__city_registry_seed.sql` — canonical city-level registry
+  seed proving the place pipeline: India → Karnataka → Bengaluru (with a
+  "Bangalore" alias), Vietnam → Hanoi and Ho Chi Minh City. Places only;
+  no dish associations are fabricated.
 
 - This directory contains **schema/data migrations**, not application Reylo queries.
 - Create next versioned SQL files such as `V20261027_002__create_user_accounts.sql` after domain ownership and schema review.

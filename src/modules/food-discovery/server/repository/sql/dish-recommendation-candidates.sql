@@ -1,9 +1,22 @@
-WITH input AS (
+WITH RECURSIVE input AS (
   SELECT :cuisine::nullable(text) AS cuisine,
     :country::nullable(text) AS country,
     :excluded_ids::bigint[] AS excluded_ids,
     :locale::text AS locale,
     :meal::text AS meal
+),
+-- Country subtree: the country place itself plus every descendant through
+-- place_parents (state -> city). A Bengaluru-tagged dish is eligible when
+-- browsing India without duplicating the association as a country row.
+country_tree(id) AS (
+  SELECT p.id AS id
+  FROM feastjourney.places AS p
+  CROSS JOIN input
+  WHERE input.country IS NOT NULL AND p.iso3166 = input.country
+  UNION
+  SELECT pp.place_id AS id
+  FROM feastjourney.place_parents AS pp
+  JOIN country_tree AS t ON t.id = pp.parent_place_id
 )
 SELECT d.id::text AS id,
   d.slug AS slug,
@@ -100,8 +113,8 @@ WHERE d.status = 'published'
     OR EXISTS (
       SELECT 1
       FROM feastjourney.dish_places AS dp
-      JOIN feastjourney.places AS p ON p.id = dp.place_id
-      WHERE dp.dish_id = d.id AND p.iso3166 = input.country
+      JOIN country_tree AS t ON t.id = dp.place_id
+      WHERE dp.dish_id = d.id
     )
   )
   AND NOT EXISTS (

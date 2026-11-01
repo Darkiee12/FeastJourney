@@ -12,8 +12,7 @@ import type { Messages } from "@/shared/i18n";
  * summary's scope label decides the honest region wording).
  */
 export interface YourPicksProps {
-  readonly allergies: ReadonlyArray<string>;
-  readonly avoid: ReadonlyArray<string>;
+  readonly excludedIngredients: ReadonlyArray<string>;
   readonly country: string | undefined;
   readonly location: RecommendPayload["location"];
   readonly meal: RecommendPayload["meal"];
@@ -26,8 +25,7 @@ export interface YourPicksProps {
  * interpretation of the submitted answers.
  */
 export const toYourPicksProps = (submitted: RecommendPayload): YourPicksProps => ({
-  allergies: submitted.allergies,
-  avoid: submitted.avoid,
+  excludedIngredients: submitted.excludedIngredients,
   country: submitted.country,
   location: submitted.location,
   meal: submitted.meal,
@@ -36,16 +34,19 @@ export const toYourPicksProps = (submitted: RecommendPayload): YourPicksProps =>
 
 /**
  * Remember-preferences controls, forwarded verbatim to RememberPrefs.
- * Persistence rules live there: allergies are never persisted and no
+ * Persistence rules: unified exclusions always persist (guest device or
+ * signed-in account); the opt-in governs only the destination. No
  * precise coordinates enter storage.
  */
 export interface SidebarPrefsProps {
+  readonly accountSaveError: string | null;
   readonly checked: boolean;
   readonly hasSaved: boolean;
   readonly onChange: (next: boolean) => void;
   readonly onClear: () => void;
   readonly onConfirmClear: () => void;
   readonly onDismissClear: () => void;
+  readonly onRetryAccountSave: () => void;
   readonly showConfirmClear: boolean;
 }
 
@@ -53,13 +54,19 @@ export interface SidebarPrefsProps {
  * YOUR PICKS card: submitted values with per-step edit chips. Standalone
  * export so the results layout can interleave it with the carousel on
  * mobile; ResultsSidebar composes it with the AI and prefs cards.
+ * The region chip always names the requested scope (e.g. the chosen city);
+ * when the server fell back to a wider pool, the outcome warnings rendered
+ * alongside explain exactly what was served — the chip never silently
+ * rewrites the visitor's choice to something they did not pick.
  */
 export function YourPicksCard({
+  compact = false,
   copy,
   countryOptions,
   onEditStep,
   submitted,
 }: {
+  readonly compact?: boolean;
   readonly copy: Messages;
   readonly countryOptions: ReadonlyArray<CountryOption>;
   readonly onEditStep: (step: number) => void;
@@ -69,10 +76,10 @@ export function YourPicksCard({
 
   return (
     <QuizSummary
-      allergies={picks.allergies}
-      avoid={picks.avoid}
+      compact={compact}
       copy={copy}
       countryOptions={countryOptions}
+      excludedIngredients={picks.excludedIngredients}
       meal={picks.meal}
       mood={picks.mood}
       onEditStep={onEditStep}
@@ -87,21 +94,26 @@ export function YourPicksCard({
  * behavior stays entirely inside RememberPrefs.
  */
 export function SidebarPrefsCard({
+  compact = false,
   copy,
   prefs,
 }: {
+  readonly compact?: boolean;
   readonly copy: Messages;
   readonly prefs: SidebarPrefsProps;
 }) {
   return (
     <RememberPrefs
+      accountSaveError={prefs.accountSaveError}
       checked={prefs.checked}
+      compact={compact}
       copy={copy}
       hasSaved={prefs.hasSaved}
       onChange={prefs.onChange}
       onClear={prefs.onClear}
       onConfirmClear={prefs.onConfirmClear}
       onDismissClear={prefs.onDismissClear}
+      onRetryAccountSave={prefs.onRetryAccountSave}
       showConfirmClear={prefs.showConfirmClear}
     />
   );
@@ -117,6 +129,7 @@ export function SidebarPrefsCard({
  */
 export function ResultsSidebar({
   aiCard,
+  compact = false,
   copy,
   countryOptions,
   onEditStep,
@@ -124,6 +137,7 @@ export function ResultsSidebar({
   submitted,
 }: {
   readonly aiCard?: ReactNode | undefined;
+  readonly compact?: boolean;
   readonly copy: Messages;
   readonly countryOptions: ReadonlyArray<CountryOption>;
   readonly onEditStep: (step: number) => void;
@@ -131,15 +145,16 @@ export function ResultsSidebar({
   readonly submitted: RecommendPayload;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-4">
+    <div className={compact ? "flex min-w-0 flex-col gap-3" : "flex min-w-0 flex-col gap-4"}>
       <YourPicksCard
+        compact={compact}
         copy={copy}
         countryOptions={countryOptions}
         onEditStep={onEditStep}
         submitted={submitted}
       />
       {aiCard}
-      <SidebarPrefsCard copy={copy} prefs={prefs} />
+      <SidebarPrefsCard compact={compact} copy={copy} prefs={prefs} />
     </div>
   );
 }

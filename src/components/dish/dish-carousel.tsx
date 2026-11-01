@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { ArrowUpRightIcon } from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -153,6 +154,20 @@ export interface DishCarouselProps {
   readonly autoplayMs?: number | undefined;
   /** Index resets to the first slide whenever this value changes. */
   readonly resetKey?: string | number | undefined;
+  /**
+   * Reports guest save-sheet open state upward (e.g. so a hosting drawer
+   * can defer its own Escape handling while the nested sheet owns the key).
+   * Optional; omitted callers are unaffected.
+   */
+  readonly onSaveSheetOpenChange?: ((open: boolean) => void) | undefined;
+  /**
+   * Slide presentation. `full` is the featured stacked/side-by-side card
+   * for desktop and discovery. `compact` is the drawer-first horizontal
+   * card (fixed thumbnail left, dish details right, arrows only) sized to
+   * fit a ~46dvh bottom sheet without scrolling. State, autoplay, swipe,
+   * and keyboard handling are identical in both.
+   */
+  readonly layout?: "full" | "compact" | undefined;
 }
 
 /**
@@ -174,7 +189,9 @@ export function DishCarousel({
   items,
   label,
   lang,
+  layout = "full",
   onIndexChange,
+  onSaveSheetOpenChange,
   resetKey,
   session,
 }: DishCarouselProps): ReactNode {
@@ -309,6 +326,150 @@ export function DishCarousel({
     }
   };
 
+  if (layout === "compact") {
+    const activeDish = items[safeIndex];
+
+    return (
+      <section aria-roledescription="carousel" aria-label={label}>
+        <output aria-live="polite" className="sr-only">
+          {announcement}
+        </output>
+        <div className="mb-1.5 flex min-w-0 items-center gap-2">
+          <p className="min-w-0 flex-1 truncate text-[11px] font-bold tracking-[0.14em] text-food-orange-strong uppercase">
+            {activeDish !== undefined && activeDish.regionNames.length > 0
+              ? activeDish.regionNames.slice(0, 2).join(" · ")
+              : label}
+          </p>
+          {total > 1 ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  goTo(safeIndex - 1);
+                }}
+                onKeyDown={handleKeyDown}
+                aria-label={copy.carouselPrev}
+                className="inline-flex min-h-10 min-w-10 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-2 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
+              >
+                ←
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  goTo(safeIndex + 1);
+                }}
+                onKeyDown={handleKeyDown}
+                aria-label={copy.carouselNext}
+                className="inline-flex min-h-10 min-w-10 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-2 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
+              >
+                →
+              </button>
+            </>
+          ) : null}
+        </div>
+        {/* The two arrows above are the entire visible compact navigation:
+            no dots, counters, progress bars, or rails. Screen-reader
+            announcements and slide labels keep carousel semantics. */}
+        <div
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+          className="discover-carousel-viewport touch-pan-y"
+        >
+          <div
+            className="discover-carousel-track"
+            style={{ transform: `translateX(-${safeIndex * 100}%)` }}
+          >
+            {items.map((dish, slide) => {
+              const title = dishCarouselTitle(dish);
+              const shown = slide === safeIndex;
+              const description = dish.description ?? null;
+
+              const descriptionLanguage =
+                dish.descriptionLanguage !== null &&
+                dish.descriptionLanguage !== undefined &&
+                dish.descriptionLanguage !== lang
+                  ? dish.descriptionLanguage
+                  : undefined;
+
+              return (
+                <article
+                  key={dish.id}
+                  aria-label={`${copy.carouselSlide} ${slide + 1} ${copy.carouselOf} ${total}`}
+                  aria-hidden={shown ? undefined : true}
+                  inert={shown ? undefined : true}
+                  className="w-full flex-none overflow-hidden rounded-2xl border border-border-soft bg-white p-2.5 shadow-[0_12px_28px_rgba(194,65,12,0.08)]"
+                >
+                  <div className="flex gap-3">
+                    <div
+                      className="relative min-h-28 w-28 flex-none self-stretch overflow-hidden rounded-xl bg-cream min-[400px]:w-32 max-[359px]:w-24"
+                      title={dish.image?.attribution ?? undefined}
+                    >
+                      <DishMedia
+                        image={toCarouselPublishedImage(dish.image ?? null, dish.id)}
+                        eager={slide === 0}
+                        sizes="(max-width: 400px) 112px, 128px"
+                        unavailableLabel={copy.carouselPhotoSoon}
+                        loadingLabel={copy.discoverLocalLoading}
+                        className="absolute inset-0 h-full w-full"
+                      />
+                    </div>
+                    <div className="flex min-w-0 flex-1 flex-col gap-1 py-0.5">
+                      <div className="flex min-w-0 flex-wrap items-start justify-end gap-2">
+                        <h3 className="font-display min-w-0 flex-1 basis-24 text-[1.35rem] leading-tight tracking-wide text-balance break-words">
+                          {title}
+                        </h3>
+                        <div className="flex flex-none items-center gap-1.5">
+                          <Link
+                            to="/dishes/$dishId"
+                            params={{ dishId: dish.slug }}
+                            search={{ lang }}
+                            tabIndex={shown ? undefined : -1}
+                            aria-label={copy.recExploreShort}
+                            title={copy.recExploreShort}
+                            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full bg-food-orange-strong text-white transition hover:bg-food-orange-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                          >
+                            <ArrowUpRightIcon aria-hidden="true" className="size-4 flex-none" />
+                          </Link>
+                          <SaveDishButton
+                            compact
+                            dishId={dish.id}
+                            onSaveSheetOpenChange={onSaveSheetOpenChange}
+                            lang={lang}
+                            returnTo="/"
+                            session={session}
+                            status={statusForDish(favoriteStatus, dish.id)}
+                          />
+                        </div>
+                      </div>
+                      {dish.nativeName !== undefined ? (
+                        <p
+                          lang={dish.nativeLanguageTag}
+                          className="truncate text-sm font-bold text-ink"
+                        >
+                          {dish.nativeName}
+                        </p>
+                      ) : null}
+                      {description !== null ? (
+                        <p
+                          lang={descriptionLanguage}
+                          className="line-clamp-2 text-[13px] leading-snug text-ink"
+                        >
+                          {description}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted italic">{copy.carouselNoDescription}</p>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section aria-roledescription="carousel" aria-label={label}>
       <output aria-live="polite" className="sr-only">
@@ -406,6 +567,7 @@ export function DishCarousel({
                     <SaveDishButton
                       dishId={dish.id}
                       lang={lang}
+                      onSaveSheetOpenChange={onSaveSheetOpenChange}
                       returnTo="/"
                       session={session}
                       status={statusForDish(favoriteStatus, dish.id)}
@@ -447,6 +609,38 @@ export function DishCarousel({
         </div>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Compact loading skeleton mirroring the compact drawer card footprint:
+ * fixed thumbnail block plus text lines and action pills at the same
+ * padding, so content resolves without layout shift. Announced once via
+ * the caller's loading region, not here.
+ */
+export function DishCarouselCompactSkeleton(): ReactNode {
+  return (
+    <div aria-hidden="true">
+      <div className="mb-2 flex items-center gap-2">
+        <div className="h-2.5 min-w-0 flex-1 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
+        <div className="h-10 w-10 flex-none animate-pulse rounded-full bg-border-soft motion-reduce:animate-none" />
+        <div className="h-10 w-10 flex-none animate-pulse rounded-full bg-border-soft motion-reduce:animate-none" />
+      </div>
+      <div className="w-full overflow-hidden rounded-2xl border border-border-soft bg-white p-3">
+        <div className="flex gap-3">
+          <div className="min-h-28 w-28 flex-none animate-pulse rounded-xl bg-border-soft motion-reduce:animate-none min-[400px]:w-32" />
+          <div className="flex min-w-0 flex-1 flex-col gap-2 py-0.5" aria-hidden="true">
+            <div className="flex min-w-0 items-start gap-2">
+              <div className="h-6 min-w-0 flex-1 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
+              <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+              <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+            </div>
+            <div className="h-3.5 w-1/2 animate-pulse rounded bg-cream motion-reduce:animate-none" />
+            <div className="h-3.5 w-full animate-pulse rounded bg-cream motion-reduce:animate-none" />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

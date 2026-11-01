@@ -65,7 +65,7 @@ function GlobeContent({
 }) {
   const reducedMotion = usePrefersReducedMotion();
   const [chunkTimedOut, setChunkTimedOut] = useState(false);
-  const fallback = <GlobeFallback label={copy.globeStaticLabel} />;
+  const fallback = <GlobeFallback label={copy.globeStaticLabel} lang={lang} />;
 
   useEffect(() => {
     if (reducedMotion) {
@@ -110,6 +110,9 @@ export function GlobeCanvas({ copy, lang }: { copy: Messages; lang: Locale }) {
   });
 
   return (
+    // Transform ownership lives in the parent layout (desktop hero or
+    // mobile stage wrapper): never animate inner scene parts from here;
+    // the rAF loop, textures and camera stay untouched.
     <div className="hero-globe pointer-events-none absolute inset-0">
       <ClientOnly fallback={null}>
         <GlobeContent copy={copy} lang={lang} bridgeRef={bridgeRef} />

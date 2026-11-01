@@ -394,6 +394,7 @@ function IssuesBody({
           {report.validRecords} valid, {report.invalidRecords} invalid, {duplicateCount} possible
           duplicates.
         </p>
+        <p className="mt-2 max-w-prose text-sm text-muted">{copy.adminImportPlacesFormat}</p>
 
         <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 sm:max-w-prose sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
           <div className="min-w-0">

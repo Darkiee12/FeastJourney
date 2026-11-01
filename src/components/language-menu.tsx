@@ -41,7 +41,7 @@ export function LanguageMenu() {
             {/* Fixed width so switching between "English" and wider names
             like "Tiếng Việt" never changes the button width; truncate is
             a backstop for fonts that render wider than the box. */}
-            <span className="inline-block min-w-[5.75rem] max-w-[5.75rem] truncate text-left">
+            <span className="hidden min-w-[5.75rem] max-w-[5.75rem] truncate text-left min-[480px]:inline-block">
               {localeNameFor(lang)}
             </span>
             <ChevronDownIcon aria-hidden="true" className="size-4" />

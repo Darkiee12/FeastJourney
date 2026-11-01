@@ -2,18 +2,29 @@ import { Context, Effect, Layer } from "effect";
 
 import dishCategoriesByDishIds from "@/modules/food-discovery/server/repository/sql/dish-categories-by-dish-ids.sql";
 import dishCategoryLink from "@/modules/food-discovery/server/repository/sql/dish-category-link.sql";
+import dishCategoryUnlink from "@/modules/food-discovery/server/repository/sql/dish-category-unlink.sql";
 import dishCuisineLink from "@/modules/food-discovery/server/repository/sql/dish-cuisine-link.sql";
+import dishCuisineUnlink from "@/modules/food-discovery/server/repository/sql/dish-cuisine-unlink.sql";
 import dishCuisinesByDishIds from "@/modules/food-discovery/server/repository/sql/dish-cuisines-by-dish-ids.sql";
+import dishDescriptionDelete from "@/modules/food-discovery/server/repository/sql/dish-description-delete.sql";
 import dishDescriptionUpsert from "@/modules/food-discovery/server/repository/sql/dish-description-upsert.sql";
 import dishDescriptionsByDishIds from "@/modules/food-discovery/server/repository/sql/dish-descriptions-by-dish-ids.sql";
 import dishFilter from "@/modules/food-discovery/server/repository/sql/dish-filter.sql";
+import dishIngredientDelete from "@/modules/food-discovery/server/repository/sql/dish-ingredient-delete.sql";
 import dishIngredientLink from "@/modules/food-discovery/server/repository/sql/dish-ingredient-link.sql";
+import dishIngredientUpdateRole from "@/modules/food-discovery/server/repository/sql/dish-ingredient-update-role.sql";
 import dishIngredientsByDishIds from "@/modules/food-discovery/server/repository/sql/dish-ingredients-by-dish-ids.sql";
 import dishMediaByDishIds from "@/modules/food-discovery/server/repository/sql/dish-media-by-dish-ids.sql";
 import dishMediaPublishedByDishIds from "@/modules/food-discovery/server/repository/sql/dish-media-published-by-dish-ids.sql";
+import dishNameClearPreferred from "@/modules/food-discovery/server/repository/sql/dish-name-clear-preferred.sql";
+import dishNameDelete from "@/modules/food-discovery/server/repository/sql/dish-name-delete.sql";
 import dishNameInsert from "@/modules/food-discovery/server/repository/sql/dish-name-insert.sql";
+import dishNameUpdate from "@/modules/food-discovery/server/repository/sql/dish-name-update.sql";
+import dishNamesAdminByDishIds from "@/modules/food-discovery/server/repository/sql/dish-names-admin-by-dish.sql";
 import dishNamesByDishIds from "@/modules/food-discovery/server/repository/sql/dish-names-by-dish-ids.sql";
+import dishPlaceDelete from "@/modules/food-discovery/server/repository/sql/dish-place-delete.sql";
 import dishPlaceLink from "@/modules/food-discovery/server/repository/sql/dish-place-link.sql";
+import dishPlaceUpdate from "@/modules/food-discovery/server/repository/sql/dish-place-update.sql";
 import dishPlacesByDishIds from "@/modules/food-discovery/server/repository/sql/dish-places-by-dish-ids.sql";
 import dishSourceLink from "@/modules/food-discovery/server/repository/sql/dish-source-link.sql";
 import dishSourcesByDishIds from "@/modules/food-discovery/server/repository/sql/dish-sources-by-dish-ids.sql";
@@ -24,15 +35,31 @@ import { type DatabaseError, runQuery } from "@/server/database/query";
 
 export type DishNameRow = (typeof dishNamesByDishIds)["~reylo"]["element"];
 
+export type DishNameAdminRow = (typeof dishNamesAdminByDishIds)["~reylo"]["element"];
+
+export type DishNameMutationRow = (typeof dishNameUpdate)["~reylo"]["element"];
+
+export type DishNameDeleteRow = (typeof dishNameDelete)["~reylo"]["element"];
+
+export type DishNameClearRow = (typeof dishNameClearPreferred)["~reylo"]["element"];
+
+export type DishDescriptionDeleteRow = (typeof dishDescriptionDelete)["~reylo"]["element"];
+
 export type DishDescriptionRow = (typeof dishDescriptionsByDishIds)["~reylo"]["element"];
 
 export type DishIngredientRow = (typeof dishIngredientsByDishIds)["~reylo"]["element"];
+
+export type DishIngredientRoleRow = (typeof dishIngredientUpdateRole)["~reylo"]["element"];
+
+export type DishIngredientDeleteRow = (typeof dishIngredientDelete)["~reylo"]["element"];
 
 export type DishMediaRow = (typeof dishMediaByDishIds)["~reylo"]["element"];
 
 export type DishPublishedMediaRow = (typeof dishMediaPublishedByDishIds)["~reylo"]["element"];
 
 export type DishPlaceRow = (typeof dishPlacesByDishIds)["~reylo"]["element"];
+
+export type DishPlaceLinkRow = (typeof dishPlaceUpdate)["~reylo"]["element"];
 
 export type DishCategoryRow = (typeof dishCategoriesByDishIds)["~reylo"]["element"];
 
@@ -46,6 +73,9 @@ export class DishRelationsRepository extends Context.Service<
     readonly namesByDishIds: (
       ids: ReadonlyArray<bigint>,
     ) => Effect.Effect<ReadonlyArray<DishNameRow>, DatabaseError, Database>;
+    readonly adminNamesByDishIds: (
+      ids: ReadonlyArray<bigint>,
+    ) => Effect.Effect<ReadonlyArray<DishNameAdminRow>, DatabaseError, Database>;
     readonly descriptionsByDishIds: (
       ids: ReadonlyArray<bigint>,
     ) => Effect.Effect<ReadonlyArray<DishDescriptionRow>, DatabaseError, Database>;
@@ -101,13 +131,63 @@ export class DishRelationsRepository extends Context.Service<
       readonly nameKind: string;
       readonly isPreferred: boolean;
       readonly searchKey: string;
-    }) => Effect.Effect<DishNameRow, DatabaseError, Database>;
+    }) => Effect.Effect<DishNameAdminRow, DatabaseError, Database>;
     readonly upsertDescription: (input: {
       readonly dishId: bigint;
       readonly languageTag: string;
       readonly description: string;
       readonly summary: string | null;
     }) => Effect.Effect<DishDescriptionRow, DatabaseError, Database>;
+    readonly deleteDescription: (
+      dishId: bigint,
+      languageTag: string,
+    ) => Effect.Effect<DishDescriptionDeleteRow | null, DatabaseError, Database>;
+    readonly updateName: (input: {
+      readonly id: bigint;
+      readonly dishId: bigint;
+      readonly languageTag: string;
+      readonly name: string;
+      readonly nameKind: string;
+      readonly isPreferred: boolean;
+      readonly searchKey: string;
+    }) => Effect.Effect<DishNameMutationRow | null, DatabaseError, Database>;
+    readonly deleteName: (
+      id: bigint,
+      dishId: bigint,
+    ) => Effect.Effect<DishNameDeleteRow | null, DatabaseError, Database>;
+    readonly clearPreferredNames: (
+      dishId: bigint,
+      languageTag: string,
+      excludedId: bigint,
+    ) => Effect.Effect<ReadonlyArray<DishNameClearRow>, DatabaseError, Database>;
+    readonly updateIngredientRole: (
+      dishId: bigint,
+      ingredientId: bigint,
+      role: string,
+    ) => Effect.Effect<DishIngredientRoleRow | null, DatabaseError, Database>;
+    readonly deleteIngredient: (
+      dishId: bigint,
+      ingredientId: bigint,
+    ) => Effect.Effect<DishIngredientDeleteRow | null, DatabaseError, Database>;
+    readonly unlinkCategory: (
+      dishId: bigint,
+      categoryId: bigint,
+    ) => Effect.Effect<number, DatabaseError, Database>;
+    readonly unlinkCuisine: (
+      dishId: bigint,
+      cuisineId: bigint,
+    ) => Effect.Effect<number, DatabaseError, Database>;
+    readonly updatePlaceLink: (input: {
+      readonly dishId: bigint;
+      readonly placeId: bigint;
+      readonly association: string;
+      readonly isDisputed: boolean;
+      readonly note: string | null;
+    }) => Effect.Effect<ReadonlyArray<DishPlaceLinkRow>, DatabaseError, Database>;
+    readonly deletePlaceLink: (
+      dishId: bigint,
+      placeId: bigint,
+    ) => Effect.Effect<number, DatabaseError, Database>;
     readonly linkDishSource: (
       dishId: bigint,
       sourceRecordId: bigint,
@@ -153,6 +233,12 @@ export const DishRelationsRepositoryLive = Layer.succeed(DishRelationsRepository
     Effect.gen(function* () {
       return yield* runQuery("dish/names-by-ids", (sql) =>
         dishNamesByDishIds.run(sql, { ids: [...ids] }),
+      );
+    }),
+  adminNamesByDishIds: (ids) =>
+    Effect.gen(function* () {
+      return yield* runQuery("dish/names-admin-by-ids", (sql) =>
+        dishNamesAdminByDishIds.run(sql, { ids: [...ids] }),
       );
     }),
   descriptionsByDishIds: (ids) =>
@@ -262,6 +348,112 @@ export const DishRelationsRepositoryLive = Layer.succeed(DishRelationsRepository
           summary: input.summary,
         }),
       );
+    }),
+  deleteDescription: (dishId, languageTag) =>
+    Effect.gen(function* () {
+      return yield* runQuery("dish/description-delete", (sql) =>
+        dishDescriptionDelete.run(sql, { dish_id: dishId, language_tag: languageTag }),
+      );
+    }),
+  updateName: (input) =>
+    Effect.gen(function* () {
+      const outcome = yield* runQuery("dish/name-update", (sql) =>
+        dishNameUpdate.try(sql, {
+          id: input.id,
+          dish_id: input.dishId,
+          language_tag: input.languageTag,
+          name: input.name,
+          name_kind: input.nameKind,
+          is_preferred: input.isPreferred,
+          search_key: input.searchKey,
+        }),
+      );
+
+      if (outcome.error !== undefined) {
+        if (outcome.error.condition === "unique_violation") {
+          return yield* new PersistenceConflict({
+            operation: "dish/name-update",
+            constraint: outcome.error.constraint ?? undefined,
+          });
+        }
+
+        return yield* classifyDatabaseError("dish/name-update", outcome.error.cause);
+      }
+
+      return outcome.value;
+    }),
+  deleteName: (id, dishId) =>
+    Effect.gen(function* () {
+      return yield* runQuery("dish/name-delete", (sql) =>
+        dishNameDelete.run(sql, { id, dish_id: dishId }),
+      );
+    }),
+  clearPreferredNames: (dishId, languageTag, excludedId) =>
+    Effect.gen(function* () {
+      return yield* runQuery("dish/name-clear-preferred", (sql) =>
+        dishNameClearPreferred.run(sql, {
+          dish_id: dishId,
+          language_tag: languageTag,
+          excluded_id: excludedId,
+        }),
+      );
+    }),
+  updateIngredientRole: (dishId, ingredientId, role) =>
+    Effect.gen(function* () {
+      return yield* runQuery("dish/ingredient-update-role", (sql) =>
+        dishIngredientUpdateRole.run(sql, {
+          dish_id: dishId,
+          ingredient_id: ingredientId,
+          role,
+        }),
+      );
+    }),
+  deleteIngredient: (dishId, ingredientId) =>
+    Effect.gen(function* () {
+      return yield* runQuery("dish/ingredient-delete", (sql) =>
+        dishIngredientDelete.run(sql, { dish_id: dishId, ingredient_id: ingredientId }),
+      );
+    }),
+  unlinkCategory: (dishId, categoryId) =>
+    Effect.gen(function* () {
+      const row = yield* runQuery("dish/category-unlink", (sql) =>
+        dishCategoryUnlink.run(sql, { dish_id: dishId, category_id: categoryId }),
+      );
+
+      return row === null ? 0 : 1;
+    }),
+  unlinkCuisine: (dishId, cuisineId) =>
+    Effect.gen(function* () {
+      const row = yield* runQuery("dish/cuisine-unlink", (sql) =>
+        dishCuisineUnlink.run(sql, { dish_id: dishId, cuisine_id: cuisineId }),
+      );
+
+      return row === null ? 0 : 1;
+    }),
+  updatePlaceLink: (input) =>
+    Effect.gen(function* () {
+      const row = yield* runQuery("dish/place-update", (sql) =>
+        dishPlaceUpdate.run(sql, {
+          dish_id: input.dishId,
+          place_id: input.placeId,
+          association: input.association,
+          is_disputed: input.isDisputed,
+          note: input.note,
+        }),
+      );
+
+      // Reylo infers UPDATE...RETURNING on the pair key as a single row
+      // (Row | null); the operation contract works in row lists, so an
+      // empty update normalizes to [] (caller inserts) instead of null.
+      return row === null ? [] : [row];
+    }),
+  deletePlaceLink: (dishId, placeId) =>
+    Effect.gen(function* () {
+      const row = yield* runQuery("dish/place-delete", (sql) =>
+        dishPlaceDelete.run(sql, { dish_id: dishId, place_id: placeId }),
+      );
+
+      return row === null ? 0 : 1;
     }),
   linkDishSource: (dishId, sourceRecordId) =>
     runVoid("dish/source-link", (sql) =>

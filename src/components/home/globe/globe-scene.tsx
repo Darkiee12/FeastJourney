@@ -243,6 +243,13 @@ function GlobeWorld({
 
   const handlePointsClick = useCallback(
     (event: ThreeEvent<PointerEvent>) => {
+      // Dragging the globe must not open a popup: R3F reports the pointer
+      // travel in `delta`, so taps (small delta) open the preview while
+      // drags (large delta) only rotate the planet.
+      if (event.delta > 5) {
+        return;
+      }
+
       const index = event.index;
 
       if (index === undefined) {
@@ -406,11 +413,11 @@ export function GlobeScene({
   }, [ready]);
 
   if (reducedMotion) {
-    return <GlobeFallback label={copy.globeStaticLabel} />;
+    return <GlobeFallback label={copy.globeStaticLabel} lang={lang} />;
   }
 
   if (webglFailed) {
-    return <GlobeFallback label={copy.globeStaticLabel} />;
+    return <GlobeFallback label={copy.globeStaticLabel} lang={lang} />;
   }
 
   return (
@@ -419,7 +426,7 @@ export function GlobeScene({
         <div
           className={`absolute inset-0 transition-opacity duration-700 ease-out ${ready ? "opacity-0" : "opacity-100"}`}
         >
-          <GlobeFallback label={copy.globeStaticLabel} />
+          <GlobeFallback label={copy.globeStaticLabel} lang={lang} />
         </div>
       ) : null}
       <div

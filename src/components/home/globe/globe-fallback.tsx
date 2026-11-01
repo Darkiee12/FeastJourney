@@ -1,4 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { FOOD_LOCATIONS, localizedDishText } from "@/components/home/globe/food-locations";
+import { usePrefersReducedMotion } from "@/components/home/globe/use-prefers-reduced-motion";
+import type { Locale } from "@/shared/i18n";
+
+/** Static rotation cadence for the non-WebGL featured dish, mirroring the live globe rhythm. */
+const STATIC_ROTATION_MS = 6000;
 
 /**
  * Static planet for SSR, reduced motion, and WebGL/chunk failures.
@@ -15,8 +22,10 @@ import { useEffect, useRef } from "react";
  *    chunk fails, or when the user prefers reduced motion (no WebGL chunk is
  *    ever downloaded on that path).
  */
-export function GlobeFallback({ label }: { label: string }) {
+export function GlobeFallback({ label, lang }: { label: string; lang?: Locale }) {
   const previewRef = useRef<HTMLCanvasElement | null>(null);
+  const reducedMotion = usePrefersReducedMotion();
+  const [featured, setFeatured] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,6 +51,26 @@ export function GlobeFallback({ label }: { label: string }) {
     };
   }, []);
 
+  // Static featured-dish rotation for WebGL-disabled devices: the same
+  // curated anchors the live globe spotlights, cycling at the same reading
+  // pace. Reduced motion shows the first dish only — content stays usable
+  // without animation. Never navigates on its own.
+  useEffect(() => {
+    if (reducedMotion || FOOD_LOCATIONS.length <= 1) {
+      return () => undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      setFeatured((current) => (current + 1) % FOOD_LOCATIONS.length);
+    }, STATIC_ROTATION_MS);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [reducedMotion]);
+
+  const dish = FOOD_LOCATIONS[featured];
+
   return (
     <figure aria-label={label} className="fallback-frame absolute inset-0 m-0 overflow-hidden">
       <div aria-hidden="true" className="fallback-planet">
@@ -51,6 +80,19 @@ export function GlobeFallback({ label }: { label: string }) {
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-linear-to-b from-transparent via-space-deep/40 to-space-deep/25"
       />
+      {dish && lang !== undefined ? (
+        <figcaption className="absolute bottom-[max(4.5rem,calc(env(safe-area-inset-bottom)+4.5rem))] left-1/2 z-[2] w-[min(19rem,78vw)] -translate-x-1/2 rounded-2xl border border-border-soft bg-white px-4 py-3 text-left text-ink shadow-[0_16px_40px_rgba(3,10,30,0.45)]">
+          <p className="flex items-center gap-2 text-base leading-tight font-extrabold">
+            <span aria-hidden="true" className="text-xl leading-none">
+              {dish.emoji}
+            </span>
+            {dish.name}
+          </p>
+          <p className="mt-0.5 pl-8 text-sm text-muted">
+            {localizedDishText(dish.country, lang)} · {localizedDishText(dish.region, lang)}
+          </p>
+        </figcaption>
+      ) : null}
     </figure>
   );
 }

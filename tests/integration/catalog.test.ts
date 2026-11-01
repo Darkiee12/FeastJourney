@@ -190,6 +190,34 @@ describe("geography", () => {
   });
 });
 
+describe("nearest city", () => {
+  test("resolves Hanoi from nearby coordinates with context and country", async () => {
+    const city = await run(
+      Effect.flatMap(CatalogService, (service) => service.nearestCity(21.0285, 105.8542, "en")),
+    );
+
+    expect(city).not.toBeNull();
+    expect(city?.name).toMatch(/Hà Nội|Hanoi/);
+    expect(city?.country).toBe("VN");
+  });
+
+  test("returns null mid-ocean where no city is close enough", async () => {
+    const city = await run(
+      Effect.flatMap(CatalogService, (service) => service.nearestCity(0, -140, "en")),
+    );
+
+    expect(city).toBeNull();
+  });
+
+  test("returns null for non-finite coordinates without querying", async () => {
+    const city = await run(
+      Effect.flatMap(CatalogService, (service) => service.nearestCity(Number.NaN, 105.8542, "en")),
+    );
+
+    expect(city).toBeNull();
+  });
+});
+
 describe("publication validation", () => {
   test("published dishes satisfy the catalog policy", async () => {
     const pho = await run(Effect.flatMap(DishService, (service) => service.getDish("pho", "en")));

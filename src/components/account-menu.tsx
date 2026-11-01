@@ -80,7 +80,7 @@ export function AccountMenu() {
             className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-transparent px-3 text-sm font-semibold text-muted-on-dark hover:border-white/25 hover:text-white aria-expanded:bg-white/10 aria-expanded:text-white"
           >
             <CircleUserRound aria-hidden="true" className="size-5" />
-            <span className="max-w-28 truncate">{session.user.name}</span>
+            <span className="hidden max-w-28 truncate min-[480px]:inline">{session.user.name}</span>
             <ChevronDownIcon aria-hidden="true" className="size-4" />
           </button>
         </DropdownMenuTrigger>

@@ -1,11 +1,14 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   CheckIcon,
   ChevronDownIcon,
   Globe2Icon,
   LocateFixedIcon,
   MapPinIcon,
+  SearchIcon,
   Undo2Icon,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { formatTemplate } from "@/components/home/recommend/quiz-model";
 import {
@@ -22,6 +25,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { searchCitiesFn } from "@/modules/food-discovery/food.functions";
 import type { Locale } from "@/shared/i18n";
 
 /**
@@ -42,11 +46,27 @@ export interface DiscoveryCountryOption {
   readonly label: string;
 }
 
-/** Which lane the section is currently serving from. */
-export type DiscoverySelection = "regional" | "nearby" | "worldwide";
+/**
+ * One city entry in the "Choose a city" submenu: the canonical registry
+ * identity plus display context. The id scopes the carousel; the name and
+ * context build the honest heading label — never free text.
+ */
+export interface DiscoveryCityOption {
+  readonly id: string;
+  readonly name: string | undefined;
+  readonly context: string | null;
+  readonly country: string | null;
+}
 
-/** Honest label for what the carousel actually served (never the ask). */
-export type DiscoveryServedScope = "nearby" | "regional" | "worldwide";
+/** Which lane the section is currently serving from. */
+export type DiscoverySelection = "regional" | "nearby" | "worldwide" | "city";
+
+/**
+ * Honest label for what the carousel actually served (never the ask). A
+ * served city pool reads as the regional family with the city named — the
+ * heading template is shared, the region name is the city label.
+ */
+export type DiscoveryServedScope = "nearby" | "regional" | "worldwide" | "city";
 
 export interface DiscoveryLocationProps {
   readonly lang: Locale;
@@ -55,6 +75,9 @@ export interface DiscoveryLocationProps {
   readonly selection: DiscoverySelection;
   /** ISO code of the served country, if any; marks the submenu radio. */
   readonly selectedCountry: string | null;
+  /** Canonical city choice, if any; marks the city submenu. Optional so
+   * existing callers render unchanged until they wire the city lane. */
+  readonly selectedCity?: DiscoveryCityOption | null | undefined;
   readonly locating: boolean;
   /** Geolocation was denied or failed: content stays, note explains. */
   readonly preciseDenied: boolean;
@@ -67,6 +90,9 @@ export interface DiscoveryLocationProps {
   readonly disabled: boolean;
   readonly onUsePrecise: () => void;
   readonly onChooseCountry: (country: string) => void;
+  /** City pick commits a canonical place id, never free text. Optional
+   * until the caller wires the city lane; the submenu still searches. */
+  readonly onChooseCity?: ((city: DiscoveryCityOption) => void) | undefined;
   readonly onExploreWorldwide: () => void;
   readonly onBackToRegion: () => void;
 }
@@ -154,18 +180,100 @@ const vietnameseCopy: DiscoveryLocationCopy = {
 export const discoveryLocationCopyFor = (lang: Locale): DiscoveryLocationCopy =>
   lang === "vi" ? vietnameseCopy : englishCopy;
 
+/** Client-side country filter: localized label, English label text, or ISO code. */
+export function filterCountryOptions(
+  countries: ReadonlyArray<DiscoveryCountryOption>,
+  query: string,
+): Array<DiscoveryCountryOption> {
+  const needle = query.trim().toLowerCase();
+
+  if (needle === "") return [...countries];
+
+  return countries.filter(
+    (country) =>
+      country.label.toLowerCase().includes(needle) || country.code.toLowerCase().includes(needle),
+  );
+}
+
+/**
+ * City submenu strings. Kept separate from DiscoveryLocationCopy so the
+ * copy-key contract pinned by unit tests stays untouched.
+ */
+export interface DiscoveryCityCopy {
+  readonly chooseCity: string;
+  readonly citySearchLabel: string;
+  readonly citySearchPlaceholder: string;
+  readonly citySearchHint: string;
+  readonly citySearching: string;
+  readonly citySearchError: string;
+  readonly citySearchEmpty: string;
+  readonly cityResultsLabel: string;
+}
+
+const englishCityCopy: DiscoveryCityCopy = {
+  chooseCity: "Choose a city",
+  cityResultsLabel: "Matching cities",
+  citySearchEmpty: "No matching city — try another spelling.",
+  citySearchError: "Could not search cities. Try again.",
+  citySearchHint: "Type a few letters to find the city.",
+  citySearchLabel: "Search for a city",
+  citySearchPlaceholder: "Search a city… e.g. Bangalore",
+  citySearching: "Searching cities…",
+};
+
+const vietnameseCityCopy: DiscoveryCityCopy = {
+  chooseCity: "Chọn thành phố",
+  cityResultsLabel: "Thành phố khớp",
+  citySearchEmpty: "Không có thành phố nào khớp — thử cách viết khác.",
+  citySearchError: "Không tìm được thành phố. Thử lại.",
+  citySearchHint: "Nhập vài chữ cái để tìm thành phố.",
+  citySearchLabel: "Tìm thành phố",
+  citySearchPlaceholder: "Tìm thành phố… ví dụ Bangalore",
+  citySearching: "Đang tìm thành phố…",
+};
+
+export const discoveryCityCopyFor = (lang: Locale): DiscoveryCityCopy =>
+  lang === "vi" ? vietnameseCityCopy : englishCityCopy;
+
+/**
+ * Display label for a chosen city: name plus administrative context
+ * ("Bengaluru, Karnataka, India"). Null when the name is missing so callers
+ * fall back to country/worldwide labels instead of fabricating one.
+ */
+export const discoveryCityLabelFor = (
+  city: Pick<DiscoveryCityOption, "name" | "context">,
+): string | null => {
+  const name = city.name?.trim() ?? "";
+
+  if (name === "") {
+    return null;
+  }
+
+  const context = city.context?.trim() ?? "";
+
+  if (context === "") {
+    return name;
+  }
+
+  return `${name}, ${context}`;
+};
+
 /**
  * Honest scope from what the server actually served. A precise request that
  * fell back to country dishes is labeled regional, never nearby: "nearby"
  * requires both a served nearby scope and an active precise location. A
  * supplemented nearby pool (sparse locality dishes topped up with country
  * dishes) is also regional: the heading names the country, never a city
- * the query did not actually run. Null while
- * the carousel has not served yet, so the lead keeps the previous heading.
+ * the query did not actually run. A served city scope reads as its own
+ * "city" lane so the heading names the city; a supplemented city pool (or
+ * any supplemented pool) stays regional, and a city that fell back to the
+ * ancestor country serves "country" and labels regional with that country.
+ * Null while the carousel has not served yet, so the lead keeps the
+ * previous heading.
  */
 export const discoveryServedScopeFor = (input: {
   readonly preciseActive: boolean;
-  readonly servedScope: "nearby" | "country" | "worldwide" | null;
+  readonly servedScope: "nearby" | "country" | "city" | "worldwide" | null;
   readonly supplemented?: boolean | undefined;
 }): DiscoveryServedScope | null => {
   if (input.servedScope === null) {
@@ -184,10 +292,18 @@ export const discoveryServedScopeFor = (input: {
     return "nearby";
   }
 
+  if (input.servedScope === "city") {
+    return "city";
+  }
+
   return "regional";
 };
 
-/** Section heading keyed off the served scope, never the requested one. */
+/**
+ * Section heading keyed off the served scope, never the requested one. The
+ * city lane shares the regional template with the city named ("Discover
+ * dishes from Bengaluru, Karnataka, India").
+ */
 export const discoveryHeadingFor = (input: {
   readonly scope: DiscoveryServedScope;
   readonly regionName: string | null;
@@ -212,7 +328,8 @@ export const discoveryHeadingFor = (input: {
 
 /**
  * Subtitle keyed off the served scope, never the requested one. Country
- * and supplemented results name the served country; worldwide owns the
+ * and city results name the served place with the regional template;
+ * supplemented results name the served country; worldwide owns the
  * catalog-gap explanation so the heading and subtitle never contradict
  * ("around the world" above "local favorites" is the exact mismatch this
  * prevents). Supplemented (nearby dishes topped up with country dishes)
@@ -269,8 +386,154 @@ export const discoveryBackLabelFor = (input: {
   return formatTemplate(copy.backToRegionNamed, name);
 };
 
+/**
+ * City search inside the "Choose a city" submenu. Queries the canonical
+ * place registry (name and alias matching — "Bangalore" finds Bengaluru)
+ * with a debounced minimum of 2 characters, showing administrative context
+ * so identical names disambiguate. A pick commits a canonical place id,
+ * never free text. Mounted only when the submenu opens, so no query fires
+ * on page load. Keystrokes stay local to the field (Escape/Tab still reach
+ * Radix for close and focus escape).
+ */
+function CitySearchContent(props: {
+  readonly lang: Locale;
+  readonly disabled: boolean;
+  readonly selected: DiscoveryCityOption | null;
+  readonly onPick: (city: DiscoveryCityOption) => void;
+}) {
+  const copy = discoveryCityCopyFor(props.lang);
+  const [text, setText] = useState("");
+  const [debounced, setDebounced] = useState("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebounced(text);
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [text]);
+
+  const trimmed = debounced.trim();
+
+  const cities = useQuery({
+    queryKey: ["catalog", "cities", props.lang, trimmed],
+    queryFn: () => searchCitiesFn({ data: { q: trimmed, locale: props.lang, limit: 8 } }),
+    enabled: trimmed.length >= 2,
+    retry: 1,
+    staleTime: 5 * 60_000,
+  });
+
+  const results = cities.data ?? [];
+  const selectedLabel = props.selected === null ? null : discoveryCityLabelFor(props.selected);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col p-1">
+      <label
+        htmlFor="discovery-city-search"
+        className="mb-1 block flex-none px-2 pt-1 text-sm font-bold text-ink"
+      >
+        {copy.citySearchLabel}
+      </label>
+      <div className="relative flex-none">
+        <SearchIcon
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted"
+        />
+        <input
+          id="discovery-city-search"
+          type="text"
+          autoComplete="off"
+          disabled={props.disabled}
+          value={text}
+          placeholder={copy.citySearchPlaceholder}
+          onChange={(event) => {
+            setText(event.target.value);
+          }}
+          onKeyDown={(event) => {
+            // Keep typing and caret keys local to the field instead of
+            // driving Radix menu typeahead; Escape/Tab still reach Radix
+            // for close and focus escape.
+            if (event.key !== "Escape" && event.key !== "Tab") {
+              event.stopPropagation();
+            }
+          }}
+          className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream py-2 pr-3 pl-10 text-base text-ink placeholder:text-muted focus:border-brand-blue disabled:cursor-not-allowed disabled:opacity-60"
+        />
+      </div>
+      {props.selected !== null ? (
+        <DropdownMenuItem disabled className="min-h-11 flex-none">
+          <CheckIcon aria-hidden="true" />
+          <span className="truncate">{selectedLabel ?? copy.chooseCity}</span>
+        </DropdownMenuItem>
+      ) : null}
+      {/* Fixed scroll region: the input stays docked while results, hints,
+          and status lines scroll inside a stable-height submenu. */}
+      <div className="mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {trimmed.length < 2 ? (
+          <output className="block px-2 py-1.5 text-sm text-muted">{copy.citySearchHint}</output>
+        ) : null}
+        {cities.isPending && trimmed.length >= 2 ? (
+          <output className="block px-2 py-1.5 text-sm font-semibold text-muted">
+            {copy.citySearching}
+          </output>
+        ) : null}
+        {cities.isError ? (
+          <p className="px-2 py-1.5 text-sm font-bold text-danger" role="alert">
+            {copy.citySearchError}
+          </p>
+        ) : null}
+        {trimmed.length >= 2 && !cities.isPending && !cities.isError && results.length === 0 ? (
+          <output className="block px-2 py-1.5 text-sm text-muted">{copy.citySearchEmpty}</output>
+        ) : null}
+        {results.length > 0 ? (
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>{copy.cityResultsLabel}</DropdownMenuLabel>
+            {results.map((entry) => {
+              const displayName = entry.name ?? entry.id;
+
+              return (
+                <DropdownMenuItem
+                  key={entry.id}
+                  disabled={props.disabled}
+                  onSelect={() => {
+                    props.onPick({
+                      id: entry.id,
+                      name: entry.name,
+                      context: entry.context,
+                      country: entry.country,
+                    });
+                  }}
+                  className="min-h-11"
+                >
+                  <MapPinIcon aria-hidden="true" />
+                  <span className="min-w-0">
+                    <span className="block truncate font-bold">{displayName}</span>
+                    {entry.context === null || entry.context === "" ? null : (
+                      <span className="block truncate text-xs font-normal text-muted">
+                        {entry.context}
+                      </span>
+                    )}
+                  </span>
+                  {props.selected?.id === entry.id ? (
+                    <CheckIcon aria-hidden="true" className="ml-auto" />
+                  ) : null}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuGroup>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function DiscoveryLocation(props: DiscoveryLocationProps) {
   const copy = discoveryLocationCopyFor(props.lang);
+  const cityCopy = discoveryCityCopyFor(props.lang);
+  const [countryQuery, setCountryQuery] = useState("");
+  const filteredCountries = filterCountryOptions(props.countries, countryQuery);
   const busy = props.disabled || props.locating;
   const destinationsReady = !props.countriesLoading && props.countries.length > 0;
 
@@ -292,7 +555,7 @@ export function DiscoveryLocation(props: DiscoveryLocationProps) {
             className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border-2 border-ink bg-white px-5 text-sm font-bold whitespace-nowrap text-ink transition hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
             <MapPinIcon aria-hidden="true" className="size-4 flex-none" />
-            <span className="inline-block max-w-24 min-w-0 truncate min-[480px]:max-w-44">
+            <span className="inline-block max-w-28 min-w-0 truncate min-[480px]:max-w-44">
               {props.currentLabel}
             </span>
             <span aria-hidden="true" className="opacity-60">
@@ -343,20 +606,43 @@ export function DiscoveryLocation(props: DiscoveryLocationProps) {
             ) : null}
             {destinationsReady ? (
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger disabled={busy}>
+                <DropdownMenuSubTrigger disabled={busy} className="min-h-11">
                   <MapPinIcon aria-hidden="true" />
                   <span>{copy.chooseDestination}</span>
                 </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="max-h-72 overflow-y-auto">
+                <DropdownMenuSubContent className="max-h-72 w-72 overflow-y-auto">
+                  <div className="p-1">
+                    <label htmlFor="discovery-country-search" className="sr-only">
+                      {props.lang === "vi" ? "Tìm quốc gia" : "Search countries"}
+                    </label>
+                    <input
+                      id="discovery-country-search"
+                      type="search"
+                      autoComplete="off"
+                      value={countryQuery}
+                      placeholder={props.lang === "vi" ? "Tìm quốc gia…" : "Search countries…"}
+                      onChange={(event) => setCountryQuery(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Escape" && event.key !== "Tab") event.stopPropagation();
+                      }}
+                      className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream px-3 text-base text-ink"
+                    />
+                  </div>
+                  {filteredCountries.length === 0 ? (
+                    <output className="block px-3 py-2 text-sm text-muted">
+                      {props.lang === "vi" ? "Không có quốc gia nào khớp." : "No matching country."}
+                    </output>
+                  ) : null}
                   <DropdownMenuRadioGroup
                     value={props.selectedCountry ?? ""}
                     onValueChange={props.onChooseCountry}
                   >
-                    {props.countries.map((country) => (
+                    {filteredCountries.map((country) => (
                       <DropdownMenuRadioItem
                         key={country.code}
                         disabled={busy}
                         value={country.code}
+                        className="min-h-11"
                       >
                         {country.label}
                       </DropdownMenuRadioItem>
@@ -365,6 +651,25 @@ export function DiscoveryLocation(props: DiscoveryLocationProps) {
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
             ) : null}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger disabled={busy} className="min-h-11">
+                <MapPinIcon aria-hidden="true" />
+                <span>{cityCopy.chooseCity}</span>
+                {props.selection === "city" ? (
+                  <CheckIcon aria-hidden="true" className="ml-auto" />
+                ) : null}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="flex h-80 w-72 flex-col overflow-hidden">
+                <CitySearchContent
+                  disabled={busy}
+                  lang={props.lang}
+                  onPick={(option) => {
+                    props.onChooseCity?.(option);
+                  }}
+                  selected={props.selectedCity ?? null}
+                />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
             <DropdownMenuItem disabled={busy} onSelect={props.onExploreWorldwide}>
               <Globe2Icon aria-hidden="true" />
               <span>{copy.exploreWorldwide}</span>

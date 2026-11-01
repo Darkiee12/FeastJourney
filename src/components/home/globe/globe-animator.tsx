@@ -19,15 +19,19 @@ import {
 } from "@/components/home/globe/use-globe-dishes";
 
 /**
- * Dish rhythm: a new set every 3.6s matches the 3.2s show + 0.38s exit for
- * near-seamless handoffs, and the 10s cooldown fits inside one window cycle.
- * Brief pauses still occur over ocean sectors with no curated dishes in view
+ * Dish rhythm: a new set every 6.5s with a 6s show + 0.38s exit for
+ * near-seamless handoffs, and a 20s cooldown so recently shown dishes rest —
+ * a comfortable reading pace for one or two labels at a time. Brief pauses
+ * still occur over ocean sectors with no curated dishes in view
  * (e.g. the Pacific transit). While a pin is hovered/focused the set freezes
  * so the auto-cycle never fights the pinned popup; the rhythm resumes fresh
  * once the pin clears.
  */
-const DISH_INTERVAL_SECONDS = 3.6;
-const DISH_COOLDOWN_SECONDS = 10;
+const DISH_INTERVAL_SECONDS = 6.5;
+const DISH_COOLDOWN_SECONDS = 20;
+
+/** Viewport width below which at most one popup shows at a time. */
+const NARROW_VIEWPORT_PX = 640;
 
 type AnchorReading = {
   cosine: number;
@@ -71,10 +75,40 @@ function readAnchor(
   // Eligible cards live on the visible globe below the hero copy: at least
   // halfway down the hero, and inside the lower globe band with room for the
   // card to fit without covering the headline or primary CTAs.
-  const zoneTop = Math.max(size.height * 0.5, size.height - layout.capPx + layout.diameterPx * 0.1);
+  // On narrow phones the hero copy stacks full-width above the globe, so the
+  // zone additionally clears the copy block plus one card height — the card
+  // extends upward from its anchor and must never cover a CTA. When the
+  // remaining band is too thin, no dish is eligible: fewer labels beat
+  // colliding ones.
+  const narrow = size.width < 640;
+
+  let copyClear = 0;
+
+  if (narrow && typeof document !== "undefined") {
+    const copyBottom =
+      document.querySelector("[data-hero-copy]")?.getBoundingClientRect().bottom ??
+      size.height * 0.5;
+
+    copyClear = copyBottom + 96;
+  }
+
+  const zoneTop = Math.max(
+    size.height * 0.5,
+    size.height - layout.capPx + layout.diameterPx * 0.1,
+    copyClear,
+  );
+
+  // The floating "Show another dish" action sits bottom-right on phones:
+  // keep anchors out from behind it so labels never cover it. The button is
+  // ~44px tall at the safe-area bottom edge, so only that strip is excluded.
+  const inActionCorner = narrow && x > size.width - 230 && y > size.height - 64;
 
   const inZone =
-    x > size.width * 0.06 && x < size.width * 0.94 && y > zoneTop && y < size.height - 8;
+    x > size.width * 0.06 &&
+    x < size.width * 0.94 &&
+    y > zoneTop &&
+    y < size.height - 8 &&
+    !inActionCorner;
 
   return { cosine, x, y, inZone };
 }
@@ -200,13 +234,15 @@ export function GlobeAnimator({
 
     // Spread the set across countries and the screen: the first pass takes
     // at most one popup per country, the second allows a second dish per
-    // country for nearby-cuisine depth, and the last pass fills leftover
-    // slots only when fewer distinct countries are in view. Every pass but
-    // the last also enforces a minimum on-screen separation so concurrent
-    // cards never stack on top of each other.
+    // country for nearby-cuisine depth. Every pass enforces a minimum
+    // on-screen separation so concurrent cards never stack on top of each
+    // other — there is no separation-free fallback pass: when space runs
+    // out, fewer labels render instead of colliding ones. Narrow phones
+    // show at most one label at a time.
     const picked: Array<ScoredDish> = [];
     const pickedIds = new Set<string>();
     const perCountry = new Map<string, number>();
+    const maxPopups = size.width < NARROW_VIEWPORT_PX ? 1 : MAX_CONCURRENT_POPUPS;
 
     const clearOfPicked = (candidate: ScoredDish, minSeparation: number): boolean => {
       if (minSeparation <= 0) {
@@ -227,7 +263,7 @@ export function GlobeAnimator({
 
     const take = (maxPerCountry: number, minSeparation: number) => {
       for (const candidate of eligible) {
-        if (picked.length >= MAX_CONCURRENT_POPUPS) {
+        if (picked.length >= maxPopups) {
           break;
         }
 
@@ -253,7 +289,6 @@ export function GlobeAnimator({
 
     take(1, POPUP_MIN_SEPARATION_PX);
     take(2, POPUP_MIN_SEPARATION_PX);
-    take(2, 0);
 
     return picked.map((item) => item.dish.id);
   };
@@ -343,6 +378,12 @@ export function GlobeAnimator({
     const anchor = bridge.activeId ? anchorsRef.current.get(bridge.activeId) : undefined;
 
     if (!node || !anchor) {
+      return;
+    }
+
+    // Narrow phones present the preview as a fixed bottom sheet (CSS owns
+    // its placement), so per-frame anchor positioning stays desktop-only.
+    if (state.size.width < NARROW_VIEWPORT_PX) {
       return;
     }
 

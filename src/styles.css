@@ -27,6 +27,15 @@
   --animate-popup-exit: popup-exit 380ms ease-in forwards;
   --animate-rec-step-enter: rec-step-enter 240ms ease-out;
 
+  /* Shared mobile sheet/globe timing: MobileSheet and the mobile globe
+     wrapper use the same duration/easing so sheet and globe arrive
+     together (450ms). */
+  --drawer-spring-duration: 450ms;
+  --drawer-spring-easing: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --animate-drawer-enter: drawer-enter var(--drawer-spring-duration) var(--drawer-spring-easing);
+  --animate-drawer-exit: drawer-exit var(--drawer-spring-duration) var(--drawer-spring-easing);
+
   @keyframes popup-enter {
     from {
       opacity: 0;
@@ -57,6 +66,27 @@
     to {
       opacity: 1;
       transform: translateY(0);
+    }
+  }
+
+  /* Bottom-sheet travel: full off-screen below to docked, and back. The
+     dialog itself is the animated element; inner step content keeps the
+     smaller rec-step-enter pulse. */
+  @keyframes drawer-enter {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes drawer-exit {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(100%);
     }
   }
 }
@@ -97,10 +127,40 @@
     min-width: 0;
   }
 
-  main:has(> .home) {
+  /* Homepage contract: every homepage variant resets the default page
+     padding — DesktopHome renders `.home`, MobileHome renders
+     `[data-mobile-home]` (plus `.home` for contract stability). The
+     descendant form survives ClientOnly/provider wrappers that add no DOM
+     but would break a direct-child-only selector. */
+  main:has(> .home, [data-mobile-home]) {
     max-width: none;
     margin-inline: 0;
     padding: 0;
+  }
+
+  /* Mobile homepage viewport: the app shell becomes exactly one viewport
+     tall (header intrinsic + main stage fills the rest), the stage owns all
+     scrolling, and the global footer stays out of the mobile experience.
+     Desktop and all other routes are untouched (strict max-md gate). */
+  @media (max-width: 767.98px) {
+    .app-shell:has([data-mobile-home]) {
+      height: 100dvh;
+      max-height: 100dvh;
+      min-height: 100dvh;
+      overflow: clip;
+    }
+
+    .app-shell:has([data-mobile-home]) main#main {
+      display: flex;
+      min-height: 0;
+      flex: 1 1 auto;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .app-shell:has([data-mobile-home]) .site-footer {
+      display: none;
+    }
   }
 
   main:focus {

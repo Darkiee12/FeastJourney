@@ -42,12 +42,13 @@ describe("adminNavEntries", () => {
     expect(adminNavEntries(NO_ADMIN_CAPABILITIES, copy)).toEqual([]);
   });
 
-  test("exposes all six sections with dashboard exact", () => {
+  test("exposes all seven sections with dashboard exact", () => {
     const entries = adminNavEntries(full, copy);
 
     expect(entries.map((entry) => entry.to)).toEqual([
       "/admin",
       "/admin/dishes",
+      "/admin/places",
       "/admin/imports",
       "/admin/reviews",
       "/admin/users",
@@ -55,6 +56,15 @@ describe("adminNavEntries", () => {
     ]);
     expect(entries[0]?.exact).toBe(true);
     expect(entries.slice(1).every((entry) => !entry.exact)).toBe(true);
+  });
+
+  test("dishes capability gates the places registry alongside dishes", () => {
+    const curator: AdminCapabilities = { ...NO_ADMIN_CAPABILITIES, dishes: true };
+
+    expect(adminNavEntries(curator, copy).map((entry) => entry.to)).toEqual([
+      "/admin/dishes",
+      "/admin/places",
+    ]);
   });
 
   test("importer-only sees only imports", () => {
@@ -68,6 +78,7 @@ describe("adminNavEntries", () => {
     const entries = adminNavEntries(full, vi);
 
     expect(entries[0]?.label).toBe(vi.adminDashboard);
-    expect(entries[2]?.label).toBe(vi.adminImports);
+    expect(entries[2]?.label).toBe(vi.adminPlaces);
+    expect(entries[3]?.label).toBe(vi.adminImports);
   });
 });
