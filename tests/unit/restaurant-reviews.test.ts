@@ -6,11 +6,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   formatReviewDate,
   RestaurantReviewCard,
-  sortCustomerReviews,
-  type RestaurantCustomerReview,
 } from "@/modules/restaurant-discovery/components/restaurant-review-card";
+import type { RestaurantCustomerReview } from "@/modules/restaurant-discovery/components/restaurant-review-card";
 import {
+  parseReviewWriteIntent,
   reviewFailureKind,
+  reviewWriteIntentKey,
+  serializeReviewWriteIntent,
   validateCustomerReviewForm,
 } from "@/modules/restaurant-discovery/components/restaurant-review-form";
 import {
@@ -18,21 +20,35 @@ import {
   formatReviewAverage,
   RestaurantReviewSummary,
 } from "@/modules/restaurant-discovery/components/restaurant-review-summary";
+import {
+  customerReviewListKey,
+  nextCustomerReviewPageParam,
+} from "@/modules/restaurant-discovery/components/restaurant-reviews-panel";
+import type { CustomerReviewPublicPage } from "@/modules/restaurant-discovery/restaurant-reviews.schema";
 
 const review = (overrides: Partial<RestaurantCustomerReview>): RestaurantCustomerReview => ({
   id: "11111111-1111-4111-8111-111111111111",
-  venue_id: "22222222-2222-4222-8222-222222222222",
-  author_id: "author-traveler",
   rating: 4,
   body: "Lovely pho, quick service.",
-  status: "published",
   created_at: "2026-10-20T10:00:00.000Z",
-  updated_at: "2026-10-20T10:00:00.000Z",
   published_at: "2026-10-21T10:00:00.000Z",
   ...overrides,
 });
 
+const page = (overrides: Partial<CustomerReviewPublicPage>): CustomerReviewPublicPage => ({
+  items: [],
+  total: 0,
+  limit: 10,
+  offset: 0,
+  ...overrides,
+});
+
 const noop = (): void => {};
+
+const items = (count: number): CustomerReviewPublicPage["items"] =>
+  Array.from({ length: count }, (_, index) =>
+    review({ id: `review-${index}`, rating: 4, body: `Body ${index}` }),
+  );
 
 describe("review form validation", () => {
   test("accepts a 1–5 rating with 1–2000 character text", () => {
@@ -65,20 +81,96 @@ describe("review failure mapping", () => {
   });
 });
 
-describe("review sort and filter logic", () => {
-  const rows = [
-    review({ id: "a", rating: 2, published_at: "2026-10-22T10:00:00.000Z" }),
-    review({ id: "b", rating: 5, published_at: "2026-10-20T10:00:00.000Z" }),
-    review({ id: "c", rating: 5, published_at: "2026-10-23T10:00:00.000Z" }),
-  ];
+describe("review list query keys", () => {
+  const venueId = "22222222-2222-4222-8222-222222222222";
 
-  test("recent keeps server order", () => {
-    expect(sortCustomerReviews(rows, "recent").map((entry) => entry.id)).toEqual(["a", "b", "c"]);
+  test("the sort rides in the key so sorts never share a cache", () => {
+    expect(customerReviewListKey(venueId, "recent")).toEqual([
+      "customer-reviews",
+      venueId,
+      "recent",
+    ]);
+    expect(customerReviewListKey(venueId, "highest")).not.toEqual(
+      customerReviewListKey(venueId, "recent"),
+    );
+    expect(customerReviewListKey(venueId, "lowest")).not.toEqual(
+      customerReviewListKey(venueId, "highest"),
+    );
   });
 
-  test("highest and lowest order by rating with newest first on ties", () => {
-    expect(sortCustomerReviews(rows, "highest").map((entry) => entry.id)).toEqual(["c", "b", "a"]);
-    expect(sortCustomerReviews(rows, "lowest").map((entry) => entry.id)).toEqual(["a", "c", "b"]);
+  test("every list key carries the venue invalidation prefix", () => {
+    const sorts = ["recent", "highest", "lowest"] as const;
+
+    for (const sort of sorts) {
+      expect(customerReviewListKey(venueId, sort).slice(0, 2)).toEqual([
+        "customer-reviews",
+        venueId,
+      ]);
+    }
+  });
+
+  test("different venues never share a key", () => {
+    expect(customerReviewListKey(venueId, "recent")).not.toEqual(
+      customerReviewListKey("33333333-3333-4333-8333-333333333333", "recent"),
+    );
+  });
+});
+
+describe("review page cursor", () => {
+  test("advances by the page limit while rows remain", () => {
+    expect(
+      nextCustomerReviewPageParam(page({ items: items(10), total: 25, limit: 10, offset: 0 })),
+    ).toBe(10);
+    expect(
+      nextCustomerReviewPageParam(page({ items: items(10), total: 25, limit: 10, offset: 10 })),
+    ).toBe(20);
+  });
+
+  test("stops at the exact end of the total", () => {
+    expect(
+      nextCustomerReviewPageParam(page({ items: items(5), total: 25, limit: 10, offset: 20 })),
+    ).toBeUndefined();
+  });
+
+  test("an empty page with a zero total stops instead of looping", () => {
+    expect(
+      nextCustomerReviewPageParam(page({ items: [], total: 0, limit: 10, offset: 0 })),
+    ).toBeUndefined();
+  });
+});
+
+describe("write intent parking", () => {
+  test("intent keys are venue-scoped", () => {
+    expect(reviewWriteIntentKey("venue-a")).toBe("rv-write-intent:venue-a");
+    expect(reviewWriteIntentKey("venue-a")).not.toBe(reviewWriteIntentKey("venue-b"));
+  });
+
+  test("a draft round-trips through serialization", () => {
+    expect(
+      parseReviewWriteIntent(serializeReviewWriteIntent({ rating: 5, body: "Great pho." })),
+    ).toEqual({
+      rating: 5,
+      body: "Great pho.",
+    });
+  });
+
+  test("an empty intent round-trips for the bare sign-in handoff", () => {
+    expect(parseReviewWriteIntent(serializeReviewWriteIntent({ rating: null, body: "" }))).toEqual({
+      rating: null,
+      body: "",
+    });
+  });
+
+  test("drops null, malformed, and out-of-range payloads", () => {
+    expect(parseReviewWriteIntent(null)).toBeNull();
+    expect(parseReviewWriteIntent("")).toBeNull();
+    expect(parseReviewWriteIntent("{not-json")).toBeNull();
+    expect(parseReviewWriteIntent(JSON.stringify({ rating: 9, body: "Fine." }))).toBeNull();
+    expect(parseReviewWriteIntent(JSON.stringify({ rating: 2.5, body: "Fine." }))).toBeNull();
+    expect(parseReviewWriteIntent(JSON.stringify({ rating: "5", body: "Fine." }))).toBeNull();
+    expect(
+      parseReviewWriteIntent(JSON.stringify({ rating: 3, body: "x".repeat(2002) })),
+    ).toBeNull();
   });
 });
 
@@ -146,7 +238,7 @@ describe("review card", () => {
   test("uses a neutral traveler label and never renders author identity metadata", () => {
     const html = renderToStaticMarkup(
       createElement(RestaurantReviewCard, {
-        review: review({ author_id: "user-uuid-9f3a", body: "Loved the broth." }),
+        review: review({ body: "Loved the broth." }),
         locale: "en",
         isAuthor: false,
         actionPending: false,
@@ -156,13 +248,12 @@ describe("review card", () => {
     );
 
     expect(html).toContain("Fellow traveler");
-    expect(html).not.toContain("user-uuid-9f3a");
     expect(html).not.toContain("mailto:");
     expect(html).not.toContain("Edit");
     expect(html).not.toContain("Delete");
   });
 
-  test("author sees edit and delete controls", () => {
+  test("author sees the your-review label with edit and delete controls", () => {
     const html = renderToStaticMarkup(
       createElement(RestaurantReviewCard, {
         review: review({}),

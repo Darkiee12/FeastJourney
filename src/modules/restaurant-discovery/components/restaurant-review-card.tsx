@@ -1,55 +1,15 @@
 import { PenLine, Star, Trash2 } from "lucide-react";
 
-/**
- * Client shape of one published customer review. Field names follow the
- * server SQL projection (snake_case); no mirror mapping is applied.
- * `authorId` is compared for ownership only and never rendered.
- */
-export interface RestaurantCustomerReview {
-  readonly id: string;
-  readonly venue_id: string;
-  readonly author_id: string;
-  readonly rating: number;
-  readonly body: string;
-  readonly status: string;
-  readonly created_at: string;
-  readonly updated_at: string;
-  readonly published_at: string | null;
-}
-
-export type ReviewSortMode = "recent" | "highest" | "lowest";
+import type { CustomerReviewPublic } from "@/modules/restaurant-discovery/restaurant-reviews.schema";
 
 /**
- * Client-side sort over one fetched page. "recent" keeps server order
- * (published first); rating sorts break ties by newest first for stability.
+ * Client shape of one published customer review. This is the public DTO:
+ * the published-only server projection with no author identity, venue
+ * redundancy, or moderation internals. Authorship is never derived here;
+ * callers pass `isAuthor` from the own-review query. Sorting is server-side;
+ * this component renders items in the order received.
  */
-export function sortCustomerReviews(
-  reviews: ReadonlyArray<RestaurantCustomerReview>,
-  mode: ReviewSortMode,
-): ReadonlyArray<RestaurantCustomerReview> {
-  if (mode === "recent") {
-    return [...reviews];
-  }
-
-  const ranked = [...reviews];
-
-  ranked.sort((left, right) => {
-    if (left.rating !== right.rating) {
-      return mode === "highest" ? right.rating - left.rating : left.rating - right.rating;
-    }
-
-    const leftDate = left.published_at ?? left.created_at;
-    const rightDate = right.published_at ?? right.created_at;
-
-    if (leftDate === rightDate) {
-      return 0;
-    }
-
-    return leftDate < rightDate ? 1 : -1;
-  });
-
-  return ranked;
-}
+export type RestaurantCustomerReview = CustomerReviewPublic;
 
 /** Locale-aware review date; never throws on malformed input. */
 export function formatReviewDate(value: string, locale: string): string {

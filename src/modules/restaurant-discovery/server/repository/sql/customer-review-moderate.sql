@@ -7,5 +7,5 @@ SET status = input.status, updated_at = now(),
   THEN COALESCE(r.published_at, now()) ELSE r.published_at END
 FROM input
 WHERE r.id = input.id AND r.status = input.from_status
-RETURNING r.id, r.venue_id, r.author_id, r.rating::int AS rating, r.body, r.status,
+RETURNING r.id, r.venue_id, r.rating::int AS rating, r.body, r.status,
  r.created_at, r.updated_at, r.published_at;

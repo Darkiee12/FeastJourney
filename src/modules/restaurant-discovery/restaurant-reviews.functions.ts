@@ -4,6 +4,11 @@ import {
   customerReviewIdSchema,
   customerReviewListSchema,
   customerReviewModerateSchema,
+  customerReviewOwnRequestSchema,
+  customerReviewOwnResponseSchema,
+  customerReviewPublicPageSchema,
+  customerReviewQueuePageSchema,
+  customerReviewQueueSchema,
   customerReviewSubmitSchema,
   customerReviewUpdateSchema,
   customerReviewVenueSchema,
@@ -28,7 +33,21 @@ export const listRestaurantCustomerReviewsFn = createServerFn({ method: "GET" })
 
     const { runClientOperation } = await import("@/server/http/run-client-operation");
 
-    return runClientOperation(listRestaurantCustomerReviews(data), "public");
+    const page = await runClientOperation(listRestaurantCustomerReviews(data), "public");
+
+    return customerReviewPublicPageSchema.parse(page);
+  });
+
+export const getOwnRestaurantCustomerReviewFn = createServerFn({ method: "GET" })
+  .validator(customerReviewOwnRequestSchema)
+  .handler(async ({ data }) => {
+    const { getOwnRestaurantReview } = await import("@/modules/restaurant-discovery/server/index");
+
+    const { actor, withActor, runClientOperation } = await memberContext();
+
+    const review = await runClientOperation(withActor(actor, getOwnRestaurantReview(data)), null);
+
+    return customerReviewOwnResponseSchema.nullable().parse(review);
   });
 
 // Authentication builds the Actor; every privileged operation additionally checks its own grant.
@@ -85,4 +104,16 @@ export const moderateRestaurantCustomerReviewFn = createServerFn({ method: "POST
     const { actor, withActor, runClientOperation } = await memberContext();
 
     return runClientOperation(withActor(actor, moderateRestaurantCustomerReview(data)), null);
+  });
+
+export const listCustomerReviewQueueFn = createServerFn({ method: "GET" })
+  .validator(customerReviewQueueSchema)
+  .handler(async ({ data }) => {
+    const { listCustomerReviewQueue } = await import("@/modules/restaurant-discovery/server/index");
+
+    const { actor, withActor, runClientOperation } = await memberContext();
+
+    const page = await runClientOperation(withActor(actor, listCustomerReviewQueue(data)), null);
+
+    return customerReviewQueuePageSchema.parse(page);
   });

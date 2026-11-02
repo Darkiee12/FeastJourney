@@ -1,31 +1,60 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft, PenLine } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { RestaurantReviewCard } from "@/modules/restaurant-discovery/components/restaurant-review-card";
+import type { RestaurantCustomerReview } from "@/modules/restaurant-discovery/components/restaurant-review-card";
 import {
-  RestaurantReviewCard,
-  sortCustomerReviews,
-  type RestaurantCustomerReview,
-  type ReviewSortMode,
-} from "@/modules/restaurant-discovery/components/restaurant-review-card";
-import {
+  clearReviewWriteIntent,
+  readReviewWriteIntent,
   RestaurantReviewFormDialog,
+  writeReviewWriteIntent,
   type CustomerReviewEditTarget,
 } from "@/modules/restaurant-discovery/components/restaurant-review-form";
 import { RestaurantReviewSummary } from "@/modules/restaurant-discovery/components/restaurant-review-summary";
+import type { CustomerReviewSortMode } from "@/modules/restaurant-discovery/restaurant-reviews.constants";
 import {
   deleteOwnRestaurantCustomerReviewFn,
+  getOwnRestaurantCustomerReviewFn,
   getRestaurantReviewSummaryFn,
   listRestaurantCustomerReviewsFn,
 } from "@/modules/restaurant-discovery/restaurant-reviews.functions";
+import type { CustomerReviewPublicPage } from "@/modules/restaurant-discovery/restaurant-reviews.schema";
 import type { SessionState } from "@/modules/user/session.functions";
 import { clientFailureSchema } from "@/shared/client-failure";
 import type { Locale } from "@/shared/i18n";
 
 export const CUSTOMER_REVIEW_PAGE_SIZE = 10;
 
-const sortOptions: ReadonlyArray<{ readonly value: ReviewSortMode; readonly label: string }> = [
+/**
+ * Server-driven list key: the sort rides in the key so switching sorts
+ * builds a fresh cache instead of re-sorting (or mixing) another sort's
+ * pages. All review queries share the ["customer-reviews", venueId] prefix
+ * so one invalidation refreshes the list, summary, and own review together.
+ */
+export const customerReviewListKey = (
+  venueId: string,
+  sort: CustomerReviewSortMode,
+): ReadonlyArray<string> => ["customer-reviews", venueId, sort];
+
+/** Pure next-offset rule for the paged public list; extracted for unit tests. */
+export const nextCustomerReviewPageParam = (
+  lastPage: CustomerReviewPublicPage,
+): number | undefined => {
+  const consumed = lastPage.offset + lastPage.items.length;
+
+  if (consumed >= lastPage.total) {
+    return undefined;
+  }
+
+  return lastPage.offset + lastPage.limit;
+};
+
+const sortOptions: ReadonlyArray<{
+  readonly value: CustomerReviewSortMode;
+  readonly label: string;
+}> = [
   { value: "recent", label: "Most recent" },
   { value: "highest", label: "Highest rated" },
   { value: "lowest", label: "Lowest rated" },
@@ -43,10 +72,11 @@ const failureText = (error: Error): string => {
 };
 
 /**
- * Self-fetching traveler reviews panel for one venue. Query keys always start
- * with ["customer-reviews", venueId], so switching venues never shows stale
- * rows and the page can invalidate the whole prefix on moderation events.
- * Own writes invalidate the same prefix after submit, edit, or delete.
+ * Self-fetching traveler reviews panel for one venue. The public list is
+ * server-sorted (the sort rides in the query key) and never shows pending
+ * rows — pending visibility is a server guarantee, not a client filter.
+ * A signed-in traveler's own review renders in a private "Your review"
+ * section with Edit instead of a duplicate Write call-to-action.
  */
 export function RestaurantReviewsPanel({
   venueId,
@@ -60,7 +90,7 @@ export function RestaurantReviewsPanel({
   readonly onBackToOverview: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [sort, setSort] = useState<ReviewSortMode>("recent");
+  const [sort, setSort] = useState<CustomerReviewSortMode>("recent");
   const [formOpen, setFormOpen] = useState(false);
 
   const [editTarget, setEditTarget] = useState<
@@ -71,7 +101,28 @@ export function RestaurantReviewsPanel({
   const [failure, setFailure] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const currentUserId = session.status === "signed-in" ? session.user.id : null;
+  const signedIn = session.status === "signed-in";
+
+  // Restore a write intent parked before the sign-in redirect with the
+  // render-adjust pattern: opening the dialog is synchronous UI state, so an
+  // effect would trip react/set-state-in-effect. One shot per venue — once
+  // the signed-in traveler is back, the dialog reopens and the form restores
+  // the parked draft from storage.
+  const [intentVenue, setIntentVenue] = useState<string | null>(null);
+
+  if (intentVenue !== venueId && signedIn && readReviewWriteIntent(venueId) !== null) {
+    setIntentVenue(venueId);
+    setEditTarget(null);
+    setFormOpen(true);
+  }
+
+  // Consuming the intent is I/O rather than UI state, so the storage clear
+  // stays in an effect with no setState inside.
+  useEffect(() => {
+    if (intentVenue === venueId) {
+      clearReviewWriteIntent(venueId);
+    }
+  }, [intentVenue, venueId]);
 
   const summary = useQuery({
     queryKey: ["customer-reviews", venueId, "summary"],
@@ -80,21 +131,23 @@ export function RestaurantReviewsPanel({
   });
 
   const list = useInfiniteQuery({
-    queryKey: ["customer-reviews", venueId, "list"],
+    queryKey: customerReviewListKey(venueId, sort),
     queryFn: ({ pageParam }) =>
       listRestaurantCustomerReviewsFn({
-        data: { venueId, limit: CUSTOMER_REVIEW_PAGE_SIZE, offset: pageParam },
+        data: { venueId, sort, limit: CUSTOMER_REVIEW_PAGE_SIZE, offset: pageParam },
       }),
     initialPageParam: 0,
-    getNextPageParam: (lastPage) => {
-      const consumed = lastPage.offset + lastPage.items.length;
+    getNextPageParam: nextCustomerReviewPageParam,
+    retry: false,
+  });
 
-      if (consumed >= lastPage.total) {
-        return undefined;
-      }
-
-      return lastPage.offset + lastPage.limit;
-    },
+  // The author's own active review (pending included) resolves from the
+  // verified session; browser input carries the venue only. Guests and
+  // unavailable sessions skip the query: there is no own review to show.
+  const own = useQuery({
+    queryKey: ["customer-reviews", venueId, "own"],
+    queryFn: () => getOwnRestaurantCustomerReviewFn({ data: { venueId } }),
+    enabled: signedIn,
     retry: false,
   });
 
@@ -115,14 +168,22 @@ export function RestaurantReviewsPanel({
     },
   });
 
+  const ownReview = own.data ?? null;
+  const ownId = ownReview?.id ?? null;
+
   const fetched: ReadonlyArray<RestaurantCustomerReview> = useMemo(
     () => list.data?.pages.flatMap((page) => page.items) ?? [],
     [list.data],
   );
 
-  const visible = useMemo(() => sortCustomerReviews(fetched, sort), [fetched, sort]);
-
   const total = list.data?.pages[0]?.total ?? 0;
+
+  // Relative venue path only: the sign-in route's safeReturnTo allowlist
+  // rejects absolute and protocol-relative destinations, so this can only
+  // ever land back on this site. The lang query preserves the locale across
+  // the full-page sign-in round-trip; the draft and write intent travel via
+  // session storage (see PendingReviewWriteIntent in the review form).
+  const returnTo = `/restaurants/${venueId}?lang=${locale}`;
 
   const openWrite = (): void => {
     setEditTarget(null);
@@ -139,6 +200,64 @@ export function RestaurantReviewsPanel({
     setFormOpen(true);
   };
 
+  const openOwnEdit = (): void => {
+    if (ownReview === null) {
+      return;
+    }
+
+    setEditTarget({
+      venueId,
+      reviewId: ownReview.id,
+      rating: ownReview.rating,
+      body: ownReview.body,
+    });
+    setFormOpen(true);
+  };
+
+  let ownBody: ReactNode = null;
+
+  if (signedIn && own.isPending) {
+    ownBody = (
+      <div aria-busy="true" aria-label="Loading your review" className="rv-section">
+        <div aria-hidden="true" className="rv-skeleton rv-skeleton-card" />
+      </div>
+    );
+  } else if (signedIn && own.isError) {
+    ownBody = (
+      <p role="alert" className="rv-error">
+        {failureText(own.error)}
+      </p>
+    );
+  } else if (ownReview !== null) {
+    ownBody = (
+      <>
+        <output className="rv-notice">
+          {ownReview.status === "pending"
+            ? "Your review was received and is awaiting moderation. It appears here once published; the shown average only counts published reviews."
+            : "Your published review. The shown average counts published reviews only."}
+        </output>
+        <ol className="rv-list">
+          <li key={ownReview.id}>
+            <RestaurantReviewCard
+              review={{
+                id: ownReview.id,
+                rating: ownReview.rating,
+                body: ownReview.body,
+                created_at: ownReview.created_at,
+                published_at: ownReview.published_at,
+              }}
+              locale={locale}
+              isAuthor
+              actionPending={deletingId === ownReview.id || deletion.isPending}
+              onEdit={openOwnEdit}
+              onDelete={() => deletion.mutate(ownReview.id)}
+            />
+          </li>
+        </ol>
+      </>
+    );
+  }
+
   let listBody: ReactNode;
 
   if (list.isPending) {
@@ -154,28 +273,30 @@ export function RestaurantReviewsPanel({
         {failureText(list.error)}
       </p>
     );
-  } else if (visible.length === 0) {
+  } else if (fetched.length === 0) {
     listBody = (
       <output className="rv-empty">
         <p>No reviews match yet. Be the first to share your experience.</p>
-        <button type="button" className="rv-primary" onClick={openWrite}>
-          <PenLine aria-hidden="true" />
-          Write a review
-        </button>
+        {ownReview === null ? (
+          <button type="button" className="rv-primary" onClick={openWrite}>
+            <PenLine aria-hidden="true" />
+            Write a review
+          </button>
+        ) : null}
       </output>
     );
   } else {
-    const remaining = total - visible.length;
+    const remaining = total - fetched.length;
 
     listBody = (
       <>
         <ol className="rv-list">
-          {visible.map((review) => (
+          {fetched.map((review) => (
             <li key={review.id}>
               <RestaurantReviewCard
                 review={review}
                 locale={locale}
-                isAuthor={currentUserId !== null && review.author_id === currentUserId}
+                isAuthor={ownId !== null && review.id === ownId}
                 actionPending={deletingId === review.id || deletion.isPending}
                 onEdit={() => openEdit(review)}
                 onDelete={() => deletion.mutate(review.id)}
@@ -200,35 +321,40 @@ export function RestaurantReviewsPanel({
     );
   }
 
-  let writeBody: ReactNode;
+  let writeBody: ReactNode = null;
 
-  if (session.status === "signed-in") {
-    writeBody = (
-      <button type="button" className="rv-primary" onClick={openWrite}>
-        <PenLine aria-hidden="true" />
-        Write a review
-      </button>
-    );
-  } else {
-    const paused =
-      session.status === "unavailable"
-        ? "Sign-in status is unavailable right now, so reviews are paused. Discovery still works — try again shortly."
-        : "Sign in to share your experience at this restaurant.";
+  if (ownReview === null) {
+    if (session.status === "signed-in") {
+      writeBody = (
+        <button type="button" className="rv-primary" onClick={openWrite}>
+          <PenLine aria-hidden="true" />
+          Write a review
+        </button>
+      );
+    } else {
+      const paused =
+        session.status === "unavailable"
+          ? "Sign-in status is unavailable right now, so reviews are paused. Discovery still works — try again shortly."
+          : "Sign in to share your experience at this restaurant.";
 
-    writeBody = (
-      <div className="rv-signin">
-        <p>{paused}</p>
-        {session.status === "signed-out" ? (
-          <Link
-            to="/sign-in"
-            search={{ lang: locale, returnTo: `/restaurants/${venueId}` }}
-            className="rv-primary"
-          >
-            Sign in to continue
-          </Link>
-        ) : null}
-      </div>
-    );
+      writeBody = (
+        <div className="rv-signin">
+          <p>{paused}</p>
+          {session.status === "signed-out" ? (
+            <Link
+              to="/sign-in"
+              search={{ lang: locale, returnTo }}
+              className="rv-primary"
+              onClick={() => {
+                writeReviewWriteIntent(venueId, { rating: null, body: "" });
+              }}
+            >
+              Sign in to continue
+            </Link>
+          ) : null}
+        </div>
+      );
+    }
   }
 
   return (
@@ -263,6 +389,13 @@ export function RestaurantReviewsPanel({
         ) : null}
       </section>
 
+      {ownBody !== null ? (
+        <section aria-label="Your review" className="rv-section">
+          <h3>Your review</h3>
+          {ownBody}
+        </section>
+      ) : null}
+
       <section aria-label="Customer reviews" className="rv-section">
         <div className="rv-toolbar">
           <h3>What travelers say</h3>
@@ -289,9 +422,11 @@ export function RestaurantReviewsPanel({
         {listBody}
       </section>
 
-      <section aria-label="Write a review" className="rv-section">
-        {writeBody}
-      </section>
+      {writeBody !== null ? (
+        <section aria-label="Write a review" className="rv-section">
+          {writeBody}
+        </section>
+      ) : null}
 
       {notice !== null ? <output className="rv-notice">{notice}</output> : null}
       {failure !== null ? (

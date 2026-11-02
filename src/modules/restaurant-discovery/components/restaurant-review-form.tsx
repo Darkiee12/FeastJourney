@@ -3,7 +3,9 @@ import { Link } from "@tanstack/react-router";
 import { Star, X } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { z } from "zod";
 
+import { CUSTOMER_REVIEW_BODY_MAX as CUSTOMER_REVIEW_BODY_MAX_LENGTH } from "@/modules/restaurant-discovery/restaurant-reviews.constants";
 import {
   submitRestaurantCustomerReviewFn,
   updateOwnRestaurantCustomerReviewFn,
@@ -11,8 +13,6 @@ import {
 import type { SessionState } from "@/modules/user/session.functions";
 import { clientFailureSchema } from "@/shared/client-failure";
 import type { Locale } from "@/shared/i18n";
-
-export const CUSTOMER_REVIEW_BODY_MAX_LENGTH = 2000;
 
 export interface CustomerReviewFormErrors {
   readonly rating?: string;
@@ -87,6 +87,87 @@ export function reviewFailureKind(tag: string | null): "sign-in" | "message" {
 }
 
 /**
+ * Pending write intent parked across the sign-in redirect. The reviews panel
+ * keeps its selection in memory, so a full-page sign-in round-trip would
+ * otherwise discard a guest's draft and write intent. The intent is stored
+ * under a venue-scoped session key: the panel consumes it on its next
+ * signed-in mount and reopens the dialog, while the form restores the draft
+ * into write-mode fields and clears the entry on successful submit.
+ */
+export interface PendingReviewWriteIntent {
+  readonly rating: number | null;
+  readonly body: string;
+}
+
+export const reviewWriteIntentKey = (venueId: string): string => `rv-write-intent:${venueId}`;
+
+const pendingReviewWriteIntentSchema = z.object({
+  rating: z.number().int().min(1).max(5).nullable(),
+  body: z.string().max(CUSTOMER_REVIEW_BODY_MAX_LENGTH + 1),
+});
+
+export const serializeReviewWriteIntent = (intent: PendingReviewWriteIntent): string =>
+  JSON.stringify({ rating: intent.rating, body: intent.body });
+
+/** Parses untrusted storage input at the boundary; malformed entries are dropped. */
+export const parseReviewWriteIntent = (raw: string | null): PendingReviewWriteIntent | null => {
+  if (raw === null) {
+    return null;
+  }
+
+  let parsed: unknown;
+
+  try {
+    // SAFETY: JSON.parse yields any; narrowing to unknown forces every use
+    // through the zod safeParse below, so malformed storage never reaches state.
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+
+  const result = pendingReviewWriteIntentSchema.safeParse(parsed);
+
+  return result.success ? result.data : null;
+};
+
+export const readReviewWriteIntent = (venueId: string): PendingReviewWriteIntent | null => {
+  if (typeof sessionStorage === "undefined") {
+    return null;
+  }
+
+  try {
+    return parseReviewWriteIntent(sessionStorage.getItem(reviewWriteIntentKey(venueId)));
+  } catch {
+    return null;
+  }
+};
+
+/** Best-effort: private-mode quota errors never block the sign-in navigation. */
+export const writeReviewWriteIntent = (venueId: string, intent: PendingReviewWriteIntent): void => {
+  if (typeof sessionStorage === "undefined") {
+    return;
+  }
+
+  try {
+    sessionStorage.setItem(reviewWriteIntentKey(venueId), serializeReviewWriteIntent(intent));
+  } catch {
+    // Storage stays best-effort so signing in always proceeds.
+  }
+};
+
+export const clearReviewWriteIntent = (venueId: string): void => {
+  if (typeof sessionStorage === "undefined") {
+    return;
+  }
+
+  try {
+    sessionStorage.removeItem(reviewWriteIntentKey(venueId));
+  } catch {
+    // Storage stays best-effort so the dialog always opens.
+  }
+};
+
+/**
  * Accessible star-rating dialog for creating or editing one customer review.
  * Drafts survive server errors; a saved review shows the pending-moderation
  * state because new and edited reviews always re-enter the moderation queue.
@@ -110,12 +191,38 @@ export function RestaurantReviewFormDialog({
 }) {
   const queryClient = useQueryClient();
   const openerRef = useRef<Element | null>(null);
-  const [rating, setRating] = useState<number | null>(initial?.rating ?? null);
-  const [body, setBody] = useState(initial?.body ?? "");
+
+  const [rating, setRating] = useState<number | null>(null);
+  const [body, setBody] = useState("");
   const [touched, setTouched] = useState(false);
   const [serverMessage, setServerMessage] = useState<string | null>(null);
   const [showSignIn, setShowSignIn] = useState(false);
   const [succeeded, setSucceeded] = useState(false);
+
+  // The dialog stays mounted while the panel swaps write/edit targets, but
+  // state seeds only once. Each new target syncs here with the render-adjust
+  // pattern (an effect would trip react/set-state-in-effect): opening Edit
+  // after Write shows the stored review, opening Write shows this venue's
+  // parked draft or empty fields. Typing never retriggers this because keys
+  // only change when the target or venue changes.
+  const writeKey = `${venueId}:${initial?.reviewId ?? "new"}`;
+  const [syncedWriteKey, setSyncedWriteKey] = useState("");
+
+  if (syncedWriteKey !== writeKey) {
+    setSyncedWriteKey(writeKey);
+
+    if (initial !== null) {
+      setRating(initial.rating);
+      setBody(initial.body);
+    } else {
+      const stored = readReviewWriteIntent(venueId);
+      setRating(stored?.rating ?? null);
+      setBody(stored?.body ?? "");
+    }
+
+    setTouched(false);
+    setServerMessage(null);
+  }
 
   // Radix does not reliably restore focus from a controlled dialog opened by
   // a list action (same pattern as the restaurant filters sheet), so the
@@ -159,6 +266,7 @@ export function RestaurantReviewFormDialog({
       setServerMessage(null);
       setShowSignIn(false);
       setSucceeded(true);
+      clearReviewWriteIntent(venueId);
       onSubmitted();
       void queryClient.invalidateQueries({ queryKey: ["customer-reviews", venueId] });
     },
@@ -206,7 +314,12 @@ export function RestaurantReviewFormDialog({
 
   const errors = touched ? validateCustomerReviewForm(rating, body) : {};
   const title = editing ? "Edit your review" : "Write a review";
-  const returnTo = `/restaurants/${venueId}`;
+  // Relative venue path only: the sign-in route's safeReturnTo allowlist
+  // rejects absolute and protocol-relative destinations, so this can only
+  // ever land back on this site. The lang query preserves the locale across
+  // the full-page sign-in round-trip; the draft and write intent travel via
+  // session storage (see PendingReviewWriteIntent).
+  const returnTo = `/restaurants/${venueId}?lang=${locale}`;
 
   let submitLabel = "Submit review";
 
@@ -244,7 +357,14 @@ export function RestaurantReviewFormDialog({
       <div className="rv-signin">
         <p>{signInHint}</p>
         {offerSignIn ? (
-          <Link to="/sign-in" search={{ lang: locale, returnTo }} className="rv-primary">
+          <Link
+            to="/sign-in"
+            search={{ lang: locale, returnTo }}
+            className="rv-primary"
+            onClick={() => {
+              writeReviewWriteIntent(venueId, { rating, body });
+            }}
+          >
             Sign in to continue
           </Link>
         ) : null}
@@ -340,7 +460,13 @@ export function RestaurantReviewFormDialog({
     <Dialog.Root open={open} onOpenChange={close} modal>
       <Dialog.Portal>
         <Dialog.Overlay className="rv-dialog-overlay" />
-        <Dialog.Content className="rv-dialog" aria-describedby={undefined}>
+        <Dialog.Content
+          className="rv-dialog"
+          aria-describedby={undefined}
+          // Custom opener restore (effect above) owns focus return: Radix
+          // would otherwise restore to whatever it tracked, not the opener.
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
           <div className="rv-dialog-head">
             <Dialog.Title className="rv-dialog-title">{title}</Dialog.Title>
             <Dialog.Close asChild>

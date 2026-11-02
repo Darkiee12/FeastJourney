@@ -202,7 +202,7 @@ describe("guest reads and pending invisibility", () => {
     ]);
 
     const page = await run(
-      listRestaurantCustomerReviews({ venueId: venueMain, limit: 20, offset: 0 }),
+      listRestaurantCustomerReviews({ venueId: venueMain, sort: "recent", limit: 20, offset: 0 }),
     );
 
     expect(page.total).toBe(0);
@@ -221,7 +221,7 @@ describe("guest reads and pending invisibility", () => {
     expect(summary.total).toBe(0);
 
     const page = await run(
-      listRestaurantCustomerReviews({ venueId: venueMain, limit: 20, offset: 0 }),
+      listRestaurantCustomerReviews({ venueId: venueMain, sort: "recent", limit: 20, offset: 0 }),
     );
 
     expect(page.total).toBe(0);
@@ -295,16 +295,27 @@ describe("publication and exact aggregates", () => {
     ]);
 
     const page = await run(
-      listRestaurantCustomerReviews({ venueId: venueMain, limit: 20, offset: 0 }),
+      listRestaurantCustomerReviews({ venueId: venueMain, sort: "recent", limit: 20, offset: 0 }),
     );
 
     expect(page.total).toBe(2);
     expect(page.items.length).toBe(2);
 
     for (const item of page.items) {
-      // oxlint-disable-next-line typescript/no-unsafe-member-access -- tsc-clean under live-DB Reylo: checker cannot resolve Effect/Reylo generics here
-      expect(item.status).toBe("published");
+      expect(Object.keys(item).toSorted()).toEqual([
+        "body",
+        "created_at",
+        "id",
+        "published_at",
+        "rating",
+      ]);
     }
+
+    const serialized = JSON.stringify(page);
+
+    expect(serialized).not.toContain("author_id");
+    expect(serialized).not.toContain("pending");
+    expect(serialized).not.toContain("removed");
   });
 
   test("listings are scoped to their venue", async () => {
@@ -320,15 +331,22 @@ describe("publication and exact aggregates", () => {
     );
 
     const page = await run(
-      listRestaurantCustomerReviews({ venueId: venueMain, limit: 20, offset: 0 }),
+      listRestaurantCustomerReviews({ venueId: venueMain, sort: "recent", limit: 20, offset: 0 }),
     );
 
     expect(page.total).toBe(2);
 
     for (const item of page.items) {
-      // oxlint-disable-next-line typescript/no-unsafe-member-access -- tsc-clean under live-DB Reylo: checker cannot resolve Effect/Reylo generics here
-      expect(item.venue_id).toBe(venueMain);
+      expect(Object.keys(item).toSorted()).toEqual([
+        "body",
+        "created_at",
+        "id",
+        "published_at",
+        "rating",
+      ]);
     }
+
+    expect(JSON.stringify(page)).not.toContain("Scoped review.");
   });
 });
 
@@ -400,7 +418,7 @@ describe("author edit and delete", () => {
       ),
     );
 
-    expect(restored._tag).toBe("Applied");
+    expect(restored._tag).toBe("Repeated");
   });
 
   test("guests cannot write", async () => {
@@ -416,7 +434,7 @@ describe("author edit and delete", () => {
     expect(denied._tag).toBe("SignInRequired");
   });
 
-  test("author delete anonymizes and stays invisible", async () => {
+  test("author delete redacts body and stays invisible", async () => {
     const submitted = await submitAs(memberA, venueMain, 3, "Revised after a second visit.");
 
     expect(submitted._tag).toBe("Updated");
@@ -447,7 +465,7 @@ describe("author edit and delete", () => {
 
   test("removed reviews cannot be edited but allow a fresh submission", async () => {
     const page = await run(
-      listRestaurantCustomerReviews({ venueId: venueMain, limit: 50, offset: 0 }),
+      listRestaurantCustomerReviews({ venueId: venueMain, sort: "recent", limit: 50, offset: 0 }),
     );
 
     expect(page.total).toBe(1);
@@ -605,7 +623,9 @@ describe("moderation transitions and failures", () => {
     expect(summary._tag).toBe("UnknownVenue");
 
     const page = await run(
-      Effect.flip(listRestaurantCustomerReviews({ venueId: missing, limit: 20, offset: 0 })),
+      Effect.flip(
+        listRestaurantCustomerReviews({ venueId: missing, sort: "recent", limit: 20, offset: 0 }),
+      ),
     );
 
     expect(page._tag).toBe("UnknownVenue");
@@ -624,13 +644,17 @@ describe("moderation transitions and failures", () => {
 
   test("invalid pages and payloads fail explicitly", async () => {
     const badLimit = await run(
-      Effect.flip(listRestaurantCustomerReviews({ venueId: venueMod, limit: 0, offset: 0 })),
+      Effect.flip(
+        listRestaurantCustomerReviews({ venueId: venueMod, sort: "recent", limit: 0, offset: 0 }),
+      ),
     );
 
     expect(badLimit._tag).toBe("CustomerReviewValidationFailed");
 
     const hugeLimit = await run(
-      Effect.flip(listRestaurantCustomerReviews({ venueId: venueMod, limit: 51, offset: 0 })),
+      Effect.flip(
+        listRestaurantCustomerReviews({ venueId: venueMod, sort: "recent", limit: 51, offset: 0 }),
+      ),
     );
 
     expect(hugeLimit._tag).toBe("CustomerReviewValidationFailed");
@@ -711,14 +735,14 @@ describe("pagination", () => {
     ]);
 
     const first = await run(
-      listRestaurantCustomerReviews({ venueId: venuePage, limit: 2, offset: 0 }),
+      listRestaurantCustomerReviews({ venueId: venuePage, sort: "recent", limit: 2, offset: 0 }),
     );
 
     expect(first.total).toBe(3);
     expect(first.items.length).toBe(2);
 
     const second = await run(
-      listRestaurantCustomerReviews({ venueId: venuePage, limit: 2, offset: 2 }),
+      listRestaurantCustomerReviews({ venueId: venuePage, sort: "recent", limit: 2, offset: 2 }),
     );
 
     expect(second.total).toBe(3);
@@ -727,12 +751,29 @@ describe("pagination", () => {
     // oxlint-disable-next-line typescript/no-unsafe-member-access, typescript/no-unsafe-argument, typescript/no-unsafe-call, typescript/no-unsafe-return -- tsc-clean under live-DB Reylo: checker cannot resolve Effect/Reylo generics here
     const firstIds = new Set(first.items.map((item) => item.id));
 
+    for (const item of first.items) {
+      expect(Object.keys(item).toSorted()).toEqual([
+        "body",
+        "created_at",
+        "id",
+        "published_at",
+        "rating",
+      ]);
+    }
+
     for (const item of second.items) {
       // oxlint-disable-next-line typescript/no-unsafe-member-access -- tsc-clean under live-DB Reylo: checker cannot resolve Effect/Reylo generics here
       expect(firstIds.has(item.id)).toBe(false);
 
-      // oxlint-disable-next-line typescript/no-unsafe-member-access -- tsc-clean under live-DB Reylo: checker cannot resolve Effect/Reylo generics here
-      expect(item.venue_id).toBe(venuePage);
+      expect(Object.keys(item).toSorted()).toEqual([
+        "body",
+        "created_at",
+        "id",
+        "published_at",
+        "rating",
+      ]);
     }
+
+    expect(JSON.stringify({ first, second })).not.toContain("author_id");
   });
 });
