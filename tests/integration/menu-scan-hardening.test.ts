@@ -34,6 +34,7 @@ import type { UserRepository } from "@/modules/user/server/repository/user-repos
 import { Actor } from "@/server/auth/actor";
 import { withActor } from "@/server/auth/current-actor";
 import { DatabaseLive, withTransaction, type Database } from "@/server/database/client";
+import { resetServerEnvCache } from "@/server/env";
 import { MenuExtractor } from "@/server/integrations/muse-menu";
 import {
   PrivateMenuStorage,
@@ -42,6 +43,25 @@ import {
 } from "@/server/integrations/private-menu-storage";
 
 import { createFoodAuth } from "./food-auth";
+
+const originalScannerEnabled = process.env["MENU_SCANNER_ENABLED"];
+const originalApiKey = process.env["MODEL_API_KEY"];
+
+const enableScannerEnv = (): void => {
+  process.env["MENU_SCANNER_ENABLED"] = "true";
+  process.env["MODEL_API_KEY"] = "synthetic-hardening-key";
+  resetServerEnvCache();
+};
+
+const restoreScannerEnv = (): void => {
+  if (originalScannerEnabled === undefined) delete process.env["MENU_SCANNER_ENABLED"];
+  else process.env["MENU_SCANNER_ENABLED"] = originalScannerEnabled;
+
+  if (originalApiKey === undefined) delete process.env["MODEL_API_KEY"];
+  else process.env["MODEL_API_KEY"] = originalApiKey;
+
+  resetServerEnvCache();
+};
 
 const sql = postgres(process.env.DATABASE_URL ?? "", { max: 3 });
 const auth = createFoodAuth();
@@ -186,6 +206,8 @@ const approval = (fixture: Awaited<ReturnType<typeof contributionFixture>>) => (
 });
 
 beforeAll(async () => {
+  enableScannerEnv();
+
   const curator = await auth.signupSignin("hardening-curator");
   curatorId = curator.userId;
   await auth.grantRole(curatorId, "curator");
@@ -243,6 +265,7 @@ afterAll(async () => {
   await sql.end();
   s3.destroy();
   await auth.close();
+  restoreScannerEnv();
 });
 
 describe("private menu scan ownership and immutable revisions", () => {

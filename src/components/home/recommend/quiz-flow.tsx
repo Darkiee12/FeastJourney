@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getRouteApi } from "@tanstack/react-router";
+import { Link, getRouteApi } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -1419,6 +1419,38 @@ export function RecommendSection() {
   );
 
   function renderOutcome(copyMessages: Messages, compact = false) {
+    /**
+     * QUIZ→RESTAURANTS BRIDGE (nav-only slice): "Find restaurants" link for
+     * the visible result card. The carousel owns its slides (DishCarousel is
+     * outside this slice), so the CTA binds to the active slide through the
+     * shared railIndex the carousel and rail already use. Search carries the
+     * canonical dish identity: `dish` (numeric filter id, per
+     * restaurantSearchSchema) + `fromDish` (slug back-link, the pattern the
+     * restaurants routes already preserve). No wizard restructure: quiz
+     * state survives the round-trip through the existing journey snapshot
+     * (writeJourneySnapshot on every state change, restored on remount).
+     * Copy is inline until the coordinator-owned i18n key lands (requested:
+     * `recFindRestaurants`); mirrors the inline `lang === "vi"` precedent in
+     * dishes.$dishId.tsx and dishCounterNoun.
+     */
+    const activeDish = carouselItems[railIndex] ?? null;
+
+    const findRestaurantsSearch =
+      activeDish === null ? null : { lang, dish: activeDish.id, fromDish: activeDish.slug };
+
+    const findRestaurantsLabel = copyMessages.recFindRestaurants;
+
+    const renderFindRestaurants = (): ReactNode =>
+      findRestaurantsSearch === null ? null : (
+        <Link
+          to="/restaurants"
+          search={findRestaurantsSearch}
+          className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full bg-food-orange-strong px-6 text-sm font-bold text-white transition hover:bg-food-orange-dark"
+        >
+          {findRestaurantsLabel} →
+        </Link>
+      );
+
     if (recommend.isPending) {
       return <ResultsLoadingSkeleton compact={compact} copy={copyMessages} />;
     }
@@ -1562,6 +1594,7 @@ export function RecommendSection() {
             resetKey={outcomeKey}
             session={session}
           />
+          <div className="mt-3 flex">{renderFindRestaurants()}</div>
           <details className="mt-2 rounded-2xl border-2 border-border-soft bg-white px-3 py-2">
             <summary className="cursor-pointer text-sm font-bold text-ink">
               {copyMessages.recSummaryLabel}
@@ -1636,6 +1669,7 @@ export function RecommendSection() {
           resetKey={outcomeKey}
           session={session}
         />
+        <div className="mt-4 flex flex-wrap">{renderFindRestaurants()}</div>
         <div className="mt-6">
           <RecommendationRail
             activeIndex={railIndex}

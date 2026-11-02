@@ -27,6 +27,13 @@ export const scanViewSchema = z.object({
   }),
   assets: scanAssetsSchema,
   document: menuScanDocumentSchema.nullable(),
+  revision: z
+    .object({
+      number: z.number().int(),
+      origin: z.string(),
+      model: z.string().nullable(),
+    })
+    .nullable(),
   contribution: z
     .object({ id: z.uuid(), status: z.string(), revision: z.number().int() })
     .nullable(),
@@ -162,6 +169,29 @@ async function requestScan<A>(
   return decodeResponse(response, schema);
 }
 
+/**
+ * Coalesces concurrent Analyze taps for the same scan into one extraction
+ * request. Sharers receive the identical outcome, including typed
+ * MenuScanClientError retryable/retryAfterSeconds failures, so a duplicate
+ * tap never fires a duplicate scan and never masks retry guidance. The
+ * originating signal governs the shared fetch; the entry clears on settle.
+ */
+const inFlightExtracts = new Map<string, Promise<ScanView>>();
+
+function dedupedExtract(scanId: string, signal?: AbortSignal): Promise<ScanView> {
+  const running = inFlightExtracts.get(scanId);
+
+  if (running !== undefined) return running;
+
+  const pending = requestScan({ action: "extract", scanId }, scanViewSchema, signal).finally(() => {
+    if (inFlightExtracts.get(scanId) === pending) inFlightExtracts.delete(scanId);
+  });
+
+  inFlightExtracts.set(scanId, pending);
+
+  return pending;
+}
+
 export const menuScanClient = {
   create: (input: z.infer<typeof createScanSchema>, signal?: AbortSignal) =>
     requestScan(
@@ -171,8 +201,7 @@ export const menuScanClient = {
     ),
   get: (scanId: string, signal?: AbortSignal) =>
     requestScan({ action: "get", scanId }, scanViewSchema, signal),
-  extract: (scanId: string, signal?: AbortSignal) =>
-    requestScan({ action: "extract", scanId }, scanViewSchema, signal),
+  extract: (scanId: string, signal?: AbortSignal) => dedupedExtract(scanId, signal),
   revise: (input: z.infer<typeof reviseScanSchema>, signal?: AbortSignal) =>
     requestScan({ action: "revise", ...input }, scanViewSchema, signal),
   contribute: (input: z.infer<typeof contributeScanSchema>, signal?: AbortSignal) =>

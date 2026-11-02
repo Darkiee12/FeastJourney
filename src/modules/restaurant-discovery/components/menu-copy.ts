@@ -203,3 +203,49 @@ export const menuLanguageNames: ReadonlyMap<string, string> = new Map([
   ["fr", "Français"],
   ["es", "Español"],
 ]);
+
+const scanPageEnglish = {
+  privacyShort: "Private scan. Photos stay private and expire after 24 hours.",
+  privacyDetailsLabel: "Privacy details",
+  sheetTitle: "Add menu photos",
+  sheetHint: "Start with the camera, or pick from your gallery instead.",
+  photoWaiting: "Waiting to upload",
+  photoUploading: "Uploading…",
+  photoUploaded: "Uploaded",
+  uploadProgress: "Upload progress",
+  stageAnalyzing: "Analysis running. This step takes a while; progress is not item-by-item.",
+  modelLabel: "Model",
+  failureRetryable: "This failed but can be retried.",
+  failureRetryAfter: "You can retry in {seconds} seconds.",
+  failureRetryNow: "You can retry now.",
+  retryAction: "Retry",
+  failureValidation:
+    "Check the highlighted fields and photo limits, then correct them before retrying.",
+  failureConflict: "The menu changed. Reload its status before trying again.",
+  failureAuth: "Sign in again, then retry.",
+};
+
+const scanPageVietnamese: typeof scanPageEnglish = {
+  privacyShort: "Bản quét riêng tư. Ảnh được giữ riêng tư và hết hạn sau 24 giờ.",
+  privacyDetailsLabel: "Chi tiết quyền riêng tư",
+  sheetTitle: "Thêm ảnh thực đơn",
+  sheetHint: "Bắt đầu bằng camera, hoặc chọn ảnh từ thư viện.",
+  photoWaiting: "Chờ tải lên",
+  photoUploading: "Đang tải lên…",
+  photoUploaded: "Đã tải lên",
+  uploadProgress: "Tiến độ tải lên",
+  stageAnalyzing: "Đang phân tích. Bước này cần thời gian; tiến độ không theo từng món.",
+  modelLabel: "Mô hình",
+  failureRetryable: "Lỗi này có thể thử lại.",
+  failureRetryAfter: "Bạn có thể thử lại sau {seconds} giây.",
+  failureRetryNow: "Bạn có thể thử lại ngay.",
+  retryAction: "Thử lại",
+  failureValidation:
+    "Kiểm tra các trường được đánh dấu và giới hạn ảnh, rồi sửa trước khi thử lại.",
+  failureConflict: "Thực đơn đã thay đổi. Tải lại trạng thái trước khi thử lại.",
+  failureAuth: "Đăng nhập lại, rồi thử lại.",
+};
+
+/** New scan-page UI states only; existing menu copy above is untouched. */
+export const menuScanPageCopy = (locale: string): typeof scanPageEnglish =>
+  locale === "vi" ? scanPageVietnamese : scanPageEnglish;

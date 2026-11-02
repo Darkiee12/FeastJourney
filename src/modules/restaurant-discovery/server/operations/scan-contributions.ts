@@ -75,7 +75,10 @@ export const getMenuContribution = Effect.fn("menu.getContribution")(function* (
         assetsQuery.run(sql, { session_id: contribution.session_id }),
       );
 
-      const document = yield* loadMenuScanDocument(contribution.session_id, contribution.revision);
+      const { document } = yield* loadMenuScanDocument(
+        contribution.session_id,
+        contribution.revision,
+      );
 
       const menus = yield* runQuery("menu/contribution-menus", (sql) =>
         contributionMenus.run(sql, { id: contribution.id }),
@@ -198,7 +201,7 @@ export const reviewMenuContribution = Effect.fn("menu.reviewContribution")(funct
               "Observation dates must be in the past and the review horizon must end before private evidence expires.",
           });
 
-        const document = yield* loadMenuScanDocument(
+        const { document } = yield* loadMenuScanDocument(
           contribution.session_id,
           contribution.revision,
         );

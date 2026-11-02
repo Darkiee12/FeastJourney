@@ -108,7 +108,7 @@ export class MetaClient extends Context.Service<
       candidates: ReadonlyArray<MetaRankCandidate>,
       context: MetaRankContext,
       config: MuseRankingConfig,
-    ) => Effect.Effect<ReadonlyArray<string>, MetaError>;
+    ) => Effect.Effect<RankingResult, MetaError>;
   }
 >()("feastjourney/integrations/MetaClient") {}
 
@@ -122,9 +122,27 @@ const ChatEnvelope = Schema.Struct({
 
 const RankingPayload = Schema.Struct({
   ranked_candidate_ids: Schema.Array(Schema.String),
+  reasons: Schema.Array(Schema.String.pipe(Schema.check(Schema.isMaxLength(140)))),
 });
 
 export type RankingPayload = typeof RankingPayload.Type;
+
+/** Upper bound for a single per-dish ranking reason (characters). */
+export const MAX_REASON_LENGTH = 140;
+
+/**
+ * Validated ranking result: reordered candidate ids plus one short
+ * human-readable reason per id, in the same order (parallel arrays).
+ * Reasons are grounded only in the supplied candidate context
+ * (cuisines, categories, region/cuisine label) and the diner's
+ * preferences (occasion, mood, exclusion respect) — never safety,
+ * health, popularity, or opening-hours claims. Eligibility stays in
+ * SQL; no new dishes can be minted (ids are validated server-side).
+ */
+export interface RankingResult {
+  readonly ids: ReadonlyArray<string>;
+  readonly reasons: ReadonlyArray<string>;
+}
 
 /** Decode untrusted provider JSON into the canonical ranking contract. */
 export const decodeRankingPayload = Schema.decodeUnknownOption(RankingPayload);
@@ -142,8 +160,9 @@ export const RANKING_SCHEMA = {
   type: "object",
   properties: {
     ranked_candidate_ids: { type: "array", items: { type: "string" } },
+    reasons: { type: "array", items: { type: "string", maxLength: MAX_REASON_LENGTH } },
   },
-  required: ["ranked_candidate_ids"],
+  required: ["ranked_candidate_ids", "reasons"],
   additionalProperties: false,
 } as const;
 
@@ -157,7 +176,10 @@ const SYSTEM_PROMPT = [
   "You rank restaurant dishes for a diner.",
   "Rank ONLY the dish IDs supplied in the user message.",
   "Never invent, add, or rename dishes.",
-  "Never make safety, allergy, or medical claims.",
+  "Write one short reason per ranked dish, in the same order as the ranked IDs.",
+  "Ground every reason ONLY in the supplied cuisines, categories, region or cuisine label, the diner's occasion and mood, or respect for the listed exclusions.",
+  "Never make safety, allergy, medical, health, popularity, rating, or opening-hours claims.",
+  "Keep each reason at most 140 characters.",
   "Respect the diner's listed ingredient exclusions when ordering; never claim safety.",
   "Respond with JSON only, matching the requested schema.",
 ].join(" ");
@@ -175,6 +197,7 @@ const buildUserPrompt = (
     `Occasion: ${context.occasion}; mood: ${context.mood}; cuisine or region: ${context.cuisineOrRegion ?? "any"}.`,
     `Ingredients to avoid: ${context.excludedIngredients.join(", ") || "none"}.`,
     "Rank the most suitable dish IDs first and return at most the requested count.",
+    "Return one reason per ranked ID, in the same order as the ranked IDs.",
     ...lines,
   ].join("\n");
 };
@@ -341,10 +364,14 @@ export const MetaClientLive = Layer.succeed(MetaClient, {
           modelId: config.modelId,
           candidateCount: candidates.length,
           returnedCount: payload.value.ranked_candidate_ids.length,
+          returnedReasons: payload.value.reasons.length,
           durationMs: Date.now() - startedAt,
         }),
       );
 
-      return payload.value.ranked_candidate_ids;
+      return {
+        ids: payload.value.ranked_candidate_ids,
+        reasons: payload.value.reasons,
+      } satisfies RankingResult;
     }),
 });

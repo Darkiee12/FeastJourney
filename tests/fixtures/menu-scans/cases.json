@@ -13,7 +13,9 @@
       "80000"
     ],
     "expectedCommonCurrency": "VND",
-    "requiredBehavior": [],
+    "requiredBehavior": [
+      "Large-bowl price belongs only to the large variant; never copy a price across items"
+    ],
     "liveEvaluation": "not_run"
   },
   {
@@ -33,7 +35,9 @@
       "1000"
     ],
     "expectedCommonCurrency": "JPY",
-    "requiredBehavior": [],
+    "requiredBehavior": [
+      "Each small/large price belongs only to its printed item and variant; never merge columns"
+    ],
     "liveEvaluation": "not_run"
   },
   {
@@ -55,7 +59,9 @@
       "12"
     ],
     "expectedCommonCurrency": "CNY",
-    "requiredBehavior": [],
+    "requiredBehavior": [
+      "Each price belongs only to its printed column item; never merge columns"
+    ],
     "liveEvaluation": "not_run"
   },
   {
@@ -74,7 +80,8 @@
     ],
     "expectedCommonCurrency": null,
     "requiredBehavior": [
-      "Currency symbol alone is ambiguous"
+      "Currency symbol alone is ambiguous",
+      "Lone dollar sign abstains with currency null and an explanatory uncertainty"
     ],
     "liveEvaluation": "not_run"
   },
@@ -129,7 +136,8 @@
     ],
     "expectedCommonCurrency": null,
     "requiredBehavior": [
-      "No printed prices"
+      "No printed prices",
+      "Missing prices abstain with price null and an explanatory uncertainty"
     ],
     "liveEvaluation": "not_run"
   },
@@ -147,7 +155,8 @@
     ],
     "expectedCommonCurrency": null,
     "requiredBehavior": [
-      "Do not guess decimal separator or currency"
+      "Do not guess decimal separator or currency",
+      "Bare 1,250 abstains with amount null and currency null plus an uncertainty"
     ],
     "liveEvaluation": "not_run"
   },
@@ -181,7 +190,8 @@
     "expectedAmounts": [],
     "expectedCommonCurrency": null,
     "requiredBehavior": [
-      "No readable menu items; recoverable error"
+      "No readable menu items; recoverable error",
+      "Unreadable photo abstains with items:[] and no invented items"
     ],
     "liveEvaluation": "not_run"
   },
@@ -220,7 +230,8 @@
     ],
     "expectedCommonCurrency": "USD",
     "requiredBehavior": [
-      "Price association unclear; require customer review"
+      "Price association unclear; require customer review",
+      "Misaligned prices abstain with price null and uncertainties; never attach a floating price to the nearest name"
     ],
     "liveEvaluation": "not_run"
   },
@@ -238,7 +249,8 @@
     ],
     "expectedCommonCurrency": "JPY",
     "requiredBehavior": [
-      "Do not invent a portion or comparison key"
+      "Do not invent a portion or comparison key",
+      "One printed price maps to one variant; never split it across invented portion variants"
     ],
     "liveEvaluation": "not_run"
   },

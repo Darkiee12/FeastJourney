@@ -1,11 +1,30 @@
+import {
+  Camera,
+  ChevronDown,
+  ChevronUp,
+  CircleCheck,
+  Images,
+  LoaderCircle,
+  RefreshCw,
+  Trash2,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 
 import { InteractiveMenuView } from "@/modules/restaurant-discovery/components/interactive-menu";
-import { menuLanguageNames } from "@/modules/restaurant-discovery/components/menu-copy";
+import {
+  menuLanguageNames,
+  menuScanPageCopy,
+} from "@/modules/restaurant-discovery/components/menu-copy";
 import { ScanEditor } from "@/modules/restaurant-discovery/components/scan-editor";
 import { presentScan } from "@/modules/restaurant-discovery/menu-presentation";
-import { menuScanClient, validateMenuFiles } from "@/modules/restaurant-discovery/menu-scan-client";
+import {
+  MenuScanClientError,
+  menuScanClient,
+  validateMenuFiles,
+} from "@/modules/restaurant-discovery/menu-scan-client";
 import type { ScanView } from "@/modules/restaurant-discovery/menu-scan-client";
 import {
   menuLanguages,
@@ -130,6 +149,52 @@ const vietnamese: typeof english = {
 
 type SelectedPhoto = { readonly id: string; readonly file: File; readonly previewUrl: string };
 
+type RetryAction = "analyze" | "load" | "save" | "contribute" | "claim";
+
+interface ScanFailure {
+  readonly message: string;
+  readonly retryable: boolean;
+  readonly retryAfterSeconds: number | null;
+  readonly action: RetryAction | null;
+  readonly code: string | undefined;
+}
+
+export type ScanFailureKind = "validation" | "conflict" | "auth" | "expired";
+
+/** Map a server failure code to the guidance family. Retryable codes need no family. */
+export function scanFailureKind(code: string | undefined): ScanFailureKind | null {
+  if (code === "invalid_request" || code === "invalid_image" || code === "invalid_extraction")
+    return "validation";
+
+  if (code === "conflict") return "conflict";
+
+  if (code === "unauthenticated" || code === "reauthentication_required") return "auth";
+
+  if (code === "not_found") return "expired";
+
+  return null;
+}
+
+/**
+ * Read-only model chip from the scan revision view. The view is the only
+ * source; when the revision carries no model (e.g. customer revisions),
+ * this returns null and the page renders nothing instead of inventing a value.
+ */
+export function scanModelChip(
+  revision: {
+    readonly number: number;
+    readonly model: string | null;
+  } | null,
+): { readonly model: string; readonly revision: number } | null {
+  if (revision === null) return null;
+
+  const parsed = z.string().min(1).safeParse(revision.model);
+
+  if (!parsed.success) return null;
+
+  return { model: parsed.data, revision: revision.number };
+}
+
 const storageOwner = "feastjourney:menu-scan-owner:v1";
 
 const storageScan = "feastjourney:menu-scan:v1";
@@ -197,6 +262,35 @@ function BranchField({
   );
 }
 
+/** Honest per-photo upload state from the observable attach count. No staged reads. */
+function PhotoUploadState({
+  index,
+  uploaded,
+  uploading,
+  copy,
+}: {
+  readonly index: number;
+  readonly uploaded: number;
+  readonly uploading: boolean;
+  readonly copy: ReturnType<typeof menuScanPageCopy>;
+}) {
+  if (index < uploaded)
+    return (
+      <>
+        <CircleCheck aria-hidden="true" /> {copy.photoUploaded}
+      </>
+    );
+
+  if (index === uploaded && uploading)
+    return (
+      <>
+        <LoaderCircle aria-hidden="true" /> {copy.photoUploading}
+      </>
+    );
+
+  return copy.photoWaiting;
+}
+
 export function MenuScanPage({
   locale,
   venueId,
@@ -207,6 +301,7 @@ export function MenuScanPage({
   readonly userId?: string | null;
 }) {
   const copy = locale === "vi" ? vietnamese : english;
+  const pageCopy = menuScanPageCopy(locale);
   const owner = userId ?? "guest";
 
   const [targetLanguage, setTargetLanguage] = useState(() => {
@@ -224,25 +319,25 @@ export function MenuScanPage({
   const [consent, setConsent] = useState(false);
   const [claimCandidate, setClaimCandidate] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(copy.restoring);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ScanFailure | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [uploaded, setUploaded] = useState(0);
+  const [uploadTotal, setUploadTotal] = useState(0);
   const controller = useRef<AbortController | null>(null);
   const previewUrls = useRef(new Set<string>());
   const busy = status !== null;
+  const uploading = uploadTotal > 0 && uploaded < uploadTotal;
 
-  const adoptView = useCallback((next: ScanView): void => {
-    setView(next);
-    setScanId(next.scan.id);
-    setDocument(next.document);
-    setDirty(false);
-    setConsent(false);
-  }, []);
-
-  const failureMessage = useRef(copy.failure);
-
-  useEffect(() => {
-    failureMessage.current = copy.failure;
-  }, [copy.failure]);
+  const adoptView = useCallback(
+    (next: ScanView): void => {
+      setView(next);
+      setScanId(next.scan.id);
+      setDocument(next.document);
+      setDirty(false);
+      setConsent(false);
+    },
+    [setView, setScanId, setDocument, setDirty, setConsent],
+  );
 
   useEffect(() => {
     const urls = previewUrls.current;
@@ -275,8 +370,16 @@ export function MenuScanPage({
 
         if (abort.signal.aborted) return;
         adoptView(next);
-      } catch {
-        if (!abort.signal.aborted) setError(failureMessage.current);
+      } catch (error) {
+        if (!abort.signal.aborted)
+          setFailure({
+            message: error instanceof Error ? error.message : copy.failure,
+            retryable: error instanceof MenuScanClientError ? error.retryable : false,
+            retryAfterSeconds:
+              error instanceof MenuScanClientError ? error.retryAfterSeconds : null,
+            action: null,
+            code: error instanceof MenuScanClientError ? error.failure?.code : undefined,
+          });
       } finally {
         if (!abort.signal.aborted) setStatus(null);
       }
@@ -290,24 +393,32 @@ export function MenuScanPage({
       abort.abort();
       controller.current?.abort();
     };
-  }, [owner, adoptView]);
+  }, [owner, adoptView, copy.failure]);
 
   const runTask = async (
     label: string,
     task: (signal: AbortSignal) => Promise<void>,
+    retryAction: RetryAction | null,
   ): Promise<void> => {
     controller.current?.abort();
     const abort = new AbortController();
     controller.current = abort;
     setStatus(label);
-    setError(null);
+    setFailure(null);
     setNotice(null);
 
     try {
       await task(abort.signal);
-    } catch (failure) {
-      if (!abort.signal.aborted)
-        setError(failure instanceof Error ? failure.message : copy.failure);
+    } catch (error) {
+      if (abort.signal.aborted) return;
+      const retryable = error instanceof MenuScanClientError && error.retryable;
+      setFailure({
+        message: error instanceof Error ? error.message : copy.failure,
+        retryable,
+        retryAfterSeconds: error instanceof MenuScanClientError ? error.retryAfterSeconds : null,
+        action: retryable ? retryAction : null,
+        code: error instanceof MenuScanClientError ? error.failure?.code : "invalid_request",
+      });
     } finally {
       if (!abort.signal.aborted) setStatus(null);
     }
@@ -316,15 +427,21 @@ export function MenuScanPage({
   const addPhotos = (files: FileList | null): void => {
     if (files === null) return;
     const selected = [...files];
-    const failure = validateMenuFiles([...photos.map((photo) => photo.file), ...selected]);
+    const rejected = validateMenuFiles([...photos.map((photo) => photo.file), ...selected]);
 
-    if (failure !== null) {
-      setError(failure);
+    if (rejected !== null) {
+      setFailure({
+        message: rejected,
+        retryable: false,
+        retryAfterSeconds: null,
+        action: null,
+        code: "invalid_request",
+      });
 
       return;
     }
 
-    setError(null);
+    setFailure(null);
     setPhotos((previous) => [
       ...previous,
       ...selected.map((file) => {
@@ -351,27 +468,44 @@ export function MenuScanPage({
     });
 
   const analyze = (): void => {
-    void runTask(copy.analyzing, async (signal) => {
-      if (photos.length === 0) throw new Error(copy.empty);
-      const branch = branchId === "" ? null : z.uuid().parse(branchId);
+    void runTask(
+      copy.analyzing,
+      async (signal) => {
+        if (photos.length === 0) throw new Error(copy.empty);
+        const branch = branchId === "" ? null : z.uuid().parse(branchId);
 
-      if (scanId !== null) await menuScanClient.remove(scanId, signal);
-      const created = await menuScanClient.create({ targetLanguage, venueId: branch }, signal);
-      setScanId(created.id);
-      sessionStorage.setItem(storageScan, created.id);
-      sessionStorage.setItem(storageOwner, owner);
+        if (scanId !== null) await menuScanClient.remove(scanId, signal);
+        const created = await menuScanClient.create({ targetLanguage, venueId: branch }, signal);
+        setScanId(created.id);
+        sessionStorage.setItem(storageScan, created.id);
+        sessionStorage.setItem(storageOwner, owner);
 
-      for (const [index, photo] of photos.entries()) {
-        setStatus(`${copy.uploading} ${index + 1}/${photos.length}`);
-        // oxlint-disable-next-line no-await-in-loop -- Photos upload in page order so progress matches the visible list.
-        await menuScanClient.attach(created.id, index + 1, photo.file, signal);
-      }
+        setUploaded(0);
+        setUploadTotal(photos.length);
 
-      setStatus(copy.analyzing);
-      const next = await menuScanClient.extract(created.id, signal);
+        for (const [index, photo] of photos.entries()) {
+          setStatus(`${copy.uploading} ${index + 1}/${photos.length}`);
+          // oxlint-disable-next-line no-await-in-loop -- Photos upload in page order so progress matches the visible list.
+          await menuScanClient.attach(created.id, index + 1, photo.file, signal);
+          setUploaded(index + 1);
+        }
 
-      if (!signal.aborted) adoptView(next);
-    });
+        setStatus(copy.analyzing);
+        const next = await menuScanClient.extract(created.id, signal);
+
+        if (!signal.aborted) adoptView(next);
+      },
+      "analyze",
+    );
+  };
+
+  const reloadScan = (): void => {
+    if (scanId === null) return;
+    void runTask(
+      copy.loading,
+      async (signal) => adoptView(await menuScanClient.get(scanId, signal)),
+      "load",
+    );
   };
 
   const saveRevision = (): void => {
@@ -380,60 +514,154 @@ export function MenuScanPage({
     const parsed = menuScanDocumentSchema.safeParse(document);
 
     if (!parsed.success) {
-      setError(parsed.error.issues.map((issue) => issue.message).join("; "));
+      setFailure({
+        message: parsed.error.issues.map((issue) => issue.message).join("; "),
+        retryable: false,
+        retryAfterSeconds: null,
+        action: null,
+        code: "invalid_request",
+      });
 
       return;
     }
 
-    void runTask(copy.saving, async (signal) =>
-      adoptView(
-        await menuScanClient.revise(
-          { scanId: view.scan.id, expectedRevision, document: parsed.data },
-          signal,
+    void runTask(
+      copy.saving,
+      async (signal) =>
+        adoptView(
+          await menuScanClient.revise(
+            { scanId: view.scan.id, expectedRevision, document: parsed.data },
+            signal,
+          ),
         ),
-      ),
+      "save",
     );
   };
 
   const submitContribution = (): void => {
     if (view === null || view.scan.current_revision === null || !consent || dirty) return;
     const revision = view.scan.current_revision;
-    void runTask(copy.contributing, async (signal) => {
-      const requestedVenue = branchId === "" ? null : z.uuid().parse(branchId);
-      await menuScanClient.contribute(
-        {
-          scanId: view.scan.id,
-          revision,
-          consent: true,
-          termsVersion: "menu-facts-v1",
-          venueId: requestedVenue,
-        },
-        signal,
-      );
-      adoptView(await menuScanClient.get(view.scan.id, signal));
-    });
+    void runTask(
+      copy.contributing,
+      async (signal) => {
+        const requestedVenue = branchId === "" ? null : z.uuid().parse(branchId);
+        await menuScanClient.contribute(
+          {
+            scanId: view.scan.id,
+            revision,
+            consent: true,
+            termsVersion: "menu-facts-v1",
+            venueId: requestedVenue,
+          },
+          signal,
+        );
+        adoptView(await menuScanClient.get(view.scan.id, signal));
+      },
+      "contribute",
+    );
   };
+
+  const retryFailure = (): void => {
+    if (failure?.action === "analyze") analyze();
+
+    if (failure?.action === "load") reloadScan();
+
+    if (failure?.action === "save") saveRevision();
+
+    if (failure?.action === "contribute") submitContribution();
+
+    if (failure?.action === "claim" && claimCandidate !== null) {
+      void runTask(
+        copy.claiming,
+        async (signal) => {
+          const next = await menuScanClient.claim(claimCandidate, signal);
+          sessionStorage.setItem(storageScan, next.scan.id);
+          sessionStorage.setItem(storageOwner, owner);
+          adoptView(next);
+          setClaimCandidate(null);
+        },
+        "claim",
+      );
+    }
+  };
+
+  const guidanceKind = failure === null ? null : scanFailureKind(failure.code);
+
+  let guidance: string | null = null;
+
+  if (guidanceKind === "validation") guidance = pageCopy.failureValidation;
+
+  if (guidanceKind === "conflict") guidance = pageCopy.failureConflict;
+
+  if (guidanceKind === "auth") guidance = pageCopy.failureAuth;
+
+  let retryAfterText: string | null = null;
+
+  if (failure !== null && failure.retryable) {
+    if (failure.retryAfterSeconds !== null)
+      retryAfterText = pageCopy.failureRetryAfter.replace(
+        "{seconds}",
+        String(failure.retryAfterSeconds),
+      );
+    else retryAfterText = pageCopy.failureRetryNow;
+  }
+
+  const modelChip = scanModelChip(view === null ? null : view.revision);
 
   return (
     <article className="menu-scan-page" lang={locale === "vi" ? "vi" : "en"}>
-      <header>
+      <header className="scan-intro">
         <h1 className="font-display text-4xl">{copy.title}</h1>
         <p>{copy.introduction}</p>
       </header>
-      <p className="scan-privacy">
-        {copy.privacy}{" "}
-        <a href="https://dev.meta.ai/legal/terms-of-service" target="_blank" rel="noreferrer">
-          Meta terms
-        </a>
-      </p>
-      {error !== null && (
-        <p role="alert" className="scan-error">
-          {error}
+      <p className="scan-privacy">{pageCopy.privacyShort}</p>
+      <details className="scan-privacy-details">
+        <summary>{pageCopy.privacyDetailsLabel}</summary>
+        <p>
+          {copy.privacy}{" "}
+          <a href="https://dev.meta.ai/legal/terms-of-service" target="_blank" rel="noreferrer">
+            Meta terms
+          </a>
         </p>
+      </details>
+      {failure !== null && (
+        <div role="alert" className="scan-failure">
+          <p>
+            <TriangleAlert aria-hidden="true" /> {failure.message}
+          </p>
+          {failure.retryable && <p>{pageCopy.failureRetryable}</p>}
+          {guidance !== null && <p>{guidance}</p>}
+          {retryAfterText !== null && <p>{retryAfterText}</p>}
+          {failure.retryable && failure.action !== null && (
+            <button type="button" onClick={retryFailure}>
+              <RefreshCw aria-hidden="true" /> {pageCopy.retryAction}
+            </button>
+          )}
+        </div>
       )}
-      <output className="scan-status" aria-live="polite">
-        {status ?? notice}
-      </output>
+      {status !== null && (
+        <div className="scan-progress" aria-busy="true">
+          <output aria-live="polite">
+            {busy && <LoaderCircle aria-hidden="true" />} {status}
+          </output>
+          {uploading && (
+            <>
+              <progress value={uploaded} max={uploadTotal} aria-label={pageCopy.uploadProgress} />
+              <p aria-live="polite">
+                {pageCopy.uploadProgress}: {uploaded}/{uploadTotal}
+              </p>
+            </>
+          )}
+          {!uploading && uploadTotal > 0 && status === copy.analyzing && (
+            <p aria-live="polite">{pageCopy.stageAnalyzing}</p>
+          )}
+        </div>
+      )}
+      {status === null && notice !== null && (
+        <output className="scan-status" aria-live="polite">
+          {notice}
+        </output>
+      )}
       {claimCandidate !== null && (
         <section className="scan-claim">
           <p>{copy.claimHelp}</p>
@@ -441,13 +669,17 @@ export function MenuScanPage({
             type="button"
             disabled={busy}
             onClick={() => {
-              void runTask(copy.claiming, async (signal) => {
-                const next = await menuScanClient.claim(claimCandidate, signal);
-                sessionStorage.setItem(storageScan, next.scan.id);
-                sessionStorage.setItem(storageOwner, owner);
-                adoptView(next);
-                setClaimCandidate(null);
-              });
+              void runTask(
+                copy.claiming,
+                async (signal) => {
+                  const next = await menuScanClient.claim(claimCandidate, signal);
+                  sessionStorage.setItem(storageScan, next.scan.id);
+                  sessionStorage.setItem(storageOwner, owner);
+                  adoptView(next);
+                  setClaimCandidate(null);
+                },
+                "claim",
+              );
             }}
           >
             {copy.claim}
@@ -455,33 +687,45 @@ export function MenuScanPage({
         </section>
       )}
       {document === null && (
-        <section className="scan-upload" aria-label={copy.pages} aria-busy={busy}>
-          <label htmlFor="scan-camera">{copy.camera}</label>
-          <input
-            id="scan-camera"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            capture="environment"
-            disabled={busy}
-            aria-describedby="scan-camera-help"
-            onChange={(event) => {
-              addPhotos(event.target.files);
-              event.target.value = "";
-            }}
-          />
-          <label htmlFor="scan-gallery">{copy.gallery}</label>
-          <input
-            id="scan-gallery"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            multiple
-            disabled={busy}
-            aria-describedby="scan-camera-help"
-            onChange={(event) => {
-              addPhotos(event.target.files);
-              event.target.value = "";
-            }}
-          />
+        <section className="scan-sheet" aria-label={pageCopy.sheetTitle} aria-busy={busy}>
+          <h2>{pageCopy.sheetTitle}</h2>
+          <p>{pageCopy.sheetHint}</p>
+          <div className="scan-sheet-actions">
+            <div className="scan-camera-action">
+              <label htmlFor="scan-camera">
+                <Camera aria-hidden="true" /> {copy.camera}
+              </label>
+              <input
+                id="scan-camera"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                capture="environment"
+                disabled={busy}
+                aria-describedby="scan-camera-help"
+                onChange={(event) => {
+                  addPhotos(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+            </div>
+            <div className="scan-gallery-action">
+              <label htmlFor="scan-gallery">
+                <Images aria-hidden="true" /> {copy.gallery}
+              </label>
+              <input
+                id="scan-gallery"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                disabled={busy}
+                aria-describedby="scan-camera-help"
+                onChange={(event) => {
+                  addPhotos(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+            </div>
+          </div>
           <p id="scan-camera-help">{copy.cameraHelp}</p>
           <label htmlFor="scan-target-language">{copy.language}</label>
           <select
@@ -503,13 +747,23 @@ export function MenuScanPage({
             disabled={busy}
             copy={copy}
           />
-          <ol className="scan-photo-list">
+          <ol className="scan-photo-list" aria-label={copy.pages}>
             {photos.map((photo, index) => (
               <li key={photo.id}>
                 <img src={photo.previewUrl} alt={`${copy.pages} ${index + 1}`} />
                 <p>
                   {index + 1}. {photo.file.name}
                 </p>
+                {uploadTotal > 0 && (
+                  <p className="scan-photo-state">
+                    <PhotoUploadState
+                      index={index}
+                      uploaded={uploaded}
+                      uploading={uploading}
+                      copy={pageCopy}
+                    />
+                  </p>
+                )}
                 <div className="scan-photo-actions">
                   <button
                     type="button"
@@ -517,7 +771,7 @@ export function MenuScanPage({
                     onClick={() => movePhoto(photo.id, -1)}
                     aria-label={`${copy.earlier}: ${index + 1}`}
                   >
-                    ↑
+                    <ChevronUp aria-hidden="true" />
                   </button>
                   <button
                     type="button"
@@ -525,7 +779,7 @@ export function MenuScanPage({
                     onClick={() => movePhoto(photo.id, 1)}
                     aria-label={`${copy.later}: ${index + 1}`}
                   >
-                    ↓
+                    <ChevronDown aria-hidden="true" />
                   </button>
                   <button
                     type="button"
@@ -536,55 +790,53 @@ export function MenuScanPage({
                       setPhotos((previous) => previous.filter((entry) => entry.id !== photo.id));
                     }}
                   >
-                    {copy.removePhoto}
+                    <X aria-hidden="true" /> {copy.removePhoto}
                   </button>
                 </div>
               </li>
             ))}
           </ol>
           {photos.length === 0 && <p>{copy.empty}</p>}
-          <button
-            type="button"
-            className="menu-order-primary"
-            disabled={busy || photos.length === 0}
-            onClick={analyze}
-          >
-            {scanId === null ? copy.analyze : copy.retry}
-          </button>
           {scanId !== null && <p>{copy.uploadRetry}</p>}
+          <div className="scan-actionbar">
+            <button
+              type="button"
+              className="menu-order-primary"
+              disabled={busy || photos.length === 0}
+              onClick={analyze}
+            >
+              {scanId === null ? copy.analyze : copy.retry}
+            </button>
+          </div>
         </section>
       )}
       {view?.scan.status === "processing" && <p>{copy.processing}</p>}
       {scanId !== null && (
         <div className="scan-session-actions">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              void runTask(copy.loading, async (signal) =>
-                adoptView(await menuScanClient.get(scanId, signal)),
-              );
-            }}
-          >
-            {copy.refresh}
+          <button type="button" disabled={busy} onClick={reloadScan}>
+            <RefreshCw aria-hidden="true" /> {copy.refresh}
           </button>
           <button
             type="button"
             disabled={busy}
             onClick={() => {
-              void runTask(copy.deleting, async (signal) => {
-                await menuScanClient.remove(scanId, signal);
-                sessionStorage.removeItem(storageScan);
-                setScanId(null);
-                setView(null);
-                setDocument(null);
-                setDirty(false);
-                setConsent(false);
-                setNotice(copy.deleted);
-              });
+              void runTask(
+                copy.deleting,
+                async (signal) => {
+                  await menuScanClient.remove(scanId, signal);
+                  sessionStorage.removeItem(storageScan);
+                  setScanId(null);
+                  setView(null);
+                  setDocument(null);
+                  setDirty(false);
+                  setConsent(false);
+                  setNotice(copy.deleted);
+                },
+                null,
+              );
             }}
           >
-            {copy.delete}
+            <Trash2 aria-hidden="true" /> {copy.delete}
           </button>
         </div>
       )}
@@ -596,6 +848,11 @@ export function MenuScanPage({
               {new Date(view.scan.expires_at).toLocaleString(locale)}
             </time>
           </p>
+          {modelChip !== null && (
+            <p className="scan-model-chip">
+              {pageCopy.modelLabel}: {modelChip.model} · rev {modelChip.revision}
+            </p>
+          )}
           <InteractiveMenuView
             key={`${owner}:${view.scan.id}`}
             menu={presentScan(document, view.scan.venue_name)}

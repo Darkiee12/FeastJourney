@@ -14,6 +14,7 @@ import {
   recommendationQuerySchema,
   relatedQuerySchema,
 } from "@/modules/food-discovery/food.schema";
+import type { RankedDishSummary } from "@/modules/food-discovery/server/operations/recommendation-service";
 
 const loadServer = () =>
   Promise.all([
@@ -496,9 +497,20 @@ export const recommendDishesFn = createServerFn({ method: "POST" })
 
     const wire = toWireOutcome(outcome);
 
+    // Transport-only projection: per-dish Muse reasons ride the DishSummary
+    // cards on AI-ranked results only. Every other mode strips model text
+    // (JSON drops undefined values), so degraded and deterministic fallbacks
+    // never show model reasons even if a dish object carried them. No SQL
+    // change: reasons are never persisted or read from the catalog.
+    const dishes: Array<RankedDishSummary> =
+      wire.mode === "ai"
+        ? wire.dishes
+        : wire.dishes.map((dish) => ({ ...dish, aiReason: undefined }));
+
     if (data.allergies.length > 0) {
       return {
         ...wire,
+        dishes,
         warnings: [
           ...wire.warnings,
           "Legacy allergy terms were merged as ordinary exclusions; strict refusal no longer applies.",
@@ -506,5 +518,5 @@ export const recommendDishesFn = createServerFn({ method: "POST" })
       };
     }
 
-    return wire;
+    return { ...wire, dishes };
   });

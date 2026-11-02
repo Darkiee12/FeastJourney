@@ -38,7 +38,12 @@ import insertRevision from "@/modules/restaurant-discovery/server/repository/sql
 import revisionQuery from "@/modules/restaurant-discovery/server/repository/sql/scan-revision.sql";
 import { withTransaction } from "@/server/database/client";
 import { runQuery } from "@/server/database/query";
-import { InvalidModelOutput, MenuExtractor } from "@/server/integrations/muse-menu";
+import { menuScanConfig } from "@/server/integrations/menu-scan-config";
+import {
+  ExtractionUnavailable,
+  InvalidModelOutput,
+  MenuExtractor,
+} from "@/server/integrations/muse-menu";
 import { PrivateMenuStorage, validateMenuImage } from "@/server/integrations/private-menu-storage";
 
 /** Constructed only by the verified session/capability transport boundary. */
@@ -84,10 +89,14 @@ export const loadMenuScanDocument = Effect.fn("menu.loadRevision")(function* (
 
   // The versioned JSON document is an independent untrusted-data contract;
   // Reylo types the row but does not validate the JSON's schema version.
-  return yield* Effect.try({
+  // Origin/model travel alongside so the UI can attribute the revision
+  // without a second query; they are display metadata, never authority.
+  const parsed = yield* Effect.try({
     try: () => menuScanDocumentSchema.parse(row.document),
     catch: () => new ScanInputError({ reason: "The saved menu document could not be read." }),
   });
+
+  return { document: parsed, origin: row.origin, model: row.model };
 });
 
 export const getMenuScan = Effect.fn("menu.get")(function* (
@@ -112,7 +121,22 @@ export const getMenuScan = Effect.fn("menu.get")(function* (
           ? null
           : yield* loadMenuScanDocument(scanId, scan.current_revision);
 
-      return { scan, assets, document, contribution };
+      const revision =
+        scan.current_revision === null || document === null
+          ? null
+          : {
+              number: scan.current_revision,
+              origin: document.origin,
+              model: document.model,
+            };
+
+      return {
+        scan,
+        assets,
+        document: document === null ? null : document.document,
+        revision,
+        contribution,
+      };
     }),
   );
 });
@@ -304,6 +328,24 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
   scanId: string,
   requestId: string,
 ) {
+  // Revision provenance records the actual configured model, so resolve it
+  // before any lease or inference. A disabled or misconfigured scanner fails
+  // here; the live extractor enforces the same boundary before any provider call.
+  const scanner = yield* Effect.try({
+    try: menuScanConfig,
+    catch: () =>
+      new ExtractionUnavailable({
+        reason: "Menu analysis is unavailable. Please retry later.",
+        retryable: false,
+      }),
+  });
+
+  if (scanner === null)
+    return yield* new ExtractionUnavailable({
+      reason: "Menu analysis is unavailable. Please retry later.",
+      retryable: false,
+    });
+
   const token = yield* withTransaction(
     "menu/claim-extraction",
     Effect.gen(function* () {
@@ -428,7 +470,7 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
                 revision: 1,
                 document,
                 origin: "model",
-                model: "muse-spark-1.3",
+                model: scanner.model,
                 user_id: principal.userId,
               }),
             );
@@ -479,13 +521,13 @@ export const reviseMenuScan = Effect.fn("menu.revise")(function* (
 
       const previous = yield* loadMenuScanDocument(input.scanId, input.expectedRevision);
 
-      if (!validateMenuRevision(previous, input.document)) {
+      if (!validateMenuRevision(previous.document, input.document)) {
         yield* new ScanInputError({
           reason: "Corrections must retain the original menu items, variants and photographs.",
         });
       }
 
-      const previousItems = new Map(previous.items.map((item) => [item.id, item]));
+      const previousItems = new Map(previous.document.items.map((item) => [item.id, item]));
 
       const document = {
         ...input.document,

@@ -59,6 +59,20 @@ const photoSchema = z.union([
   z.strictObject({ contributionId: z.uuid(), assetId: z.uuid() }),
 ]);
 
+/**
+ * Retry-After is advisory: it invites the client to retry, so it is sent
+ * only when the client error contract says the failure is retryable. A
+ * non-retryable failure that happens to carry provider timing data must not
+ * advertise a retry delay.
+ */
+export function applyRetryAfter(
+  headers: Headers,
+  failure: { readonly retryable: boolean; readonly retryAfterSeconds: number | null },
+): void {
+  if (failure.retryable && failure.retryAfterSeconds !== null)
+    headers.set("Retry-After", String(failure.retryAfterSeconds));
+}
+
 export async function handleMenuScanRequest(request: Request): Promise<Response> {
   const requestId = crypto.randomUUID();
 
@@ -252,8 +266,7 @@ export async function handleMenuScanRequest(request: Request): Promise<Response>
     onFailure: () => clientFailure(undefined),
   });
 
-  if (failure.retryAfterSeconds !== null)
-    headers.set("Retry-After", String(failure.retryAfterSeconds));
+  applyRetryAfter(headers, failure);
 
   return Response.json(failure, { status: failure.status, headers });
 }

@@ -57,10 +57,21 @@ import {
   type MetaRankCandidate,
   type MuseRankingConfig,
   RankingFailureDisposition,
+  type RankingResult,
   dispositionForMetaError,
 } from "@/server/integrations/meta-client";
 
 export type RecommendationCandidateRow = (typeof dishRecommendationCandidates)["~reylo"]["element"];
+
+/**
+ * Transport-only per-dish Muse reason. Attached in the service after
+ * validation, projected by the transport, never persisted and never read
+ * from SQL. Present only on ReadyMuse dishes: deterministic, degraded,
+ * uncertain, and empty paths never carry model text.
+ */
+export interface RankedDishSummary extends DishSummary {
+  readonly aiReason?: string | undefined;
+}
 
 export type CityRecommendationCandidateRow =
   (typeof dishRecommendationCandidatesPlace)["~reylo"]["element"];
@@ -70,7 +81,7 @@ export type RecommendationServedScope = "city" | "country" | "nearby" | "worldwi
 
 export type RecommendationOutcome = Data.TaggedEnum<{
   ReadyMuse: {
-    readonly dishes: ReadonlyArray<DishSummary>;
+    readonly dishes: ReadonlyArray<RankedDishSummary>;
     readonly warnings: ReadonlyArray<string>;
     readonly ranking: RankingProvenance;
     readonly servedScope: RecommendationServedScope;
@@ -115,7 +126,10 @@ export class RecommendationMisconfigured extends Data.TaggedError("Recommendatio
 
 /** Intermediate provider result before hydration into dish summaries. */
 export type MuseRankResult = Data.TaggedEnum<{
-  Ranked: { readonly ids: ReadonlyArray<string> };
+  Ranked: {
+    readonly ids: ReadonlyArray<string>;
+    readonly reasons: ReadonlyArray<string>;
+  };
   Degraded: {
     readonly ids: ReadonlyArray<string>;
     readonly warning: string;
@@ -135,7 +149,7 @@ export const MuseRankResult = Data.taggedEnum<MuseRankResult>();
  */
 export interface RecommendationWireOutcome {
   readonly mode: "ai" | "deterministic" | "uncertain" | "empty";
-  readonly dishes: Array<DishSummary>;
+  readonly dishes: Array<RankedDishSummary>;
   readonly warnings: Array<string>;
   readonly reasons: Array<string>;
   readonly ranking: RankingProvenance;
@@ -610,12 +624,44 @@ const enrichRows = (
     });
   });
 
-const validateRankedIds = (
-  ids: ReadonlyArray<string>,
+/**
+ * Server-side approximation of the reason claim allowlist (cuisine,
+ * meal-category, region, exclusion-respect only). Any reason matching a
+ * banned class — safety/allergy, health, popularity/social-proof, or
+ * opening-hours — invalidates the whole payload (MetaInvalidOutput →
+ * deterministic fallback + warning). Grounding to the supplied context is
+ * prompt-enforced; this denylist is the fail-safe backstop. Fail-safe by
+ * design: an over-eager pattern only costs AI ordering, never leaks a claim.
+ */
+const BANNED_REASON_CLAIMS: ReadonlyArray<{ readonly tag: string; readonly pattern: RegExp }> = [
+  {
+    tag: "safety",
+    pattern: /\b(safe|safety|allergen|allergens|allergic|allergies|guarantee[sd]?|risk-?free)\b/i,
+  },
+  {
+    tag: "health",
+    pattern:
+      /\b(health|healthy|unhealthy|nutriti\w*|calories?|diet\w*|low-?fat|protein-?rich|vitamins?)\b/i,
+  },
+  {
+    tag: "popularity",
+    pattern:
+      /\b(popular|popularity|famous|ratings?|rated|stars?|reviews?|michelin|trending|best-?sellers?)\b/i,
+  },
+  {
+    tag: "hours",
+    pattern: /\b(open|opening|hours|open-?late|late-?night|closes?|24\s?\/\s?7)\b/i,
+  },
+];
+
+const validateRankedResult = (
+  result: RankingResult,
   candidates: ReadonlyArray<RecommendationCandidateRow>,
   outputLimit: number,
-): Effect.Effect<ReadonlyArray<string>, MetaInvalidOutput> =>
+): Effect.Effect<RankingResult, MetaInvalidOutput> =>
   Effect.gen(function* () {
+    const { ids, reasons } = result;
+
     if (ids.length === 0) {
       return yield* new MetaInvalidOutput({ reason: "Meta ranking was empty" });
     }
@@ -623,6 +669,12 @@ const validateRankedIds = (
     if (ids.length > outputLimit) {
       return yield* new MetaInvalidOutput({
         reason: `Meta ranking returned ${ids.length} dishes (limit ${outputLimit})`,
+      });
+    }
+
+    if (reasons.length !== ids.length) {
+      return yield* new MetaInvalidOutput({
+        reason: `Meta ranking returned ${ids.length.toString()} ids with ${reasons.length.toString()} reasons (must match)`,
       });
     }
 
@@ -645,7 +697,21 @@ const validateRankedIds = (
       seen.add(id);
     }
 
-    return ids;
+    for (const reason of reasons) {
+      if (reason.trim().length === 0) {
+        return yield* new MetaInvalidOutput({ reason: "Meta ranking contained an empty reason" });
+      }
+
+      for (const { tag, pattern } of BANNED_REASON_CLAIMS) {
+        if (pattern.test(reason)) {
+          return yield* new MetaInvalidOutput({
+            reason: `Meta ranking reason made a ${tag} claim`,
+          });
+        }
+      }
+    }
+
+    return result;
   });
 
 // Local relevance order. Mood-free by design: no catalog signal encodes
@@ -685,6 +751,22 @@ const rankAllDeterministic = (
   );
 
   return scored.map((entry) => entry.candidate);
+};
+
+/**
+ * Zip validated parallel reasons onto enriched summaries. Validation
+ * guarantees equal lengths, so a mismatch here means an internal drift:
+ * attach nothing rather than misattribute model text to the wrong dish.
+ */
+const zipReasons = (
+  summaries: ReadonlyArray<DishSummary>,
+  reasons: ReadonlyArray<string>,
+): Array<RankedDishSummary> => {
+  if (summaries.length !== reasons.length) {
+    return summaries.map((summary) => ({ ...summary }));
+  }
+
+  return summaries.map((summary, index) => ({ ...summary, aiReason: reasons[index] }));
 };
 
 /**
@@ -815,9 +897,11 @@ const rankWithMuse = (
         }),
       ),
     ),
-    (ids) => validateRankedIds(ids, candidates, outputLimit),
+    (result) => validateRankedResult(result, candidates, outputLimit),
   ).pipe(
-    Effect.map((ids) => MuseRankResult.Ranked({ ids })),
+    Effect.map((result) =>
+      MuseRankResult.Ranked({ ids: result.ids, reasons: [...result.reasons] }),
+    ),
     Effect.catchTags({
       MetaAuthError: (error) => failLoudly(config, error),
       MetaPermanentError: (error) => failLoudly(config, error),
@@ -944,9 +1028,9 @@ const finishRecommendations = (
     );
 
     return MuseRankResult.$match(ranked, {
-      Ranked: () =>
+      Ranked: ({ reasons }) =>
         RecommendationOutcome.ReadyMuse({
-          dishes,
+          dishes: zipReasons(dishes, reasons),
           warnings: [...warnings],
           ranking: RankingProvenance.LiveMuse(),
           servedScope,
