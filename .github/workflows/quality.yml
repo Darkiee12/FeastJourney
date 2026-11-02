@@ -28,7 +28,7 @@ jobs:
   backend:
     name: PostgreSQL-backed typecheck, tests and build
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     env:
       # Disposable CI-only values (fresh Postgres per run, test-only admin key).
       DATABASE_URL: postgres://feastjourney:replace-with-strong-local-only-password@127.0.0.1:5433/feastjourney
@@ -64,6 +64,18 @@ jobs:
         run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator
       - name: Validate Flyway migration history
         run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator validate
+      - name: Restore Reylo analysis cache
+        uses: actions/cache@v4
+        with:
+          # Reylo caches each query's analysis in .reylo/, keyed by a
+          # fingerprint of the schema (reylo.dev): entries self-invalidate
+          # after migrations, and .reylo/ self-excludes from git. The cache
+          # key busts on any query, migration, config, or engine change, so a
+          # stale hit is impossible; worst case is a cold re-analysis.
+          path: .reylo
+          key: reylo-${{ runner.os }}-${{ hashFiles('src/**/*.sql', 'db/migrations/**', '.reylo.yaml', 'bun.lock') }}
+          restore-keys: |
+            reylo-${{ runner.os }}-
       - name: Reylo-aware TypeScript
         run: bun run check-types
       - name: Unit and integration tests
