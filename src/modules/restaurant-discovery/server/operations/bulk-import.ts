@@ -63,15 +63,38 @@ export type RestaurantImportJobRow = (typeof jobFind)["~reylo"]["element"];
 
 export type RestaurantImportRecordRow = (typeof recordsByJob)["~reylo"]["element"];
 
-/** Initial bounded geography: Ho Chi Minh City. Hanoi follows only after
- * HCMC ingests cleanly (widen here, never in the wizard). */
-export const COVERAGE_BOUNDS = {
+export interface CoverageRegion {
+  readonly name: string;
+  readonly countryCode: string;
+  readonly minLongitude: number;
+  readonly maxLongitude: number;
+  readonly minLatitude: number;
+  readonly maxLatitude: number;
+}
+
+/** Supported coverage regions for restaurant discovery. (widen here, never in the wizard). */
+const PRIMARY_REGION: CoverageRegion = {
+  name: "Ho Chi Minh City",
+  countryCode: "VN",
   minLongitude: 106.3,
   maxLongitude: 107.1,
   minLatitude: 10.3,
   maxLatitude: 11.2,
-  countryCode: "VN",
-} as const;
+};
+
+export const COVERAGE_REGIONS: ReadonlyArray<CoverageRegion> = [
+  PRIMARY_REGION,
+  {
+    name: "Bangalore",
+    countryCode: "IN",
+    minLongitude: 77.3,
+    maxLongitude: 77.9,
+    minLatitude: 12.75,
+    maxLatitude: 13.3,
+  },
+];
+
+export const COVERAGE_BOUNDS: CoverageRegion = PRIMARY_REGION;
 
 /** Trigram floor for fuzzy duplicate candidacy (ADR 0006: within 50 m). */
 export const FUZZY_SIMILARITY_THRESHOLD = 0.4;
@@ -191,11 +214,21 @@ export const classifyDuplicateDecision = (input: {
   return "create";
 };
 
-export const isWithinCoverage = (longitude: number, latitude: number): boolean =>
-  longitude >= COVERAGE_BOUNDS.minLongitude &&
-  longitude <= COVERAGE_BOUNDS.maxLongitude &&
-  latitude >= COVERAGE_BOUNDS.minLatitude &&
-  latitude <= COVERAGE_BOUNDS.maxLatitude;
+export const isWithinCoverage = (
+  longitude: number,
+  latitude: number,
+  countryCode?: string,
+): boolean =>
+  COVERAGE_REGIONS.some(
+    (region) =>
+      (countryCode === undefined || region.countryCode === countryCode) &&
+      Number.isFinite(longitude) &&
+      Number.isFinite(latitude) &&
+      longitude >= region.minLongitude &&
+      longitude <= region.maxLongitude &&
+      latitude >= region.minLatitude &&
+      latitude <= region.maxLatitude,
+  );
 
 export interface ParsedCsv {
   readonly headers: ReadonlyArray<string>;
@@ -429,14 +462,16 @@ export const validateStagedRow = (
       errors.push(`${issue.path.join(".") || "row"}: ${issue.message}`);
     }
   } else {
-    if (parsed.data.countryCode !== COVERAGE_BOUNDS.countryCode) {
-      errors.push(
-        `countryCode: only ${COVERAGE_BOUNDS.countryCode} venues are in scope (Ho Chi Minh City first)`,
-      );
-    }
+    const region = COVERAGE_REGIONS.find((r) => r.countryCode === parsed.data.countryCode);
 
-    if (!isWithinCoverage(parsed.data.longitude, parsed.data.latitude)) {
-      errors.push("coordinates: outside the Ho Chi Minh City coverage bounds");
+    if (region === undefined) {
+      errors.push(
+        `countryCode: only ${COVERAGE_REGIONS.map((r) => r.countryCode).join(", ")} venues are in scope (${COVERAGE_BOUNDS.name} first)`,
+      );
+    } else if (
+      !isWithinCoverage(parsed.data.longitude, parsed.data.latitude, parsed.data.countryCode)
+    ) {
+      errors.push(`coordinates: outside the ${region.name} coverage bounds`);
     }
 
     if (parsed.data.sourceUrl === null) {

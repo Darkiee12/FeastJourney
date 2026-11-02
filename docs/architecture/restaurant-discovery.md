@@ -222,3 +222,15 @@ third-party calls separately. No historical PR test count or skipped CI commit
 establishes current readiness. The product vision, MVP and trust-and-safety
 documents referenced by `AGENTS.md` remain missing; this document does not invent
 requirements in their place.
+
+### Customer-review retention policy
+
+Customer reviews use soft-delete-with-redaction. A removed row keeps
+`author_id`, `venue_id`, `rating`, `created_at`, `updated_at`, and
+`published_at` for audit and moderation history; only `body` is redacted to
+`''` with status `removed`. The row never appears in published-only reads or
+aggregates again. This is not anonymization: the author link stays so abuse
+stays traceable and the partial unique index can distinguish terminal rows
+from active ones. Resubmission after removal creates a fresh row only when no
+active (`pending`/`published`) row remains; rejected rows stay for audit while
+a fresh submission proceeds.

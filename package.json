@@ -20,7 +20,7 @@
     "fmt": "oxfmt .",
     "check-types": "tsc --noEmit --runExternalCode -p tsconfig.json",
     "check": "bun run format && bun run lint && bun run check-types",
-    "test": "bun test tests/",
+    "test": "bun test --isolate tests/",
     "audit": "bun run audit:dependencies && bun run audit:slop && bun run audit:react-doctor && bun run audit:react-compiler",
     "audit:dependencies": "bun audit",
     "audit:slop": "bunx aislop@0.18.1 ci",

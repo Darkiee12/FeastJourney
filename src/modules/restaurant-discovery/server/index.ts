@@ -123,6 +123,8 @@ export {
 export {
   getRestaurantReviewSummary,
   listRestaurantCustomerReviews,
+  getOwnRestaurantReview,
+  listCustomerReviewQueue,
   submitRestaurantCustomerReview,
   updateOwnRestaurantCustomerReview,
   deleteOwnRestaurantCustomerReview,
@@ -140,6 +142,9 @@ export {
 export type {
   CustomerReviewRow,
   CustomerReviewListRow,
+  CustomerReviewOwnRow,
+  CustomerReviewOwnInput,
+  CustomerReviewQueueInput,
   CustomerReviewSummary,
   CustomerReviewModerationStatus,
   CustomerReviewSubmitInput,

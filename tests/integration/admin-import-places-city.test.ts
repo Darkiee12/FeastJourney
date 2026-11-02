@@ -1,6 +1,6 @@
 // oxlint-disable-next-line import/no-unassigned-import -- side-effectful test environment setup, runs before server modules initialize.
 import "./cleanup";
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 
 import { SQL } from "bun";
 import { Effect } from "effect";
@@ -196,6 +196,15 @@ const removeColliderPair = async (collider: Collider): Promise<void> => {
   );
   await query((sql) => sql`DELETE FROM feastjourney.places WHERE id = ANY(${ids}::bigint[])`);
 };
+
+afterAll(async () => {
+  // Data hygiene: applied dishes link Hanoi/Bengaluru/VN and would pollute
+  // the shared database for suites that need an empty Hanoi pool
+  // (recommendation honest fallbacks). Slugs derive from the stamp-unique
+  // dish names, so one prefix match removes exactly this file's dishes;
+  // dish rows cascade to dish_places/names/descriptions.
+  await query((sql) => sql`DELETE FROM feastjourney.dishes WHERE slug LIKE ${`%${stamp}%`}`);
+});
 
 describe("admin import city/province places", () => {
   test("JSON city@parent object resolves and applies with explicit origin", async () => {

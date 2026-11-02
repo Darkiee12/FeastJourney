@@ -174,14 +174,22 @@
         "src/routes/dishes.index.tsx",
         "src/routes/api/menu-scans.ts",
         "tests/integration/restaurants.test.ts",
+        "tests/integration/restaurant-customer-reviews.test.ts",
+        "tests/integration/restaurant-customer-review-lifecycle.test.ts",
+        "tests/integration/restaurant-customer-review-privacy.test.ts",
+        "tests/integration/restaurant-customer-review-queue.test.ts",
         "tests/integration/restaurant-fx-cache.test.ts",
         "tests/integration/restaurant-publication-gating.test.ts",
         "tests/integration/menu-scan-config-status.test.ts",
         "tests/integration/menu-scan-hardening.test.ts",
         "tests/integration/menu-scan-promotion.test.ts",
+        "tests/integration/menu-scan-provenance.test.ts",
+        "tests/integration/restaurant-menu-pages.test.ts",
+        "tests/integration/restaurant-photo-api.test.ts",
         "tests/unit/restaurant-*.test.{ts,tsx}",
         "tests/unit/scan-*.test.{ts,tsx}",
         "tests/unit/menu-scan-hardening.test.ts",
+        "tests/unit/menu-scan-transport.test.ts",
         "tests/unit/menu-image.test.ts",
         "tests/unit/muse-menu.test.ts",
         "tests/unit/meta-client-abort.test.ts",
@@ -237,6 +245,7 @@
     "coverage/**",
     "**/routeTree.gen.ts",
     "**/*.generated.ts",
-    "tools/oxlint/**"
+    "tools/oxlint/**",
+    "probe-mapux.mjs"
   ]
 }

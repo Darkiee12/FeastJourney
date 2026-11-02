@@ -67,7 +67,10 @@ function DishSearch() {
               </Link>
             </h2>
             <p>{dish.regionNames.join(" · ")}</p>
-            <Link to="/restaurants" search={{ lang: search.lang, dish: dish.id }}>
+            <Link
+              to="/restaurants"
+              search={{ lang: search.lang, dish: dish.id, fromDish: dish.slug }}
+            >
               Find restaurants serving this
             </Link>
           </li>

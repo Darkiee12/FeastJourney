@@ -32,6 +32,7 @@ import {
   MetaPermanentError,
   MetaRateLimited,
   MetaRequestError,
+  type RankingResult,
 } from "@/server/integrations/meta-client";
 
 // Recommendation tests use the real database with a fake MetaClient injected
@@ -48,7 +49,7 @@ type RankImpl = (
   candidates: ReadonlyArray<MetaRankCandidate>,
   context: MetaRankContext,
   config: MuseRankingConfig,
-) => Effect.Effect<ReadonlyArray<string>, MetaError>;
+) => Effect.Effect<RankingResult, MetaError>;
 
 const makeRuntime = (rank: RankImpl) => {
   const fakeMeta = Layer.succeed(MetaClient, { rank });
@@ -160,6 +161,18 @@ const reasonsOf = (outcome: RecommendationOutcome): Array<string> =>
     ReadyDeterministic: () => [],
     Uncertain: ({ reasons }) => [...reasons],
     Empty: ({ reasons }) => [...reasons],
+  });
+
+/**
+ * Per-dish Muse reasons on the AI path. Deterministic, uncertain, and empty
+ * outcomes never carry model text; the transport strips it as well.
+ */
+const dishReasonsOf = (outcome: RecommendationOutcome): Array<string | undefined> =>
+  RecommendationOutcome.$match(outcome, {
+    ReadyMuse: ({ dishes }) => dishes.map((dish) => dish.aiReason),
+    ReadyDeterministic: () => [],
+    Uncertain: () => [],
+    Empty: () => [],
   });
 
 const servedOf = (outcome: RecommendationOutcome): string | undefined =>
@@ -400,6 +413,7 @@ describe("dish recommendations", () => {
     let calls = 0;
     let candidateKeys: Array<string> = [];
     let expectedIds: Array<string> = [];
+    let expectedReasons: Array<string> = [];
 
     const runtime = track(
       makeRuntime((candidates, context, config) => {
@@ -410,16 +424,18 @@ describe("dish recommendations", () => {
           candidateKeys = Object.keys(first).toSorted();
         }
 
-        expectedIds = candidates
-          .slice(0, 3)
-          .toReversed()
-          .map((candidate) => candidate.id);
+        const picked = candidates.slice(0, 3).toReversed();
+
+        expectedIds = picked.map((candidate) => candidate.id);
+        expectedReasons = picked.map(
+          (candidate) => `Shortlisted ${candidate.name} for a comforting dinner`,
+        );
 
         expect(context.occasion).toBe("dinner");
         expect(context.mood).toBe("comforting");
         expect(config.modelId).toBe("muse-spark-1.3");
 
-        return Effect.succeed(expectedIds);
+        return Effect.succeed({ ids: expectedIds, reasons: expectedReasons });
       }),
     );
 
@@ -436,6 +452,7 @@ describe("dish recommendations", () => {
     const dishes = dishesOf(outcome);
     expect(dishes).toHaveLength(3);
     expect(dishes.map((dish) => dish.id)).toEqual(expectedIds);
+    expect(dishReasonsOf(outcome)).toEqual(expectedReasons);
     expect(dishes[0]?.name).toBeDefined();
     expect(dishes[0]?.slug.length).toBeGreaterThan(0);
     expect(dishes[0]?.categorySlugs.length).toBeGreaterThan(0);
@@ -456,7 +473,12 @@ describe("dish recommendations", () => {
           context: { ...context, excludedIngredients: [...context.excludedIngredients] },
         });
 
-        return Effect.succeed(candidates.slice(0, 3).map((candidate) => candidate.id));
+        const picked = candidates.slice(0, 3);
+
+        return Effect.succeed({
+          ids: picked.map((candidate) => candidate.id),
+          reasons: picked.map((candidate) => `Shortlisted ${candidate.name} for dinner`),
+        });
       }),
     );
 
@@ -535,7 +557,14 @@ describe("dish recommendations", () => {
     expect(baseline.length).toBeGreaterThan(0);
 
     const overLimit = track(
-      makeRuntime((candidates) => Effect.succeed(candidates.slice(0, 3).map((c) => c.id))),
+      makeRuntime((candidates) => {
+        const ids = candidates.slice(0, 3).map((c) => c.id);
+
+        return Effect.succeed({
+          ids,
+          reasons: ids.map((id) => `Shortlisted dish ${id} for dinner`),
+        });
+      }),
     );
 
     const outcome = await recommendAsMember(overLimit, baseInput);
@@ -551,7 +580,14 @@ describe("dish recommendations", () => {
     withRankingEnv({ provider: "muse", key: "test-key", outputLimit: "2" });
 
     const runtime = track(
-      makeRuntime((candidates) => Effect.succeed(candidates.slice(0, 2).map((c) => c.id))),
+      makeRuntime((candidates) => {
+        const ids = candidates.slice(0, 2).map((c) => c.id);
+
+        return Effect.succeed({
+          ids,
+          reasons: ids.map((id) => `Shortlisted dish ${id} for dinner`),
+        });
+      }),
     );
 
     const outcome = await recommendAsMember(runtime, baseInput);
@@ -559,6 +595,8 @@ describe("dish recommendations", () => {
     expect(modeOf(outcome)).toBe("ai");
     expect(dishesOf(outcome)).toHaveLength(2);
     expect(warningsOf(outcome)).toEqual([]);
+    expect(dishReasonsOf(outcome)).toHaveLength(2);
+    expect(dishReasonsOf(outcome).every((reason) => (reason?.length ?? 0) > 0)).toBe(true);
   });
 
   test("falls back to deterministic order on transient and malformed AI output", async () => {
@@ -570,15 +608,51 @@ describe("dish recommendations", () => {
     const cases: Array<{ name: string; rank: RankImpl }> = [
       {
         name: "duplicate ids",
-        rank: (candidates) => Effect.succeed([candidates[0]?.id ?? "", candidates[0]?.id ?? ""]),
+        rank: (candidates) =>
+          Effect.succeed({
+            ids: [candidates[0]?.id ?? "", candidates[0]?.id ?? ""],
+            reasons: ["Shortlisted pick one", "Shortlisted pick two"],
+          }),
       },
       {
         name: "unknown id",
-        rank: () => Effect.succeed(["999999999"]),
+        rank: () => Effect.succeed({ ids: ["999999999"], reasons: ["Shortlisted for dinner"] }),
       },
       {
         name: "empty ranking",
-        rank: () => Effect.succeed([]),
+        rank: () => Effect.succeed({ ids: [], reasons: [] }),
+      },
+      {
+        name: "length mismatch",
+        rank: (candidates) =>
+          Effect.succeed({
+            ids: candidates.slice(0, 2).map((candidate) => candidate.id),
+            reasons: ["Only one reason for two ids"],
+          }),
+      },
+      {
+        name: "safety claim",
+        rank: (candidates) =>
+          Effect.succeed({
+            ids: candidates.slice(0, 1).map((candidate) => candidate.id),
+            reasons: ["Completely safe for all allergies, guaranteed healthy!"],
+          }),
+      },
+      {
+        name: "popularity claim",
+        rank: (candidates) =>
+          Effect.succeed({
+            ids: candidates.slice(0, 1).map((candidate) => candidate.id),
+            reasons: ["The most popular dish with five-star ratings"],
+          }),
+      },
+      {
+        name: "hours claim",
+        rank: (candidates) =>
+          Effect.succeed({
+            ids: candidates.slice(0, 1).map((candidate) => candidate.id),
+            reasons: ["Open late near you every night"],
+          }),
       },
       {
         name: "invalid output",
@@ -603,6 +677,11 @@ describe("dish recommendations", () => {
       expect(warningsOf(outcome).some((warning) => warning.includes("deterministic order"))).toBe(
         true,
       );
+
+      // Fallbacks never surface model text on the cards.
+      for (const dish of dishesOf(outcome)) {
+        expect("aiReason" in dish, entry.name).toBe(false);
+      }
     };
 
     await Promise.all(cases.map((entry) => checkFallback(entry)));

@@ -17,6 +17,7 @@ import {
   MetaRateLimited,
   MetaRequestError,
   RankingFailureDisposition,
+  type RankingResult,
 } from "@/server/integrations/meta-client";
 
 /**
@@ -83,7 +84,7 @@ const asFetch = (impl: FetchImpl): typeof fetch =>
 const rankWithFetch = (
   fetchImpl: FetchImpl,
   config: MuseRankingConfig = testConfig,
-): Promise<ReadonlyArray<string>> => {
+): Promise<RankingResult> => {
   const previous = globalThis.fetch;
   globalThis.fetch = asFetch(fetchImpl);
 
@@ -99,7 +100,7 @@ const rankWithFetch = (
 const rankEither = async (
   fetchImpl: FetchImpl,
   config: MuseRankingConfig = testConfig,
-): Promise<{ readonly data: ReadonlyArray<string> | null; readonly error: unknown }> => {
+): Promise<{ readonly data: RankingResult | null; readonly error: unknown }> => {
   try {
     return { data: await rankWithFetch(fetchImpl, config), error: null };
   } catch (error) {
@@ -127,7 +128,16 @@ const hanging: FetchImpl = (_input, init) =>
 const successEnvelope = (ids: ReadonlyArray<string>): Response =>
   jsonResponse(
     JSON.stringify({
-      choices: [{ message: { content: JSON.stringify({ ranked_candidate_ids: [...ids] }) } }],
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              ranked_candidate_ids: [...ids],
+              reasons: ids.map((id) => `Fits the requested meal ${id}`),
+            }),
+          },
+        },
+      ],
     }),
     200,
   );
@@ -352,7 +362,10 @@ describe("MetaClientLive failure taxonomy (stubbed transport, real adapter)", ()
     const { data, error } = await rankEither(observe);
 
     expect(error).toBeNull();
-    expect(data).toEqual(["202", "101"]);
+    expect(data).toEqual({
+      ids: ["202", "101"],
+      reasons: ["Fits the requested meal 202", "Fits the requested meal 101"],
+    });
     expect(capturedUrl).toBe("https://api.meta.ai/v1/chat/completions");
 
     const headers = new Headers(capturedInit?.headers);
