@@ -7,6 +7,9 @@
 @import "./modules/restaurant-discovery/components/venue-overview.css";
 @import "./modules/restaurant-discovery/components/restaurant-menu.css";
 @import "./modules/restaurant-discovery/components/restaurant-reviews.css";
+@import "./modules/restaurant-discovery/components/restaurant-review-moderation.css";
+@import "./modules/restaurant-discovery/components/menu-scan-page.css";
+@import "./modules/restaurant-discovery/components/restaurant-photo-manager.css";
 
 @theme {
   --color-brand-blue: #2563eb;

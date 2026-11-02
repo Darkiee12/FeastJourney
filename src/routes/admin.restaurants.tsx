@@ -26,6 +26,28 @@ import {
   type EditorVenue,
   type VenueWriteInput,
 } from "@/modules/restaurant-discovery/components/restaurant-editor";
+import type { RestaurantPhotoManagerClient } from "@/modules/restaurant-discovery/components/restaurant-photo-manager";
+import {
+  RestaurantReviewModeration,
+  type CustomerReviewModerationClient,
+  type ModerationDecisionResult,
+} from "@/modules/restaurant-discovery/components/restaurant-review-moderation";
+import {
+  deletePhoto,
+  listPhotoReviewQueue,
+  listVenuePhotos,
+  previewPhoto,
+  publishPhoto,
+  reorderPhotos,
+  stageVenuePhoto,
+  submitPhotoForReview,
+  updatePhotoMetadata,
+  withdrawPhoto,
+} from "@/modules/restaurant-discovery/restaurant-photos.functions";
+import {
+  listCustomerReviewQueueFn,
+  moderateRestaurantCustomerReviewFn,
+} from "@/modules/restaurant-discovery/restaurant-reviews.functions";
 import {
   importMenuFn,
   restaurantAdminFn,
@@ -176,11 +198,329 @@ function toEditorVenue(venue: DashboardVenue): EditorVenue {
   };
 }
 
+/**
+ * Blob URLs minted by previewPhoto, keyed by photo id. The manager drops
+ * URLs on query invalidation without revoking them, so the adapter revokes
+ * the previous URL for a photo before minting a new one. Entries are
+ * removed on delete to keep the map bounded.
+ */
+const previewUrlsByPhoto = new Map<string, string>();
+
+/**
+ * Staff photo adapter: every call hits the real `restaurant:manage` /
+ * `restaurant:review`-gated photo endpoints. The edited venue supplies the
+ * display name (admin rows carry no venue name); description stays null
+ * until stored; block reasons start empty and accumulate on failed publish.
+ */
+const restaurantPhotoManagerClient: RestaurantPhotoManagerClient = {
+  listVenuePhotos: async (input) => {
+    const rows = await listVenuePhotos({ data: { venueId: input.venueId } });
+
+    return rows.map((row) => ({
+      id: row.id,
+      venueId: row.venueId,
+      venueName: null,
+      status: row.status,
+      sortOrder: row.sortOrder,
+      isPrimary: row.isPrimary,
+      altText: row.altText,
+      attribution: row.attribution,
+      description: null,
+      license: row.license,
+      focalX: row.focalX,
+      focalY: row.focalY,
+      sourceUrl: row.sourceUrl,
+      deliveryUrl: row.deliveryUrl,
+      previewUrl: row.previewUrl,
+      processing: row.processing,
+      blockReasons: [],
+    }));
+  },
+  listPhotoReviewQueue: async (input) => {
+    const rows = await listPhotoReviewQueue({
+      data: { limit: input.limit, offset: input.offset },
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      venueId: row.venueId,
+      venueName: null,
+      status: row.status,
+      sortOrder: row.sortOrder,
+      isPrimary: row.isPrimary,
+      altText: row.altText,
+      attribution: row.attribution,
+      description: null,
+      license: row.license,
+      focalX: row.focalX,
+      focalY: row.focalY,
+      sourceUrl: row.sourceUrl,
+      deliveryUrl: row.deliveryUrl,
+      previewUrl: row.previewUrl,
+      processing: row.processing,
+      blockReasons: [],
+    }));
+  },
+  stageVenuePhoto: async (input) => {
+    const form = new FormData();
+
+    form.set("venueId", input.venueId);
+    form.set("file", input.file);
+
+    const optionalText: ReadonlyArray<readonly [string, string | null]> = [
+      ["altText", input.altText],
+      ["attribution", input.attribution],
+      ["license", input.license === "" ? null : input.license],
+      ["sourceUrl", input.sourceUrl],
+      ["focalX", input.focalX === null ? null : String(input.focalX)],
+      ["focalY", input.focalY === null ? null : String(input.focalY)],
+    ];
+
+    for (const [key, value] of optionalText) {
+      if (value !== null) form.set(key, value);
+    }
+
+    form.set("makePrimary", input.makePrimary ? "true" : "false");
+
+    const row = await stageVenuePhoto({ data: form });
+
+    return {
+      id: row.id,
+      venueId: row.venueId,
+      venueName: null,
+      status: row.status,
+      sortOrder: row.sortOrder,
+      isPrimary: row.isPrimary,
+      altText: row.altText,
+      attribution: row.attribution,
+      description: null,
+      license: row.license,
+      focalX: row.focalX,
+      focalY: row.focalY,
+      sourceUrl: row.sourceUrl,
+      deliveryUrl: row.deliveryUrl,
+      previewUrl: row.previewUrl,
+      processing: row.processing,
+      blockReasons: [],
+    };
+  },
+  updatePhotoMetadata: async (input) => {
+    if (
+      input.license !== "own-work" &&
+      input.license !== "cc0" &&
+      input.license !== "cc-by" &&
+      input.license !== "cc-by-sa" &&
+      input.license !== "licensed" &&
+      input.license !== "unknown"
+    ) {
+      throw new Error("Unsupported license. Choose a supported license.");
+    }
+
+    const row = await updatePhotoMetadata({
+      data: {
+        photoId: input.photoId,
+        altText: input.altText,
+        attribution: input.attribution,
+        license: input.license,
+        focalX: input.focalX,
+        focalY: input.focalY,
+        sourceUrl: input.sourceUrl,
+      },
+    });
+
+    return {
+      id: row.id,
+      venueId: row.venueId,
+      venueName: null,
+      status: row.status,
+      sortOrder: row.sortOrder,
+      isPrimary: row.isPrimary,
+      altText: row.altText,
+      attribution: row.attribution,
+      description: null,
+      license: row.license,
+      focalX: row.focalX,
+      focalY: row.focalY,
+      sourceUrl: row.sourceUrl,
+      deliveryUrl: row.deliveryUrl,
+      previewUrl: row.previewUrl,
+      processing: row.processing,
+      blockReasons: [],
+    };
+  },
+  reorderPhotos: async (input) => {
+    const rows = await reorderPhotos({
+      data: { venueId: input.venueId, orderedIds: [...input.orderedIds] },
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      venueId: row.venueId,
+      venueName: null,
+      status: row.status,
+      sortOrder: row.sortOrder,
+      isPrimary: row.isPrimary,
+      altText: row.altText,
+      attribution: row.attribution,
+      description: null,
+      license: row.license,
+      focalX: row.focalX,
+      focalY: row.focalY,
+      sourceUrl: row.sourceUrl,
+      deliveryUrl: row.deliveryUrl,
+      previewUrl: row.previewUrl,
+      processing: row.processing,
+      blockReasons: [],
+    }));
+  },
+  submitPhotoForReview: async (input) => {
+    const row = await submitPhotoForReview({ data: { photoId: input.photoId } });
+
+    return {
+      id: row.id,
+      venueId: row.venueId,
+      venueName: null,
+      status: row.status,
+      sortOrder: row.sortOrder,
+      isPrimary: row.isPrimary,
+      altText: row.altText,
+      attribution: row.attribution,
+      description: null,
+      license: row.license,
+      focalX: row.focalX,
+      focalY: row.focalY,
+      sourceUrl: row.sourceUrl,
+      deliveryUrl: row.deliveryUrl,
+      previewUrl: row.previewUrl,
+      processing: row.processing,
+      blockReasons: [],
+    };
+  },
+  publishPhoto: async (input) => {
+    const row = await publishPhoto({ data: { photoId: input.photoId } });
+
+    return {
+      id: row.id,
+      venueId: row.venueId,
+      venueName: null,
+      status: row.status,
+      sortOrder: row.sortOrder,
+      isPrimary: row.isPrimary,
+      altText: row.altText,
+      attribution: row.attribution,
+      description: null,
+      license: row.license,
+      focalX: row.focalX,
+      focalY: row.focalY,
+      sourceUrl: row.sourceUrl,
+      deliveryUrl: row.deliveryUrl,
+      previewUrl: row.previewUrl,
+      processing: row.processing,
+      blockReasons: [],
+    };
+  },
+  withdrawPhoto: async (input) => {
+    const row = await withdrawPhoto({ data: { photoId: input.photoId } });
+
+    return {
+      id: row.id,
+      venueId: row.venueId,
+      venueName: null,
+      status: row.status,
+      sortOrder: row.sortOrder,
+      isPrimary: row.isPrimary,
+      altText: row.altText,
+      attribution: row.attribution,
+      description: null,
+      license: row.license,
+      focalX: row.focalX,
+      focalY: row.focalY,
+      sourceUrl: row.sourceUrl,
+      deliveryUrl: row.deliveryUrl,
+      previewUrl: row.previewUrl,
+      processing: row.processing,
+      blockReasons: [],
+    };
+  },
+  deletePhoto: async (input) => {
+    const removed = await deletePhoto({ data: { photoId: input.photoId } });
+    const previous = previewUrlsByPhoto.get(input.photoId);
+
+    if (previous !== undefined) {
+      URL.revokeObjectURL(previous);
+      previewUrlsByPhoto.delete(input.photoId);
+    }
+
+    return { id: removed.id, venueId: removed.venueId };
+  },
+  previewPhoto: async (input) => {
+    const response = await previewPhoto({ data: { photoId: input.photoId } });
+    const blob = await response.blob();
+    const previous = previewUrlsByPhoto.get(input.photoId);
+
+    if (previous !== undefined) URL.revokeObjectURL(previous);
+
+    const url = URL.createObjectURL(blob);
+
+    previewUrlsByPhoto.set(input.photoId, url);
+
+    return url;
+  },
+};
+
 function describeFailure(cause: unknown): string {
   if (cause instanceof Error && cause.message !== "") return cause.message;
 
   return "The action failed. Retry.";
 }
+
+/**
+ * Staff adapter: decisions and queue reads both call the real
+ * `restaurant:review`-gated endpoints. The queue shows pending-first
+ * traveler reviews across venues; members without the grant never reach
+ * data (server enforcement + `canReview` gate on the component).
+ */
+const customerReviewModerationClient: CustomerReviewModerationClient = {
+  loadQueue: async (query) => {
+    const page = await listCustomerReviewQueueFn({
+      data: {
+        venue: query.venue,
+        status: query.status,
+        limit: query.limit,
+        offset: query.offset,
+      },
+    });
+
+    return {
+      items: page.items.map((entry) => ({
+        id: entry.id,
+        venueId: entry.venue_id,
+        venueName: entry.venue_name,
+        rating: entry.rating,
+        body: entry.body,
+        status: entry.status,
+        submittedAt: entry.submitted_at,
+      })),
+      total: page.total,
+      limit: page.limit,
+      offset: page.offset,
+      pendingCount: page.pending_count,
+    };
+  },
+  decide: async (input): Promise<ModerationDecisionResult> => {
+    const outcome: unknown = await moderateRestaurantCustomerReviewFn({
+      data: { reviewId: input.reviewId, status: input.status },
+    });
+
+    const repeated = z.object({ _tag: z.literal("Repeated") }).safeParse(outcome).success;
+
+    return {
+      reviewId: input.reviewId,
+      status: input.status,
+      repeated,
+    };
+  },
+};
 
 function RestaurantAdmin() {
   const { queue, canReview, cuisines, initialPage } = Route.useLoaderData();
@@ -489,6 +829,8 @@ function RestaurantAdmin() {
         onSearchBusinesses={searchBusinesses}
         onSubmit={submitVenue}
         onClose={() => setEditorOpen(false)}
+        photoClient={restaurantPhotoManagerClient}
+        canManagePhotos
       />
 
       <div id="menu-management">
@@ -728,6 +1070,13 @@ function RestaurantAdmin() {
             </li>
           ))}
         </ul>
+      </AdminSection>
+      <AdminSection title="Customer reviews">
+        <p className="mb-3 text-sm text-muted">
+          Traveler-authored reviews. Separate from menu, price, serving, and scan queues: decisions
+          here only publish, reject, or remove whole reviews. Review text is never edited.
+        </p>
+        <RestaurantReviewModeration canReview={canReview} client={customerReviewModerationClient} />
       </AdminSection>
     </div>
   );

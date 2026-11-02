@@ -9,6 +9,10 @@ import {
   AdminPrimaryButton,
   AdminSecondaryButton,
 } from "@/components/admin/ui";
+import {
+  RestaurantPhotoManager,
+  type RestaurantPhotoManagerClient,
+} from "@/modules/restaurant-discovery/components/restaurant-photo-manager";
 import { requestUserPosition } from "@/modules/restaurant-discovery/location-storage";
 import { DEFAULT_MAP_CENTER } from "@/modules/restaurant-discovery/map-bounds";
 import { venueWriteSchema } from "@/modules/restaurant-discovery/restaurant.schema";
@@ -156,6 +160,8 @@ export function RestaurantEditor({
   onSearchBusinesses,
   onSubmit,
   onClose,
+  photoClient,
+  canManagePhotos,
 }: {
   readonly open: boolean;
   readonly venue: EditorVenue | null;
@@ -169,6 +175,15 @@ export function RestaurantEditor({
   readonly onSearchBusinesses: (query: string) => void;
   readonly onSubmit: (input: VenueWriteInput) => void;
   readonly onClose: () => void;
+  /**
+   * Photo service client (wired by the route to
+   * `restaurant-photos.functions.ts`). Absent until the route passes it —
+   * the Photos section stays hidden so the venue form never shows a dead
+   * control.
+   */
+  readonly photoClient?: RestaurantPhotoManagerClient | undefined;
+  /** Venue photo upload/edit grant. Server still enforces `restaurant:manage`. */
+  readonly canManagePhotos?: boolean | undefined;
 }) {
   const editing = venue !== null;
 
@@ -454,6 +469,19 @@ export function RestaurantEditor({
                 ))}
               </ul>
             )}
+          </section>
+        )}
+
+        {editing && photoClient !== undefined && (
+          <section aria-label="Venue photos" className="flex flex-col gap-2">
+            <h3 className="text-sm font-semibold">Photos</h3>
+            <RestaurantPhotoManager
+              venueId={venue.id}
+              venueName={venue.name}
+              canManage={canManagePhotos ?? false}
+              canReview={canPublish}
+              client={photoClient}
+            />
           </section>
         )}
 
