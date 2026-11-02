@@ -24,6 +24,17 @@ export function clientFailure(cause: unknown): ClientFailure {
 
   if (tag === "ScanNotFound") message = "This private scan is unavailable or has expired.";
 
+  if (tag === "RestaurantPhotoNotFound" || tag === "MenuPageNotFound")
+    message = "This image is unavailable.";
+
+  if (
+    tag === "RestaurantPhotoValidationFailed" ||
+    tag === "MenuPageValidationFailed" ||
+    tag === "RestaurantPhotoPublishBlocked" ||
+    tag === "MenuPagePublishBlocked"
+  )
+    message = "This image cannot be used yet. Check the requirements and try again.";
+
   if (tag === "SignInRequired") message = "Sign in to continue.";
 
   if (tag === "InsufficientPermissions" || tag === "OwnershipDenied")

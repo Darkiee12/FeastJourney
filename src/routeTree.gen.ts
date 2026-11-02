@@ -53,6 +53,7 @@ import { Route as ApiV1AdminDishesRouteImport } from './routes/api/v1/admin.dish
 import { Route as ApiV1AdminReviewQueueRouteImport } from './routes/api/v1/admin.review-queue'
 import { Route as ApiV1DishesIdRouteImport } from './routes/api/v1/dishes.$id'
 import { Route as ApiV1IngredientsIdRouteImport } from './routes/api/v1/ingredients.$id'
+import { Route as ApiV1MenuPagesPageIdRouteImport } from './routes/api/v1/menu-pages.$pageId'
 import { Route as ApiV1PlacesIdRouteImport } from './routes/api/v1/places.$id'
 import { Route as ApiV1AdminDishesIdRouteImport } from './routes/api/v1/admin.dishes.$id'
 import { Route as ApiV1AdminImportsApplyRouteImport } from './routes/api/v1/admin.imports.apply'
@@ -69,6 +70,7 @@ import { Route as ApiV1AdminDishesIdPlacesRouteImport } from './routes/api/v1/ad
 import { Route as ApiV1AdminDishesIdRevisionsRouteImport } from './routes/api/v1/admin.dishes.$id.revisions'
 import { Route as ApiV1AdminDishesIdStatusRouteImport } from './routes/api/v1/admin.dishes.$id.status'
 import { Route as ApiV1DishImagesMediaIdVersionWidthRouteImport } from './routes/api/v1/dish-images.$mediaId.$version.$width'
+import { Route as ApiV1RestaurantImagesAssetIdVersionWidthRouteImport } from './routes/api/v1/restaurant-images.$assetId.$version.$width'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -290,6 +292,11 @@ const ApiV1IngredientsIdRoute = ApiV1IngredientsIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => ApiV1IngredientsRoute,
 } as any)
+const ApiV1MenuPagesPageIdRoute = ApiV1MenuPagesPageIdRouteImport.update({
+  id: '/api/v1/menu-pages/$pageId',
+  path: '/api/v1/menu-pages/$pageId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiV1PlacesIdRoute = ApiV1PlacesIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -379,6 +386,12 @@ const ApiV1DishImagesMediaIdVersionWidthRoute =
     path: '/api/v1/dish-images/$mediaId/$version/$width',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiV1RestaurantImagesAssetIdVersionWidthRoute =
+  ApiV1RestaurantImagesAssetIdVersionWidthRouteImport.update({
+    id: '/api/v1/restaurant-images/$assetId/$version/$width',
+    path: '/api/v1/restaurant-images/$assetId/$version/$width',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -425,6 +438,7 @@ export interface FileRoutesByFullPath {
   '/api/v1/admin/review-queue': typeof ApiV1AdminReviewQueueRoute
   '/api/v1/dishes/$id': typeof ApiV1DishesIdRouteWithChildren
   '/api/v1/ingredients/$id': typeof ApiV1IngredientsIdRoute
+  '/api/v1/menu-pages/$pageId': typeof ApiV1MenuPagesPageIdRoute
   '/api/v1/places/$id': typeof ApiV1PlacesIdRouteWithChildren
   '/api/v1/admin/dishes/$id': typeof ApiV1AdminDishesIdRouteWithChildren
   '/api/v1/admin/imports/apply': typeof ApiV1AdminImportsApplyRoute
@@ -441,6 +455,7 @@ export interface FileRoutesByFullPath {
   '/api/v1/admin/dishes/$id/revisions': typeof ApiV1AdminDishesIdRevisionsRoute
   '/api/v1/admin/dishes/$id/status': typeof ApiV1AdminDishesIdStatusRoute
   '/api/v1/dish-images/$mediaId/$version/$width': typeof ApiV1DishImagesMediaIdVersionWidthRoute
+  '/api/v1/restaurant-images/$assetId/$version/$width': typeof ApiV1RestaurantImagesAssetIdVersionWidthRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -484,6 +499,7 @@ export interface FileRoutesByTo {
   '/api/v1/admin/review-queue': typeof ApiV1AdminReviewQueueRoute
   '/api/v1/dishes/$id': typeof ApiV1DishesIdRouteWithChildren
   '/api/v1/ingredients/$id': typeof ApiV1IngredientsIdRoute
+  '/api/v1/menu-pages/$pageId': typeof ApiV1MenuPagesPageIdRoute
   '/api/v1/places/$id': typeof ApiV1PlacesIdRouteWithChildren
   '/api/v1/admin/dishes/$id': typeof ApiV1AdminDishesIdRouteWithChildren
   '/api/v1/admin/imports/apply': typeof ApiV1AdminImportsApplyRoute
@@ -500,6 +516,7 @@ export interface FileRoutesByTo {
   '/api/v1/admin/dishes/$id/revisions': typeof ApiV1AdminDishesIdRevisionsRoute
   '/api/v1/admin/dishes/$id/status': typeof ApiV1AdminDishesIdStatusRoute
   '/api/v1/dish-images/$mediaId/$version/$width': typeof ApiV1DishImagesMediaIdVersionWidthRoute
+  '/api/v1/restaurant-images/$assetId/$version/$width': typeof ApiV1RestaurantImagesAssetIdVersionWidthRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -547,6 +564,7 @@ export interface FileRoutesById {
   '/api/v1/admin/review-queue': typeof ApiV1AdminReviewQueueRoute
   '/api/v1/dishes/$id': typeof ApiV1DishesIdRouteWithChildren
   '/api/v1/ingredients/$id': typeof ApiV1IngredientsIdRoute
+  '/api/v1/menu-pages/$pageId': typeof ApiV1MenuPagesPageIdRoute
   '/api/v1/places/$id': typeof ApiV1PlacesIdRouteWithChildren
   '/api/v1/admin/dishes/$id': typeof ApiV1AdminDishesIdRouteWithChildren
   '/api/v1/admin/imports/apply': typeof ApiV1AdminImportsApplyRoute
@@ -563,6 +581,7 @@ export interface FileRoutesById {
   '/api/v1/admin/dishes/$id/revisions': typeof ApiV1AdminDishesIdRevisionsRoute
   '/api/v1/admin/dishes/$id/status': typeof ApiV1AdminDishesIdStatusRoute
   '/api/v1/dish-images/$mediaId/$version/$width': typeof ApiV1DishImagesMediaIdVersionWidthRoute
+  '/api/v1/restaurant-images/$assetId/$version/$width': typeof ApiV1RestaurantImagesAssetIdVersionWidthRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -611,6 +630,7 @@ export interface FileRouteTypes {
     | '/api/v1/admin/review-queue'
     | '/api/v1/dishes/$id'
     | '/api/v1/ingredients/$id'
+    | '/api/v1/menu-pages/$pageId'
     | '/api/v1/places/$id'
     | '/api/v1/admin/dishes/$id'
     | '/api/v1/admin/imports/apply'
@@ -627,6 +647,7 @@ export interface FileRouteTypes {
     | '/api/v1/admin/dishes/$id/revisions'
     | '/api/v1/admin/dishes/$id/status'
     | '/api/v1/dish-images/$mediaId/$version/$width'
+    | '/api/v1/restaurant-images/$assetId/$version/$width'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -670,6 +691,7 @@ export interface FileRouteTypes {
     | '/api/v1/admin/review-queue'
     | '/api/v1/dishes/$id'
     | '/api/v1/ingredients/$id'
+    | '/api/v1/menu-pages/$pageId'
     | '/api/v1/places/$id'
     | '/api/v1/admin/dishes/$id'
     | '/api/v1/admin/imports/apply'
@@ -686,6 +708,7 @@ export interface FileRouteTypes {
     | '/api/v1/admin/dishes/$id/revisions'
     | '/api/v1/admin/dishes/$id/status'
     | '/api/v1/dish-images/$mediaId/$version/$width'
+    | '/api/v1/restaurant-images/$assetId/$version/$width'
   id:
     | '__root__'
     | '/'
@@ -732,6 +755,7 @@ export interface FileRouteTypes {
     | '/api/v1/admin/review-queue'
     | '/api/v1/dishes/$id'
     | '/api/v1/ingredients/$id'
+    | '/api/v1/menu-pages/$pageId'
     | '/api/v1/places/$id'
     | '/api/v1/admin/dishes/$id'
     | '/api/v1/admin/imports/apply'
@@ -748,6 +772,7 @@ export interface FileRouteTypes {
     | '/api/v1/admin/dishes/$id/revisions'
     | '/api/v1/admin/dishes/$id/status'
     | '/api/v1/dish-images/$mediaId/$version/$width'
+    | '/api/v1/restaurant-images/$assetId/$version/$width'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -776,9 +801,11 @@ export interface RootRouteChildren {
   ApiV1PlacesRoute: typeof ApiV1PlacesRouteWithChildren
   ApiV1AdminDishesRoute: typeof ApiV1AdminDishesRouteWithChildren
   ApiV1AdminReviewQueueRoute: typeof ApiV1AdminReviewQueueRoute
+  ApiV1MenuPagesPageIdRoute: typeof ApiV1MenuPagesPageIdRoute
   ApiV1AdminImportsApplyRoute: typeof ApiV1AdminImportsApplyRoute
   ApiV1AdminImportsValidateRoute: typeof ApiV1AdminImportsValidateRoute
   ApiV1DishImagesMediaIdVersionWidthRoute: typeof ApiV1DishImagesMediaIdVersionWidthRoute
+  ApiV1RestaurantImagesAssetIdVersionWidthRoute: typeof ApiV1RestaurantImagesAssetIdVersionWidthRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -1091,6 +1118,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1IngredientsIdRouteImport
       parentRoute: typeof ApiV1IngredientsRoute
     }
+    '/api/v1/menu-pages/$pageId': {
+      id: '/api/v1/menu-pages/$pageId'
+      path: '/api/v1/menu-pages/$pageId'
+      fullPath: '/api/v1/menu-pages/$pageId'
+      preLoaderRoute: typeof ApiV1MenuPagesPageIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/v1/places/$id': {
       id: '/api/v1/places/$id'
       path: '/$id'
@@ -1201,6 +1235,13 @@ declare module '@tanstack/react-router' {
       path: '/api/v1/dish-images/$mediaId/$version/$width'
       fullPath: '/api/v1/dish-images/$mediaId/$version/$width'
       preLoaderRoute: typeof ApiV1DishImagesMediaIdVersionWidthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/restaurant-images/$assetId/$version/$width': {
+      id: '/api/v1/restaurant-images/$assetId/$version/$width'
+      path: '/api/v1/restaurant-images/$assetId/$version/$width'
+      fullPath: '/api/v1/restaurant-images/$assetId/$version/$width'
+      preLoaderRoute: typeof ApiV1RestaurantImagesAssetIdVersionWidthRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -1420,10 +1461,13 @@ const rootRouteChildren: RootRouteChildren = {
   ApiV1PlacesRoute: ApiV1PlacesRouteWithChildren,
   ApiV1AdminDishesRoute: ApiV1AdminDishesRouteWithChildren,
   ApiV1AdminReviewQueueRoute: ApiV1AdminReviewQueueRoute,
+  ApiV1MenuPagesPageIdRoute: ApiV1MenuPagesPageIdRoute,
   ApiV1AdminImportsApplyRoute: ApiV1AdminImportsApplyRoute,
   ApiV1AdminImportsValidateRoute: ApiV1AdminImportsValidateRoute,
   ApiV1DishImagesMediaIdVersionWidthRoute:
     ApiV1DishImagesMediaIdVersionWidthRoute,
+  ApiV1RestaurantImagesAssetIdVersionWidthRoute:
+    ApiV1RestaurantImagesAssetIdVersionWidthRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
