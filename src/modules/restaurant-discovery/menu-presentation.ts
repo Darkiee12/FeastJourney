@@ -168,6 +168,241 @@ export const presentReviewed = (
   };
 };
 
+/**
+ * Menu localization presentation (PR13 menu redesign).
+ *
+ * Visitor language precedence: the visitor's explicit FeastJourney language
+ * choice always wins. Browser/default-locale resolution (see
+ * `resolveInitialLocale` in `src/server/geo/trusted-region.ts` and
+ * `detectBrowserLocale` in `src/shared/i18n.ts`) only applies when no
+ * explicit preference exists — a guess never overrides a deliberate choice.
+ * `resolveMenuLocale` enforces that precedence at this presentation
+ * boundary; callers pass the explicit choice first.
+ *
+ * Display fallback order for reviewed menus: approved stored translation
+ * (the single per-row translation, human-approved at review) in the
+ * requested language, otherwise the original menu text. The relational model
+ * stores exactly one reviewed translation language per immutable item row
+ * and no machine-translation flag, so there is no eligible stored
+ * machine tier to render — nothing here synthesizes translations, and no
+ * Muse call runs from render or per request. Private scans and drafts carry
+ * unverified extracted text under their own provenance notices instead.
+ */
+
+const MENU_BCP47_TAGS: ReadonlyMap<string, string> = new Map([
+  ["en", "en"],
+  ["vi", "vi"],
+  ["ja", "ja"],
+  ["zh", "zh-Hans"],
+  ["ko", "ko"],
+  ["fr", "fr"],
+  ["es", "es"],
+]);
+
+/**
+ * BCP 47 tag for a menu source/target language code. Unknown or missing
+ * codes become "und" (undetermined) — never a guess at another language.
+ * Replaces `locale === "vi" ? "vi" : "en"` ternaries that mislabeled every
+ * non-Vietnamese locale (including ja/zh/ko/fr/es menu text) as English.
+ */
+export const menuBcp47TagFor = (tag: string | null | undefined): string => {
+  if (tag === null || tag === undefined) return "und";
+
+  const primary = tag.split("-")[0]?.trim().toLowerCase() ?? "";
+
+  if (primary === "") return "und";
+
+  return MENU_BCP47_TAGS.get(primary) ?? "und";
+};
+
+export type MenuLocaleSource = "explicit" | "fallback";
+
+export interface ResolvedMenuLocale {
+  readonly locale: string;
+  readonly source: MenuLocaleSource;
+}
+
+/**
+ * Explicit visitor choice wins; the browser/default resolution only fills
+ * the gap when no explicit preference exists. Blank inputs never count as
+ * a choice. Defaults to English when neither side supplies a language.
+ */
+export const resolveMenuLocale = (
+  explicit: string | null | undefined,
+  fallback: string | null | undefined,
+): ResolvedMenuLocale => {
+  const cleanedExplicit = explicit?.trim() ?? "";
+
+  if (cleanedExplicit !== "") return { locale: cleanedExplicit, source: "explicit" };
+
+  const cleanedFallback = fallback?.trim() ?? "";
+
+  if (cleanedFallback !== "") return { locale: cleanedFallback, source: "fallback" };
+
+  return { locale: "en", source: "fallback" };
+};
+
+export type MenuTextProvenance = "approved" | "unverified" | "original";
+
+export interface MenuTextDisplay {
+  readonly primary: string;
+  readonly primaryLang: string;
+  readonly secondary: string | null;
+  readonly secondaryLang: string | null;
+  readonly provenance: MenuTextProvenance;
+}
+
+const cleanMenuText = (value: string | null | undefined): string | null => {
+  if (value === null || value === undefined) return null;
+
+  const trimmed = value.trim();
+
+  if (trimmed === "") return null;
+
+  return trimmed;
+};
+
+/**
+ * One display string with its fallback resolved. A stored translation is
+ * eligible only when it is non-blank and tagged for the requested target
+ * language; an identical or same-language translation collapses to the
+ * original so VI visitors see Vietnamese once, never duplicated. Otherwise
+ * the original menu text stays available under its own language tag.
+ */
+export const resolveMenuText = (input: {
+  readonly original: string;
+  readonly sourceLanguage: string | null;
+  readonly translated: string | null;
+  readonly translationLanguage: string | null;
+  readonly targetLanguage: string;
+  readonly reviewed: boolean;
+}): MenuTextDisplay => {
+  const original = input.original;
+  const sourceTag = menuBcp47TagFor(input.sourceLanguage);
+  const targetTag = menuBcp47TagFor(input.targetLanguage);
+  const translated = cleanMenuText(input.translated);
+  const translationTag = menuBcp47TagFor(input.translationLanguage);
+
+  if (translated === null) {
+    return {
+      primary: original,
+      primaryLang: sourceTag,
+      secondary: null,
+      secondaryLang: null,
+      provenance: "original",
+    };
+  }
+
+  if (translationTag !== targetTag || targetTag === sourceTag || translated === original.trim()) {
+    return {
+      primary: original,
+      primaryLang: sourceTag,
+      secondary: null,
+      secondaryLang: null,
+      provenance: "original",
+    };
+  }
+
+  return {
+    primary: translated,
+    primaryLang: targetTag,
+    secondary: original,
+    secondaryLang: sourceTag,
+    provenance: input.reviewed ? "approved" : "unverified",
+  };
+};
+
+/**
+ * Browsing-list display for one `InteractiveMenu` item. `InteractiveMenu`
+ * only carries translated text already matched to `menu.targetLanguage`
+ * (reviewed projection gates by `translation_language`, scans and drafts by
+ * document language), so the target language doubles as the translation
+ * tag here. Title is the localized name when eligible, otherwise the
+ * original; the original name stays secondary when it differs, keeping the
+ * native name accessible for ordering. A same-language request (VI visitor
+ * on a Vietnamese menu) never duplicates the name.
+ */
+export interface MenuItemDisplay {
+  readonly title: string;
+  readonly titleLang: string;
+  readonly subtitle: string | null;
+  readonly subtitleLang: string | null;
+  readonly description: string | null;
+  readonly descriptionLang: string | null;
+  readonly nativeName: string;
+  readonly nativeLang: string;
+  readonly provenance: MenuTextProvenance;
+}
+
+export const menuItemDisplayFor = (
+  item: InteractiveMenu["items"][number],
+  menu: Pick<InteractiveMenu, "sourceLanguage" | "targetLanguage" | "provenance">,
+): MenuItemDisplay => {
+  const reviewed = menu.provenance === "reviewed";
+
+  const name = resolveMenuText({
+    original: item.originalName,
+    sourceLanguage: menu.sourceLanguage,
+    translated: item.translatedName,
+    translationLanguage: item.translatedName === null ? null : menu.targetLanguage,
+    targetLanguage: menu.targetLanguage,
+    reviewed,
+  });
+
+  const description = resolveMenuText({
+    original: item.originalDescription ?? "",
+    sourceLanguage: menu.sourceLanguage,
+    translated: item.translatedDescription,
+    translationLanguage: item.translatedDescription === null ? null : menu.targetLanguage,
+    targetLanguage: menu.targetLanguage,
+    reviewed,
+  });
+
+  const nativeTag = menuBcp47TagFor(menu.sourceLanguage);
+
+  return {
+    title: name.primary,
+    titleLang: name.primaryLang,
+    subtitle: name.secondary,
+    subtitleLang: name.secondaryLang,
+    description:
+      item.originalDescription === null && item.translatedDescription === null
+        ? null
+        : description.primary,
+    descriptionLang:
+      item.originalDescription === null && item.translatedDescription === null
+        ? null
+        : description.primaryLang,
+    nativeName: item.originalName,
+    nativeLang: nativeTag,
+    provenance:
+      item.originalDescription === null && item.translatedDescription === null
+        ? name.provenance
+        : description.provenance,
+  };
+};
+
+export interface WaiterText {
+  readonly text: string;
+  readonly lang: string;
+}
+
+/**
+ * Waiter card consumes the original menu language primarily: staff match
+ * what is printed, so the original name and variant label lead under the
+ * source language tag. Localized text stays available in the card body for
+ * the visitor; these helpers expose the order-critical originals.
+ */
+export const waiterDishNameFor = (
+  item: InteractiveMenu["items"][number],
+  sourceLanguage: string | null,
+): WaiterText => ({ text: item.originalName, lang: menuBcp47TagFor(sourceLanguage) });
+
+export const waiterVariantLabelFor = (
+  variant: InteractiveMenu["items"][number]["variants"][number],
+  sourceLanguage: string | null,
+): WaiterText => ({ text: variant.originalLabel, lang: menuBcp47TagFor(sourceLanguage) });
+
 /** One deterministic preview highlight: real item identity only. */
 export interface MenuHighlight {
   readonly id: string;

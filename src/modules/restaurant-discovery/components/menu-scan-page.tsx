@@ -19,7 +19,7 @@ import {
   menuScanPageCopy,
 } from "@/modules/restaurant-discovery/components/menu-copy";
 import { ScanEditor } from "@/modules/restaurant-discovery/components/scan-editor";
-import { presentScan } from "@/modules/restaurant-discovery/menu-presentation";
+import { menuBcp47TagFor, presentScan } from "@/modules/restaurant-discovery/menu-presentation";
 import {
   MenuScanClientError,
   menuScanClient,
@@ -609,7 +609,7 @@ export function MenuScanPage({
   const modelChip = scanModelChip(view === null ? null : view.revision);
 
   return (
-    <article className="menu-scan-page" lang={locale === "vi" ? "vi" : "en"}>
+    <article className="menu-scan-page" lang={menuBcp47TagFor(locale)}>
       <header className="scan-intro">
         <h1 className="font-display text-4xl">{copy.title}</h1>
         <p>{copy.introduction}</p>

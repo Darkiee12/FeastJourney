@@ -86,6 +86,14 @@ const english = {
   addVariant: "Add a missing portion",
   removeVariant: "Remove this portion",
   customerAdded: "Added by you, not extracted from the photograph",
+  machineTranslated: "Machine translation — confirm details with the waiter.",
+  originalMenuText: "Original menu text",
+  translatedFrom: "Translated from {language}",
+  showForOrder: "Show this name when ordering",
+  showTranslations: "Show translations",
+  hideTranslations: "Hide translations",
+  openDetails: "View details",
+  addToOrder: "Add to order",
 };
 
 const vietnamese: typeof english = {
@@ -175,6 +183,14 @@ const vietnamese: typeof english = {
   addVariant: "Thêm khẩu phần còn thiếu",
   removeVariant: "Xóa khẩu phần này",
   customerAdded: "Do bạn thêm, không trích xuất từ ảnh",
+  machineTranslated: "Bản dịch máy — hãy xác nhận chi tiết với nhân viên.",
+  originalMenuText: "Chữ gốc trên thực đơn",
+  translatedFrom: "Được dịch từ {language}",
+  showForOrder: "Đưa tên này cho nhân viên xem khi gọi món",
+  showTranslations: "Hiện bản dịch",
+  hideTranslations: "Ẩn bản dịch",
+  openDetails: "Xem chi tiết",
+  addToOrder: "Thêm vào phiếu gọi",
 };
 
 const menuTranslations: ReadonlyMap<string, typeof english> = new Map([

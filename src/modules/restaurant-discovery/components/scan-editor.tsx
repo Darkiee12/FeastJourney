@@ -7,7 +7,7 @@ import {
   type ScanItem,
 } from "@/modules/restaurant-discovery/components/scan-item-editor";
 import { draftPriceValid } from "@/modules/restaurant-discovery/components/scan-price-editor";
-import { presentDraft } from "@/modules/restaurant-discovery/menu-presentation";
+import { menuBcp47TagFor, presentDraft } from "@/modules/restaurant-discovery/menu-presentation";
 import type { MenuDraft, MenuDraftItem } from "@/modules/restaurant-discovery/menu-presentation";
 import {
   menuLanguages,
@@ -37,7 +37,7 @@ export function ScanEditor({
     <section
       className="scan-editor"
       aria-label={copy.edit}
-      lang={document.targetLanguage === "vi" ? "vi" : "en"}
+      lang={menuBcp47TagFor(document.targetLanguage)}
     >
       <h2 className="font-display text-3xl">{copy.edit}</h2>
       <p>{copy.editHelp}</p>

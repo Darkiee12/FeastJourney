@@ -7,6 +7,7 @@ import type {
   InteractiveMenu,
   MenuSelection,
 } from "@/modules/restaurant-discovery/menu-presentation";
+import { menuBcp47TagFor } from "@/modules/restaurant-discovery/menu-presentation";
 import { isAmount, isCurrency, type ExchangeRate } from "@/shared/money";
 
 type MenuItem = InteractiveMenu["items"][number];
@@ -296,7 +297,7 @@ export function InteractiveMenuView({
   if (menu.provenance === "draft") notice = copy.draftNotice;
 
   return (
-    <section className="menu-order" aria-labelledby={titleId} lang={locale === "vi" ? "vi" : "en"}>
+    <section className="menu-order" aria-labelledby={titleId} lang={menuBcp47TagFor(locale)}>
       <h2 id={titleId} className="font-display text-3xl">
         {copy.menu}
       </h2>
