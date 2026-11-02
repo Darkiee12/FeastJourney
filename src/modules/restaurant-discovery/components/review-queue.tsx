@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { AdminSelect } from "@/components/admin/select";
+import { AdminGhostButton, AdminPrimaryButton } from "@/components/admin/ui";
+
 /**
  * Observation review queue: pending-first, searchable, server-paginated.
  * Rows, totals and decisions arrive through the injected client so this
@@ -96,8 +99,8 @@ function ReviewEntry({
   const kind: "price" | "serving" = entry.kind === "serving" ? "serving" : "price";
 
   return (
-    <li className="discovery-card">
-      <h3>
+    <li className="rounded-2xl border border-border-soft bg-white p-4">
+      <h3 className="font-semibold">
         {entry.venue} · {entry.item}
         {entry.variant !== null && ` · ${entry.variant}`}
       </h3>
@@ -135,8 +138,8 @@ function ReviewEntry({
           {entry.reviewed_at?.slice(0, 10)}
         </p>
       )}
-      <div className="discovery-card-actions">
-        <button
+      <div className="mt-3 flex flex-wrap gap-2">
+        <AdminPrimaryButton
           type="button"
           disabled={busy || decided || suggestionBlocked(entry)}
           title={
@@ -147,15 +150,14 @@ function ReviewEntry({
           onClick={() => onDecide({ kind, id: entry.id, status: "approved" })}
         >
           Approve
-        </button>
-        <button
+        </AdminPrimaryButton>
+        <AdminGhostButton
           type="button"
-          className="secondary"
           disabled={busy || decided}
           onClick={() => onDecide({ kind, id: entry.id, status: "rejected" })}
         >
           Reject
-        </button>
+        </AdminGhostButton>
       </div>
     </li>
   );
@@ -251,105 +253,119 @@ export function ReviewQueue({
         deletes an earlier price.
       </p>
       <form
-        className="restaurant-filters"
         onSubmit={(event) => {
           event.preventDefault();
           applyFilters();
         }}
       >
-        <div>
-          <label htmlFor="review-queue-venue">Branch, area or address</label>
-          <input
-            id="review-queue-venue"
-            value={venue}
-            maxLength={200}
-            onChange={(event) => setVenue(event.target.value)}
-            placeholder="Search branches"
-          />
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
+          <div className="flex min-w-0 flex-col gap-1">
+            <label htmlFor="review-queue-venue" className="text-sm font-semibold">
+              Branch, area or address
+            </label>
+            <input
+              id="review-queue-venue"
+              value={venue}
+              maxLength={200}
+              onChange={(event) => setVenue(event.target.value)}
+              placeholder="Search branches"
+              className="min-h-11 rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink"
+            />
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <label htmlFor="review-queue-kind" className="text-sm font-semibold">
+              Evidence type
+            </label>
+            <AdminSelect
+              id="review-queue-kind"
+              value={kind}
+              onValueChange={(value) => {
+                if (value === "price" || value === "serving" || value === "all") setKind(value);
+              }}
+              options={[
+                { label: "Price and serving", value: "all" },
+                { label: "Price only", value: "price" },
+                { label: "Serving only", value: "serving" },
+              ]}
+            />
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <label htmlFor="review-queue-status" className="text-sm font-semibold">
+              Review status
+            </label>
+            <AdminSelect
+              id="review-queue-status"
+              value={status}
+              onValueChange={(value) => {
+                if (
+                  value === "pending" ||
+                  value === "approved" ||
+                  value === "rejected" ||
+                  value === "all"
+                )
+                  setStatus(value);
+              }}
+              options={[
+                { label: "Pending", value: "pending" },
+                { label: "Approved", value: "approved" },
+                { label: "Rejected", value: "rejected" },
+                { label: "All decisions", value: "all" },
+              ]}
+            />
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <label htmlFor="review-queue-from" className="text-sm font-semibold">
+              Observed from
+            </label>
+            <input
+              id="review-queue-from"
+              type="date"
+              value={from}
+              onChange={(event) => setFrom(event.target.value)}
+              className="min-h-11 rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink"
+            />
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <label htmlFor="review-queue-to" className="text-sm font-semibold">
+              Observed to
+            </label>
+            <input
+              id="review-queue-to"
+              type="date"
+              value={to}
+              onChange={(event) => setTo(event.target.value)}
+              className="min-h-11 rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink"
+            />
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <label htmlFor="review-queue-limit" className="text-sm font-semibold">
+              Page size
+            </label>
+            <AdminSelect
+              id="review-queue-limit"
+              value={String(limit)}
+              onValueChange={(value) => setLimit(Number(value))}
+              options={PAGE_SIZES.map((size) => ({
+                label: `${size} per page`,
+                value: String(size),
+              }))}
+            />
+          </div>
+          <div className="flex items-end sm:col-span-2 md:col-span-3">
+            <AdminGhostButton type="submit" disabled={page.isFetching}>
+              Search queue
+            </AdminGhostButton>
+          </div>
         </div>
-        <div>
-          <label htmlFor="review-queue-kind">Evidence type</label>
-          <select
-            id="review-queue-kind"
-            value={kind}
-            onChange={(event) => {
-              const value = event.target.value;
-
-              if (value === "price" || value === "serving" || value === "all") setKind(value);
-            }}
-          >
-            <option value="all">Price and serving</option>
-            <option value="price">Price only</option>
-            <option value="serving">Serving only</option>
-          </select>
-        </div>
-        <div>
-          <label htmlFor="review-queue-status">Review status</label>
-          <select
-            id="review-queue-status"
-            value={status}
-            onChange={(event) => {
-              const value = event.target.value;
-
-              if (
-                value === "pending" ||
-                value === "approved" ||
-                value === "rejected" ||
-                value === "all"
-              )
-                setStatus(value);
-            }}
-          >
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
-            <option value="all">All decisions</option>
-          </select>
-        </div>
-        <div>
-          <label htmlFor="review-queue-from">Observed from</label>
-          <input
-            id="review-queue-from"
-            type="date"
-            value={from}
-            onChange={(event) => setFrom(event.target.value)}
-          />
-        </div>
-        <div>
-          <label htmlFor="review-queue-to">Observed to</label>
-          <input
-            id="review-queue-to"
-            type="date"
-            value={to}
-            onChange={(event) => setTo(event.target.value)}
-          />
-        </div>
-        <div>
-          <label htmlFor="review-queue-limit">Page size</label>
-          <select
-            id="review-queue-limit"
-            value={limit}
-            onChange={(event) => setLimit(Number(event.target.value))}
-          >
-            {PAGE_SIZES.map((size) => (
-              <option key={size} value={size}>
-                {size} per page
-              </option>
-            ))}
-          </select>
-        </div>
-        <button type="submit" disabled={page.isFetching}>
-          Search queue
-        </button>
       </form>
       {filterError !== "" && (
-        <p className="discovery-message" role="alert">
+        <p className="text-sm font-semibold text-red-800" role="alert">
           {filterError}
         </p>
       )}
       {page.isPending && <p aria-live="polite">Loading review queue…</p>}
       {page.isError && (
-        <p className="discovery-message" role="alert">
+        <p className="text-sm font-semibold text-red-800" role="alert">
           {page.error.message}
         </p>
       )}
@@ -369,33 +385,31 @@ export function ReviewQueue({
               />
             ))}
           </ul>
-          <div className="discovery-card-actions">
-            <button
+          <div className="mt-3 flex flex-wrap gap-2">
+            <AdminGhostButton
               type="button"
-              className="secondary"
               disabled={applied.offset === 0 || page.isFetching}
               onClick={() => goTo(Math.max(0, applied.offset - applied.limit))}
             >
               Previous page
-            </button>
-            <button
+            </AdminGhostButton>
+            <AdminGhostButton
               type="button"
-              className="secondary"
               disabled={applied.offset + shown >= total || page.isFetching}
               onClick={() => goTo(applied.offset + applied.limit)}
             >
               Next page
-            </button>
+            </AdminGhostButton>
           </div>
         </>
       )}
       {notice !== "" && (
-        <p className="discovery-message" aria-live="polite">
+        <p className="text-sm text-muted" aria-live="polite">
           {notice}
         </p>
       )}
       {decision.isError && (
-        <p className="discovery-message" role="alert">
+        <p className="text-sm font-semibold text-red-800" role="alert">
           {decision.error.message}
         </p>
       )}

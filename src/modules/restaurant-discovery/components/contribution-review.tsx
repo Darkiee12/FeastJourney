@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { AdminSelect } from "@/components/admin/select";
 import { menuScanClient } from "@/modules/restaurant-discovery/menu-scan-client";
 import { searchRestaurantsFn } from "@/modules/restaurant-discovery/restaurant.functions";
 import { channelSchema } from "@/modules/restaurant-discovery/restaurant.schema";
@@ -378,17 +379,18 @@ function ContributionDetail({
             onVenueId={setVenueId}
           />
           <label htmlFor={`review-channel-${contribution.id}`}>Confirmed sales channel</label>
-          <select
+          <AdminSelect
             id={`review-channel-${contribution.id}`}
-            value={channel}
+            value={channel === "" ? undefined : channel}
             disabled={review.isPending}
-            onChange={(event) => setChannel(event.target.value)}
-          >
-            <option value="">Choose the observed channel</option>
-            <option value="dine_in">Dine-in</option>
-            <option value="takeaway">Takeaway</option>
-            <option value="delivery">Delivery</option>
-          </select>
+            onValueChange={setChannel}
+            placeholder="Choose the observed channel"
+            options={[
+              { label: "Dine-in", value: "dine_in" },
+              { label: "Takeaway", value: "takeaway" },
+              { label: "Delivery", value: "delivery" },
+            ]}
+          />
           <label htmlFor={`review-observed-${contribution.id}`}>Observed date</label>
           <input
             id={`review-observed-${contribution.id}`}

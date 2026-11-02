@@ -4,6 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { z } from "zod";
 
+import { AdminSelect } from "@/components/admin/select";
+import {
+  AdminField,
+  AdminGhostButton,
+  AdminPageHeading,
+  AdminPrimaryButton,
+  AdminSection,
+} from "@/components/admin/ui";
 import { ContributionReview } from "@/modules/restaurant-discovery/components/contribution-review";
 import { DiscoveryError } from "@/modules/restaurant-discovery/components/discovery-error";
 import {
@@ -204,6 +212,9 @@ function RestaurantAdmin() {
   const [sources, setSources] = useState<ReadonlyArray<EditorSource>>([]);
   const [menuVenueId, setMenuVenueId] = useState("");
   const [lastImport, setLastImport] = useState("");
+  const [offeringKind, setOfferingKind] = useState("item");
+  const [offeringId, setOfferingId] = useState("");
+  const [offeringVisibility, setOfferingVisibility] = useState("archived");
 
   const queryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -411,15 +422,11 @@ function RestaurantAdmin() {
   };
 
   return (
-    <section className="discovery-page" lang="en">
-      <header>
-        <p className="discovery-eyebrow">Editorial workspace</p>
-        <h1>Restaurants & menus</h1>
-        <p>
-          Record real branches and source observations. Imported prices and serving matches remain
-          pending until reviewed.
-        </p>
-      </header>
+    <div className="flex flex-col gap-4" lang="en">
+      <AdminPageHeading
+        title="Restaurants & menus"
+        description="Record real branches and source observations. Imported prices and serving matches remain pending until reviewed."
+      />
 
       <RestaurantDashboard
         venues={venues}
@@ -484,68 +491,73 @@ function RestaurantAdmin() {
         onClose={() => setEditorOpen(false)}
       />
 
-      <section id="menu-management">
-        <h2>Official menu entry / structured import</h2>
-        <p className="my-3 text-sm text-muted">
-          Supply source URL or private object reference, a stable snapshot deduplication key, actual
-          observation date and review horizon. Add exact decimal strings to variant price fields.
-          Reuse menuId, itemId and variantId to append a new price observation to an existing
-          offering. No OCR or public file upload is performed here.
-        </p>
-        <form className="grid gap-3" onSubmit={importSource}>
-          <label htmlFor="menu-payload">Menu JSON (required fields start blank)</label>
-          <textarea
-            key={menuVenueId}
-            id="menu-payload"
-            name="payload"
-            rows={18}
-            defaultValue={template}
-            spellCheck={false}
-            required
-            className="font-mono text-sm"
-          />
-          <button type="submit" disabled={busy || menuVenueId === ""}>
-            Import pending observations
-          </button>
-        </form>
-        {menuVenueId !== "" && (
-          <details className="mt-4">
-            <summary className="cursor-pointer font-semibold">Price field reference</summary>
-            <pre className="overflow-x-auto rounded-lg bg-white p-4 text-xs">
-              {JSON.stringify(
-                {
-                  name: "As listed",
-                  comparisonKey: "regular-bowl",
-                  price: {
-                    amount: "",
-                    currency: "",
-                    kind: "listed",
-                    channel: "dine_in",
-                    taxTreatment: "unknown",
-                    sourceLineKey: "",
+      <div id="menu-management">
+        <AdminSection title="Official menu entry / structured import">
+          <p className="text-sm text-muted">
+            Supply source URL or private object reference, a stable snapshot deduplication key,
+            actual observation date and review horizon. Add exact decimal strings to variant price
+            fields. Reuse menuId, itemId and variantId to append a new price observation to an
+            existing offering. No OCR or public file upload is performed here.
+          </p>
+          <form className="mt-3 grid gap-3" onSubmit={importSource}>
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor="menu-payload" className="text-sm font-semibold">
+                Menu JSON (required fields start blank)
+              </label>
+              <textarea
+                key={menuVenueId}
+                id="menu-payload"
+                name="payload"
+                rows={18}
+                defaultValue={template}
+                spellCheck={false}
+                required
+                className="min-h-11 rounded-lg border border-border-soft bg-white px-3 py-2 font-mono text-sm text-ink"
+              />
+            </div>
+            <div>
+              <AdminPrimaryButton type="submit" disabled={busy || menuVenueId === ""}>
+                Import pending observations
+              </AdminPrimaryButton>
+            </div>
+          </form>
+          {menuVenueId !== "" && (
+            <details className="mt-4">
+              <summary className="cursor-pointer font-semibold">Price field reference</summary>
+              <pre className="overflow-x-auto rounded-lg bg-white p-4 text-xs">
+                {JSON.stringify(
+                  {
+                    name: "As listed",
+                    comparisonKey: "regular-bowl",
+                    price: {
+                      amount: "",
+                      currency: "",
+                      kind: "listed",
+                      channel: "dine_in",
+                      taxTreatment: "unknown",
+                      sourceLineKey: "",
+                    },
                   },
-                },
-                null,
-                2,
-              )}
-            </pre>
-            <p className="text-sm">
-              For serving evidence, add the canonical dishId and matchKind (exact, variant or
-              suggestion) to an item. Suggestions cannot be approved.
-            </p>
-          </details>
-        )}
-      </section>
+                  null,
+                  2,
+                )}
+              </pre>
+              <p className="text-sm">
+                For serving evidence, add the canonical dishId and matchKind (exact, variant or
+                suggestion) to an item. Suggestions cannot be approved.
+              </p>
+            </details>
+          )}
+        </AdminSection>
+      </div>
       {lastImport !== "" && (
         <details open>
           <summary>Imported record IDs (retain for later observations)</summary>
           <pre className="overflow-x-auto bg-white p-4 text-xs">{lastImport}</pre>
         </details>
       )}
-      <section>
-        <h2>Menu visibility</h2>
+      <AdminSection title="Menu visibility">
         <form
-          className="discovery-search-bar"
           onSubmit={(event) => {
             event.preventDefault();
             const form = new FormData(event.currentTarget);
@@ -563,24 +575,25 @@ function RestaurantAdmin() {
             else setMessage("Enter a valid menu ID.");
           }}
         >
-          <label htmlFor="archive-menu">Menu ID to archive</label>
-          <input id="archive-menu" name="menuId" required />
-          <button type="submit" disabled={busy}>
-            Archive menu
-          </button>
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+            <AdminField id="archive-menu" name="menuId" label="Menu ID to archive" required />
+            <AdminPrimaryButton type="submit" disabled={busy}>
+              Archive menu
+            </AdminPrimaryButton>
+          </div>
         </form>
-      </section>
+      </AdminSection>
       <ContributionReview canReview={canReview} />
-      <section>
-        <h2>Observation review and history</h2>
+      <AdminSection title="Observation review and history">
         <form
-          className="restaurant-filters"
           onSubmit={(event) => {
             event.preventDefault();
 
-            const parsed = offeringStatusSchema.safeParse(
-              Object.fromEntries(new FormData(event.currentTarget)),
-            );
+            const parsed = offeringStatusSchema.safeParse({
+              kind: offeringKind,
+              id: offeringId,
+              status: offeringVisibility,
+            });
 
             if (!parsed.success) {
               setMessage("Choose an offering type and valid item/variant ID.");
@@ -594,27 +607,47 @@ function RestaurantAdmin() {
             );
           }}
         >
-          <div>
-            <label htmlFor="offering-kind">Offering type</label>
-            <select id="offering-kind" name="kind">
-              <option value="item">Menu item</option>
-              <option value="variant">Variant</option>
-            </select>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-[12rem_minmax(0,1fr)_12rem_auto] md:items-end">
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor="offering-kind" className="text-sm font-semibold">
+                Offering type
+              </label>
+              <AdminSelect
+                id="offering-kind"
+                value={offeringKind}
+                onValueChange={setOfferingKind}
+                options={[
+                  { label: "Menu item", value: "item" },
+                  { label: "Variant", value: "variant" },
+                ]}
+              />
+            </div>
+            <AdminField
+              id="offering-id"
+              name="id"
+              label="Item / variant ID"
+              value={offeringId}
+              onChange={(event) => setOfferingId(event.target.value)}
+              required
+            />
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor="offering-status" className="text-sm font-semibold">
+                Visibility
+              </label>
+              <AdminSelect
+                id="offering-status"
+                value={offeringVisibility}
+                onValueChange={setOfferingVisibility}
+                options={[
+                  { label: "Archived", value: "archived" },
+                  { label: "Published", value: "published" },
+                ]}
+              />
+            </div>
+            <AdminPrimaryButton type="submit" disabled={busy}>
+              Update offering
+            </AdminPrimaryButton>
           </div>
-          <div>
-            <label htmlFor="offering-id">Item / variant ID</label>
-            <input id="offering-id" name="id" required />
-          </div>
-          <div>
-            <label htmlFor="offering-status">Visibility</label>
-            <select id="offering-status" name="status">
-              <option value="archived">Archived</option>
-              <option value="published">Published</option>
-            </select>
-          </div>
-          <button type="submit" disabled={busy}>
-            Update offering
-          </button>
         </form>
         <p className="my-3 text-sm text-muted">
           Review source, branch, portion, channel, tax treatment and observation date. Conflicting
@@ -623,8 +656,11 @@ function RestaurantAdmin() {
         </p>
         <ul className="grid gap-3">
           {queue.map((entry) => (
-            <li key={`${entry.kind}:${entry.id}`} className="discovery-card">
-              <h3>
+            <li
+              key={`${entry.kind}:${entry.id}`}
+              className="rounded-2xl border border-border-soft bg-white p-4"
+            >
+              <h3 className="font-semibold">
                 {entry.venue} · {entry.item}
                 {entry.variant !== null && ` · ${entry.variant}`}
               </h3>
@@ -648,8 +684,8 @@ function RestaurantAdmin() {
                 </a>
               )}
               {canReview && (
-                <div className="discovery-card-actions">
-                  <button
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <AdminPrimaryButton
                     type="button"
                     disabled={busy || entry.detail.startsWith("suggestion")}
                     onClick={() =>
@@ -667,10 +703,9 @@ function RestaurantAdmin() {
                     }
                   >
                     Approve
-                  </button>
-                  <button
+                  </AdminPrimaryButton>
+                  <AdminGhostButton
                     type="button"
-                    className="secondary"
                     disabled={busy}
                     onClick={() =>
                       void run(
@@ -687,13 +722,13 @@ function RestaurantAdmin() {
                     }
                   >
                     Reject
-                  </button>
+                  </AdminGhostButton>
                 </div>
               )}
             </li>
           ))}
         </ul>
-      </section>
-    </section>
+      </AdminSection>
+    </div>
   );
 }

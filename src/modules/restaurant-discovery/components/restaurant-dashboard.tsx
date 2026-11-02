@@ -1,3 +1,4 @@
+import { AdminSelect } from "@/components/admin/select";
 import {
   AdminCard,
   AdminEmptyState,
@@ -111,31 +112,30 @@ export function RestaurantDashboard({
         <label htmlFor="dashboard-status" className="sr-only">
           Filter by publication state
         </label>
-        <select
+        <AdminSelect
           id="dashboard-status"
           value={status}
           disabled={busy}
-          onChange={(event) => {
-            const next = event.target.value;
-
+          onValueChange={(next) => {
             if (next === "" || next === "draft" || next === "published" || next === "archived") {
               onStatus(next);
             }
           }}
-          className="min-h-11 rounded-lg border border-border-soft bg-white px-3 text-sm"
-        >
-          <option value="">All states</option>
-          <option value="draft">Drafts</option>
-          <option value="published">Published</option>
-          <option value="archived">Archived</option>
-        </select>
+          triggerClassName="w-44"
+          options={[
+            { label: "All states", value: "" },
+            { label: "Drafts", value: "draft" },
+            { label: "Published", value: "published" },
+            { label: "Archived", value: "archived" },
+          ]}
+        />
         <AdminPrimaryButton type="button" disabled={busy} onClick={onCreate}>
           Add branch
         </AdminPrimaryButton>
       </AdminToolbar>
 
       {actionMessage !== "" && (
-        <p className="discovery-message" aria-live="polite">
+        <p className="text-sm font-semibold" aria-live="polite">
           {actionMessage}
         </p>
       )}
