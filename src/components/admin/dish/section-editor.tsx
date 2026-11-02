@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 import {
   dishEditFnAvailable,
   invokeDishEdit,
+  type DishEditFailure,
   type DishEditFnName,
   type DishEditPayload,
 } from "@/components/admin/dish/edit-contracts";
@@ -130,6 +131,36 @@ export interface EditSaveHandle {
   readonly save: (data: DishEditPayload) => void;
 }
 
+/**
+ * Maps a settled dish-edit failure to client-safe copy. The transport
+ * settles every domain failure into a `DishEditFailure` outcome, so this is
+ * an exhaustive compile-time switch — adding a failure code without a case
+ * fails the build via the missing-return check. Thrown transport errors
+ * (network, serialization, infrastructure) never reach here; `onError`
+ * below maps those to the generic message.
+ */
+export function dishEditFailureMessage(outcome: DishEditFailure, copy: Messages): string {
+  switch (outcome.code) {
+    case "unknown_place":
+      return `${outcome.reason} ${copy.adminPlaceNeedsRegistration}`;
+    case "ambiguous_place":
+      return `${copy.adminPlaceAmbiguousHint} ${outcome.reason}`;
+    case "invalid_reference":
+      return outcome.reason;
+    case "conflict":
+      return outcome.reason;
+    case "not_found":
+      return outcome.reason;
+    case "forbidden":
+      return copy.authDenied;
+    default: {
+      const exhaustive: never = outcome.code;
+
+      return exhaustive;
+    }
+  }
+}
+
 export function useEditSave(input: {
   readonly copy: Messages;
   readonly fnName: DishEditFnName;
@@ -140,10 +171,16 @@ export function useEditSave(input: {
 
   const mutation = useMutation({
     mutationFn: (data: DishEditPayload) => invokeDishEdit(input.fnName, data),
-    onSuccess: () => {
-      setError(null);
-      input.onSaved();
-      void router.invalidate();
+    onSuccess: (outcome) => {
+      if (outcome.ok) {
+        setError(null);
+        input.onSaved();
+        void router.invalidate();
+
+        return;
+      }
+
+      setError(dishEditFailureMessage(outcome, input.copy));
     },
     onError: () => {
       setError(input.copy.adminSaveFailed);

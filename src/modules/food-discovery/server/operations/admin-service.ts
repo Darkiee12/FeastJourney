@@ -8,6 +8,7 @@ import {
   InvalidLocale,
   InvalidRelationship,
   InvalidSearchFilter,
+  UnknownPlace,
 } from "@/modules/food-discovery/server/domain/errors";
 import {
   type DishStatus,
@@ -23,6 +24,10 @@ import {
   toPrefixKey,
 } from "@/modules/food-discovery/server/domain/search";
 import { CurationService } from "@/modules/food-discovery/server/operations/curation-service";
+import {
+  AmbiguousPlace,
+  type AmbiguousPlaceCandidate,
+} from "@/modules/food-discovery/server/operations/place-admin-service";
 import { DishRelationsRepository } from "@/modules/food-discovery/server/repository/dish-relations-repository";
 import { DishRepository } from "@/modules/food-discovery/server/repository/dish-repository";
 import { IngredientRepository } from "@/modules/food-discovery/server/repository/ingredient-repository";
@@ -58,6 +63,7 @@ const MAX_SLUG_ATTEMPTS = 20;
 const MAX_PARENT_CHAIN_DEPTH = 25;
 
 export type AdminServiceError =
+  | AmbiguousPlace
   | CatalogConflict
   | ConflictingDish
   | DishNotFound
@@ -65,6 +71,7 @@ export type AdminServiceError =
   | InvalidLocale
   | InvalidRelationship
   | InvalidSearchFilter
+  | UnknownPlace
   | DatabaseUnavailable
   | PersistenceError
   | PersistenceConflict
@@ -1000,7 +1007,7 @@ export const AdminServiceLive = Layer.effect(
           const place = yield* placeRepository.findById(id);
 
           if (place === null) {
-            return yield* new InvalidSearchFilter({ reason: "unknown place id" });
+            return yield* new UnknownPlace({ reason: "unknown place id" });
           }
 
           return place.id;
@@ -1016,7 +1023,7 @@ export const AdminServiceLive = Layer.effect(
           const place = yield* placeRepository.findByIso(iso);
 
           if (place === null) {
-            return yield* new InvalidSearchFilter({ reason: `unknown place iso "${iso}"` });
+            return yield* new UnknownPlace({ reason: `unknown place iso "${iso}"` });
           }
 
           return place.id;
@@ -1046,14 +1053,14 @@ export const AdminServiceLive = Layer.effect(
         });
 
         if (ids.length === 0) {
-          return yield* new InvalidSearchFilter({ reason: `unknown place "${query}"` });
+          return yield* new UnknownPlace({ reason: `unknown place "${query}"` });
         }
 
         const allNames = yield* placeRepository.namesByPlaceIds(ids.map((entry) => entry.id));
         const exact = allNames.filter((row) => row.search_key === key);
 
         if (exact.length === 0) {
-          return yield* new InvalidSearchFilter({ reason: `unknown place "${query}"` });
+          return yield* new UnknownPlace({ reason: `unknown place "${query}"` });
         }
 
         const preferred = exact.filter((row) => row.is_preferred);
@@ -1077,7 +1084,7 @@ export const AdminServiceLive = Layer.effect(
           }
 
           if (scoped.length === 0) {
-            return yield* new InvalidSearchFilter({ reason: `unknown place "${query}"` });
+            return yield* new UnknownPlace({ reason: `unknown place "${query}"` });
           }
         }
 
@@ -1085,7 +1092,7 @@ export const AdminServiceLive = Layer.effect(
           const only = scoped[0];
 
           if (only === undefined) {
-            return yield* new InvalidSearchFilter({ reason: `unknown place "${query}"` });
+            return yield* new UnknownPlace({ reason: `unknown place "${query}"` });
           }
 
           return only;
@@ -1100,17 +1107,23 @@ export const AdminServiceLive = Layer.effect(
           }
         }
 
-        const listing = scoped
-          .map((candidate) => {
-            const name = preferredByPlace.get(candidate.toString()) ?? candidate.toString();
+        const candidates: Array<AmbiguousPlaceCandidate> = [];
 
-            return `${candidate.toString()}: ${name}`;
-          })
-          .join("; ");
+        for (const candidate of scoped) {
+          const placeKey = candidate.toString();
+          const name = preferredByPlace.get(placeKey) ?? placeKey;
+          const chain = yield* placeRepository.ancestors(candidate);
+          const scopeRow = chain.find((row) => row.iso3166 !== null);
+          const scopeIso = scopeRow?.iso3166 ?? null;
 
-        return yield* new InvalidDishData({
-          reason: `ambiguous city "${query}": ${listing}`,
-        });
+          candidates.push({
+            id: encodeDbId(candidate),
+            name,
+            context: scopeIso === null ? `${name} (place:${placeKey})` : `${name}, ${scopeIso}`,
+          });
+        }
+
+        return yield* new AmbiguousPlace({ query, candidates });
       });
 
     const updateDishFields = (actor: string, id: string, input: UpdateDishFieldsInput) =>

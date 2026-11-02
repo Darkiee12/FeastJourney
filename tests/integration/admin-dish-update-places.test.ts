@@ -1,13 +1,21 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
+import { SQL } from "bun";
 import { Effect } from "effect";
 
 import { AdminService } from "@/modules/food-discovery/server/operations/admin-service";
 import { CurationService } from "@/modules/food-discovery/server/operations/curation-service";
+import {
+  PlaceAdminService,
+  PlaceAdminServiceLive,
+} from "@/modules/food-discovery/server/operations/place-admin-service";
+import { Actor } from "@/server/auth/actor";
+import { type CurrentActor, withActor } from "@/server/auth/current-actor";
 import type { AppServices } from "@/server/layers";
 import { appRuntime } from "@/server/runtime";
 
 import { createdSlugs } from "./cleanup";
+import { createFoodAuth } from "./food-auth";
 
 const run = <A, E, R extends AppServices>(effect: Effect.Effect<A, E, R>): Promise<A> =>
   appRuntime.runPromise(effect);
@@ -91,28 +99,28 @@ describe("resolvePlaceRefLocal", () => {
   test("rejects unknown and mismatched place references", async () => {
     await expectFailure(
       Effect.flatMap(AdminService, (service) => service.resolvePlaceRefLocal({ iso: "XX" })),
-      "InvalidSearchFilter",
+      "UnknownPlace",
     );
 
     await expectFailure(
       Effect.flatMap(AdminService, (service) =>
         service.resolvePlaceRefLocal({ city: "No Such City Anywhere" }),
       ),
-      "InvalidSearchFilter",
+      "UnknownPlace",
     );
 
     await expectFailure(
       Effect.flatMap(AdminService, (service) =>
         service.resolvePlaceRefLocal({ city: "Hanoi", parentIso: "JP" }),
       ),
-      "InvalidSearchFilter",
+      "UnknownPlace",
     );
 
     await expectFailure(
       Effect.flatMap(AdminService, (service) =>
         service.resolvePlaceRefLocal({ placeId: "999999999" }),
       ),
-      "InvalidSearchFilter",
+      "UnknownPlace",
     );
   });
 });
@@ -238,6 +246,166 @@ describe("dish place updates", () => {
 
 beforeAll(() => {
   expect(process.env.DATABASE_URL).toBeTruthy();
+});
+
+const foodAuth = createFoodAuth();
+
+const roleId = `test-dish-places-${Date.now().toString(36)}`;
+const ownedPlaceIds: Array<string> = [];
+let editorUserId = "";
+let editorLabel = "";
+
+const runAs = <A, E>(
+  userId: string,
+  effect: Effect.Effect<A, E, PlaceAdminService | AppServices | CurrentActor>,
+): Promise<A> =>
+  appRuntime.runPromise(
+    withActor(Actor.Member({ userId }), effect).pipe(Effect.provide(PlaceAdminServiceLive)),
+  );
+
+const query = async <T>(statement: (sql: SQL) => Promise<T>): Promise<T> => {
+  const sql = new SQL(process.env.DATABASE_URL ?? "");
+
+  try {
+    return await statement(sql);
+  } finally {
+    await sql.end();
+  }
+};
+
+describe("ambiguous city names on the dish path", () => {
+  const cityName = `E2E Ambiguous ${stamp}`;
+
+  beforeAll(async () => {
+    await query(
+      (sql) =>
+        sql`INSERT INTO feastjourney.roles (id, slug, name) VALUES (${roleId}, ${roleId}, ${roleId}) ON CONFLICT DO NOTHING`,
+    );
+    await query(
+      (sql) =>
+        sql`INSERT INTO feastjourney.role_permissions (role_id, permission_key) VALUES (${roleId}, 'food:update') ON CONFLICT DO NOTHING`,
+    );
+
+    const session = await foodAuth.signupSignin("dish-places-ambiguous");
+
+    await foodAuth.grantRole(session.userId, roleId);
+
+    editorUserId = session.userId;
+    editorLabel = `member:${session.userId}`;
+
+    const makeParent = async (iso: string, label: string): Promise<string> => {
+      const view = await runAs(
+        editorUserId,
+        Effect.flatMap(PlaceAdminService, (service) =>
+          service.createPlace({
+            kind: "province",
+            iso3166: iso,
+            names: [{ languageTag: "en", name: `${label} ${stamp}` }],
+          }),
+        ),
+      );
+
+      ownedPlaceIds.push(view.id);
+
+      return view.id;
+    };
+
+    const north = await makeParent("QW", "E2E Westprov");
+    const south = await makeParent("QE", "E2E Eastprov");
+
+    const westCity = await runAs(
+      editorUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.createPlace({
+          kind: "locality",
+          names: [{ languageTag: "en", name: cityName }],
+          parentIds: [north],
+        }),
+      ),
+    );
+
+    ownedPlaceIds.push(westCity.id);
+
+    const eastCity = await runAs(
+      editorUserId,
+      Effect.flatMap(PlaceAdminService, (service) =>
+        service.createPlace({
+          kind: "locality",
+          names: [{ languageTag: "en", name: cityName }],
+          parentIds: [south],
+        }),
+      ),
+    );
+
+    ownedPlaceIds.push(eastCity.id);
+  });
+
+  afterAll(async () => {
+    await query(
+      (sql) =>
+        sql`DELETE FROM feastjourney.dishes WHERE slug LIKE 'upd-places-ambiguous-%' OR slug LIKE 'upd-places-scoped-%'`,
+    );
+
+    await Promise.all(
+      ownedPlaceIds.map((id) =>
+        query((sql) => sql`DELETE FROM feastjourney.place_parents WHERE place_id = ${id}::bigint`),
+      ),
+    );
+
+    await Promise.all(
+      ownedPlaceIds
+        .toReversed()
+        .map((id) => query((sql) => sql`DELETE FROM feastjourney.places WHERE id = ${id}::bigint`)),
+    );
+
+    await query(
+      (sql) => sql`DELETE FROM feastjourney.place_revisions WHERE actor = ${editorLabel}`,
+    );
+    await query((sql) => sql`DELETE FROM feastjourney.roles WHERE id = ${roleId}`);
+    await foodAuth.close();
+  });
+
+  test("bare city name fails as AmbiguousPlace with both candidates", async () => {
+    await expectFailure(
+      Effect.flatMap(AdminService, (service) => service.resolvePlaceRefLocal({ city: cityName })),
+      "AmbiguousPlace",
+    );
+
+    const dish = await createDish(slugFor("ambiguous"));
+
+    await expectFailure(
+      Effect.flatMap(AdminService, (service) =>
+        service.updateDishPlaces(ACTOR, dish.id, {
+          upsert: [{ place: { city: cityName } }],
+          removePlaceIds: [],
+        }),
+      ),
+      "AmbiguousPlace",
+    );
+  });
+
+  test("parent-ISO scope resolves the intended candidate and links it", async () => {
+    const west = await run(
+      Effect.flatMap(AdminService, (service) =>
+        service.resolvePlaceRefLocal({ city: cityName, parentIso: "QW" }),
+      ),
+    );
+
+    const dish = await createDish(slugFor("scoped"));
+
+    const linked = await run(
+      Effect.flatMap(AdminService, (service) =>
+        service.updateDishPlaces(ACTOR, dish.id, {
+          upsert: [{ place: { placeId: west.toString() }, association: "popular" }],
+          removePlaceIds: [],
+        }),
+      ),
+    );
+
+    expect(linked.places).toHaveLength(1);
+    expect(linked.places[0]?.placeId).toBe(west.toString());
+    expect(linked.places[0]?.association).toBe("popular");
+  });
 });
 
 afterAll(async () => {

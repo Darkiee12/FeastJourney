@@ -26,6 +26,8 @@ export const troubleByTag = {
   IngredientNotFound: { status: 404, code: "not_found" },
   PlaceNotFound: { status: 404, code: "not_found" },
   InvalidSearchFilter: { status: 400, code: "invalid_request" },
+  UnknownPlace: { status: 400, code: "invalid_request" },
+  AmbiguousPlace: { status: 400, code: "invalid_request" },
   InvalidLocale: { status: 400, code: "invalid_request" },
   InvalidJsonBody: { status: 400, code: "invalid_request" },
   InvalidDishData: { status: 400, code: "invalid_request" },

@@ -14,6 +14,11 @@ import type { Locale } from "@/shared/i18n";
  * registry ids resolve server-side and surface as review issues; the parser
  * only rejects malformed shapes so curators fix the cell instead of
  * shipping a dangling link.
+ *
+ * City (`City@ISO`) and bare ISO previews are syntactically valid but
+ * unverified until save: they describe a locality that may not exist in the
+ * place registry yet. Only `place:<id>` refs reference the registry
+ * directly (see isVerifiedPlaceRef).
  */
 
 const ASSOCIATIONS: ReadonlyArray<DishPlaceAssociation> = ["origin", "associated", "popular"];
@@ -126,6 +131,21 @@ export const parsePlaceRef = (
   }
 
   return { ok: true, value: { ref: { iso }, association } };
+};
+
+/**
+ * True only for canonical registry refs (`place:<decimal-id>`, optional
+ * `:association` suffix). City (`City@ISO`) and bare ISO refs parse fine
+ * but are unverified until save — they name a locality, not a registry row.
+ */
+export const isVerifiedPlaceRef = (raw: string): boolean => {
+  const parsed = parsePlaceRef(raw.trim());
+
+  if (!parsed.ok) {
+    return false;
+  }
+
+  return "placeId" in parsed.value.ref;
 };
 
 /** Geographic preview for a parsed ref — city/country context, never a raw id alone. */

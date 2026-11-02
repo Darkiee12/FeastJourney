@@ -1,4 +1,12 @@
-import { Link, createFileRoute, getRouteApi, redirect, useNavigate } from "@tanstack/react-router";
+import {
+  Link,
+  Outlet,
+  createFileRoute,
+  getRouteApi,
+  redirect,
+  useChildMatches,
+  useNavigate,
+} from "@tanstack/react-router";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { z } from "zod";
 
@@ -198,9 +206,14 @@ function PlacesFilterForm({
 function AdminPlaces() {
   const { lang } = rootRoute.useSearch();
   const search = Route.useSearch();
+  const childMatches = useChildMatches();
   const copy = messagesFor(lang);
   const data = Route.useLoaderData();
   const navigate = useNavigate({ from: Route.fullPath });
+
+  if (childMatches.length > 0) {
+    return <Outlet />;
+  }
 
   const applyFilters = (filters: { kind: string; parentId: string; query: string }): void => {
     void navigate({

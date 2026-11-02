@@ -44,10 +44,17 @@ import type { RoleRepository } from "@/modules/user/server/repository/role-repos
 import type * as ActorModule from "@/server/auth/actor";
 import type { CurrentActor } from "@/server/auth/current-actor";
 import { InsufficientPermissions } from "@/server/auth/errors";
+import type { SignInRequired, UserSuspended } from "@/server/auth/errors";
 import type { PermissionRequest } from "@/server/auth/permissions";
 import type * as SessionModule from "@/server/auth/session";
 import type { Database } from "@/server/database/client";
-import type { TransactionFailed } from "@/server/database/errors";
+import type {
+  DatabaseUnavailable,
+  PersistenceConflict,
+  PersistenceError,
+  TransactionConflict,
+  TransactionFailed,
+} from "@/server/database/errors";
 import type { DatabaseError } from "@/server/database/query";
 import type * as RuntimeModule from "@/server/runtime";
 import { formatFileSize } from "@/shared/format-file-size";
@@ -1422,7 +1429,149 @@ const loadDishAdminServer = async () => {
   return { effects, server, dishes, authorization, session, actor, currentActor, runtime };
 };
 
-const withDishAdminService = async <A>(
+const dishUpdatePermissions = (status: string | undefined): ReadonlyArray<PermissionRequest> =>
+  status === "published"
+    ? [
+        { resource: "food", actions: ["update"] },
+        { resource: "food", actions: ["publish"] },
+      ]
+    : [{ resource: "food", actions: ["update"] }];
+
+/**
+ * Client-safe dish-edit failure codes. Every code maps to one copy string
+ * on the client via an exhaustive switch — no runtime error sniffing.
+ * Infrastructure failures (database, transactions) are not settled here;
+ * they propagate as server-function errors and surface the generic message.
+ */
+export type DishEditFailureCode =
+  | "unknown_place"
+  | "ambiguous_place"
+  | "invalid_reference"
+  | "conflict"
+  | "forbidden"
+  | "not_found";
+
+export interface DishEditFailure {
+  readonly ok: false;
+  readonly code: DishEditFailureCode;
+  readonly reason: string;
+}
+
+export type DishEditOutcome = { readonly ok: true } | DishEditFailure;
+
+/**
+ * Settles dish-edit failures into the client-safe outcome contract,
+ * mirroring `settlePlaceTask` in place.functions.ts. Domain failures map
+ * per Effect tag (known at compile time from AdminServiceError); the
+ * permission-stage tags map to `forbidden`. Anything else propagates.
+ */
+const settleDishEdit = <A, R>(
+  effects: typeof EffectModule,
+  task: Effect.Effect<
+    A,
+    AdminServiceError | SignInRequired | UserSuspended | InsufficientPermissions,
+    R
+  >,
+): Effect.Effect<
+  DishEditOutcome,
+  | DatabaseUnavailable
+  | PersistenceError
+  | PersistenceConflict
+  | TransactionConflict
+  | TransactionFailed
+  | DatabaseError,
+  R
+> =>
+  task.pipe(
+    effects.Effect.map(() => ({ ok: true as const })),
+    effects.Effect.catchTags({
+      UnknownPlace: (failure) =>
+        effects.Effect.succeed({
+          ok: false as const,
+          code: "unknown_place" as const,
+          reason: failure.reason,
+        }),
+      AmbiguousPlace: (failure) =>
+        effects.Effect.succeed({
+          ok: false as const,
+          code: "ambiguous_place" as const,
+          reason:
+            `ambiguous city "${failure.query}": ` +
+            failure.candidates
+              .map((candidate) => `${candidate.id}: ${candidate.name} (${candidate.context})`)
+              .join("; "),
+        }),
+      InvalidSearchFilter: (failure) =>
+        effects.Effect.succeed({
+          ok: false as const,
+          code: "invalid_reference" as const,
+          reason: failure.reason,
+        }),
+      InvalidDishData: (failure) =>
+        effects.Effect.succeed({
+          ok: false as const,
+          code: "invalid_reference" as const,
+          reason: failure.reason,
+        }),
+      InvalidRelationship: (failure) =>
+        effects.Effect.succeed({
+          ok: false as const,
+          code: "invalid_reference" as const,
+          reason: failure.reason,
+        }),
+      InvalidLocale: (failure) =>
+        effects.Effect.succeed({
+          ok: false as const,
+          code: "invalid_reference" as const,
+          reason: failure.locale,
+        }),
+      ConflictingDish: (failure) =>
+        effects.Effect.succeed({
+          ok: false as const,
+          code: "conflict" as const,
+          reason: failure.reason,
+        }),
+      CatalogConflict: (failure) =>
+        effects.Effect.succeed({
+          ok: false as const,
+          code: "conflict" as const,
+          reason: failure.reason,
+        }),
+      DishNotFound: (failure) =>
+        effects.Effect.succeed({
+          ok: false as const,
+          code: "not_found" as const,
+          reason: `Dish ${failure.dishId} was not found.`,
+        }),
+      SignInRequired: () =>
+        effects.Effect.succeed({
+          ok: false as const,
+          code: "forbidden" as const,
+          reason: "Administration requires a signed-in curator.",
+        }),
+      UserSuspended: () =>
+        effects.Effect.succeed({
+          ok: false as const,
+          code: "forbidden" as const,
+          reason: "Suspended accounts cannot edit the catalog.",
+        }),
+      InsufficientPermissions: () =>
+        effects.Effect.succeed({
+          ok: false as const,
+          code: "forbidden" as const,
+          reason: "Administration requires food:update.",
+        }),
+    }),
+  );
+
+/**
+ * Dish-edit transport with settled outcomes. Same two gates as the other
+ * admin transports (surface access, then `food:update`), but composed
+ * into one Effect so permission-stage failures settle to `forbidden`
+ * instead of throwing — the client switches on the outcome code and never
+ * inspects thrown errors.
+ */
+const withDishEditService = async <A>(
   loaded: Awaited<ReturnType<typeof loadDishAdminServer>>,
   headers: Headers,
   permissions: PermissionRequest | ReadonlyArray<PermissionRequest>,
@@ -1432,38 +1581,36 @@ const withDishAdminService = async <A>(
     service: AdminServiceApi,
     actorLabel: string,
   ) => Effect.Effect<A, AdminServiceError, Database>,
-): Promise<A> => {
-  const { effects, session, actor, currentActor, runtime } = loaded;
+): Promise<DishEditOutcome> => {
+  const { effects, session, actor, authorization, currentActor, runtime } = loaded;
 
-  await requireSurface(loaded, headers, operation, requestId);
-
-  const trusted = await runtime.runApp(
-    session.requirePermission(headers, permissions),
-    operation,
-    15000,
-    requestId,
-  );
-
-  const actorLabel = `admin:${trusted.userId}`;
-
-  return runtime.runApp(
-    currentActor.withActor(
-      actor.Actor.Member({ userId: trusted.userId }),
-      effects.Effect.flatMap(loaded.dishes.AdminService, (service) => task(service, actorLabel)),
+  const program = effects.Effect.flatMap(session.requireAuthenticatedActor(headers), (trusted) =>
+    effects.Effect.flatMap(
+      effects.Effect.forEach(SURFACE_CHECKS, (check) =>
+        effects.Effect.flatMap(authorization.Authorization, (authz) =>
+          authz.has(actor.Actor.Member({ userId: trusted.userId }), check),
+        ),
+      ),
+      (results) =>
+        results.some(Boolean)
+          ? effects.Effect.flatMap(session.requirePermission(headers, permissions), (verified) =>
+              currentActor.withActor(
+                actor.Actor.Member({ userId: verified.userId }),
+                effects.Effect.flatMap(loaded.dishes.AdminService, (service) =>
+                  task(service, `admin:${verified.userId}`),
+                ),
+              ),
+            )
+          : effects.Effect.fail(
+              new InsufficientPermissions({
+                reason: "administration requires admin, import, or moderation grants",
+              }),
+            ),
     ),
-    operation,
-    15000,
-    requestId,
   );
-};
 
-const dishUpdatePermissions = (status: string | undefined): ReadonlyArray<PermissionRequest> =>
-  status === "published"
-    ? [
-        { resource: "food", actions: ["update"] },
-        { resource: "food", actions: ["publish"] },
-      ]
-    : [{ resource: "food", actions: ["update"] }];
+  return runtime.runApp(settleDishEdit(effects, program), operation, 15000, requestId);
+};
 
 export const adminUpdateDishFieldsFn = createServerFn({ method: "POST" })
   .validator(adminUpdateDishFieldsSchema)
@@ -1474,7 +1621,7 @@ export const adminUpdateDishFieldsFn = createServerFn({ method: "POST" })
     const headers = server.getRequestHeaders();
     const requestId = crypto.randomUUID();
 
-    return withDishAdminService(
+    return withDishEditService(
       loaded,
       headers,
       dishUpdatePermissions(data.status),
@@ -1498,7 +1645,7 @@ export const adminUpdateDishNamesFn = createServerFn({ method: "POST" })
     const headers = server.getRequestHeaders();
     const requestId = crypto.randomUUID();
 
-    return withDishAdminService(
+    return withDishEditService(
       loaded,
       headers,
       dishUpdatePermissions(undefined),
@@ -1527,7 +1674,7 @@ export const adminUpdateDishDescriptionsFn = createServerFn({ method: "POST" })
     const headers = server.getRequestHeaders();
     const requestId = crypto.randomUUID();
 
-    return withDishAdminService(
+    return withDishEditService(
       loaded,
       headers,
       dishUpdatePermissions(undefined),
@@ -1554,7 +1701,7 @@ export const adminUpdateDishIngredientsFn = createServerFn({ method: "POST" })
     const headers = server.getRequestHeaders();
     const requestId = crypto.randomUUID();
 
-    return withDishAdminService(
+    return withDishEditService(
       loaded,
       headers,
       dishUpdatePermissions(undefined),
@@ -1580,7 +1727,7 @@ export const adminUpdateDishTaxonomyFn = createServerFn({ method: "POST" })
     const headers = server.getRequestHeaders();
     const requestId = crypto.randomUUID();
 
-    return withDishAdminService(
+    return withDishEditService(
       loaded,
       headers,
       dishUpdatePermissions(undefined),
@@ -1605,7 +1752,7 @@ export const adminUpdateDishPlacesFn = createServerFn({ method: "POST" })
     const headers = server.getRequestHeaders();
     const requestId = crypto.randomUUID();
 
-    return withDishAdminService(
+    return withDishEditService(
       loaded,
       headers,
       dishUpdatePermissions(undefined),
