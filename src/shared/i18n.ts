@@ -248,6 +248,12 @@ const english = {
   adminSlugsHint: "Separate multiple slugs with commas or semicolons.",
   adminPlaceRef: "Place reference",
   adminPlaceRefHint: "VN, VN:origin, place:45, place:45:popular, Hanoi@VN or Hanoi@VN:associated.",
+  adminPlaceNeedsRegistration:
+    "This locality is not in the place registry yet. Register it under Admin → Places first, then link the canonical place:<id>.",
+  adminPlaceAmbiguousHint:
+    "Multiple places share this name. Add a parent scope (City@ISO) or pick the canonical place:<id>.",
+  adminPlaceRefUnverified:
+    "Unverified reference — pick a registry match from search, or it will be validated on save.",
   adminAssociation: "Association",
   adminAssocOrigin: "Origin",
   adminAssocAssociated: "Associated",
@@ -870,6 +876,12 @@ const vietnamese: Messages = {
   adminPlaceRef: "Tham chiếu địa điểm",
   adminPlaceRefHint:
     "VN, VN:origin, place:45, place:45:popular, Hanoi@VN hoặc Hanoi@VN:associated.",
+  adminPlaceNeedsRegistration:
+    "Địa danh này chưa có trong danh mục địa điểm. Hãy đăng ký dưới mục Quản trị → Địa điểm trước, rồi liên kết place:<id> chuẩn.",
+  adminPlaceAmbiguousHint:
+    "Nhiều địa điểm trùng tên. Hãy thêm phạm vi cấp cha (City@ISO) hoặc chọn place:<id> chuẩn.",
+  adminPlaceRefUnverified:
+    "Tham chiếu chưa xác minh — hãy chọn một kết quả trong danh mục từ tìm kiếm, nếu không hệ thống sẽ kiểm tra khi lưu.",
   adminAssociation: "Liên kết",
   adminAssocOrigin: "Xuất xứ",
   adminAssocAssociated: "Liên quan",
@@ -1490,6 +1502,12 @@ const hindi: Messages = {
   adminSlugsHint: "Separate multiple slugs with commas or semicolons.",
   adminPlaceRef: "Place reference",
   adminPlaceRefHint: "VN, VN:origin, place:45, place:45:popular, Hanoi@VN or Hanoi@VN:associated.",
+  adminPlaceNeedsRegistration:
+    "This locality is not in the place registry yet. Register it under Admin → Places first, then link the canonical place:<id>.",
+  adminPlaceAmbiguousHint:
+    "Multiple places share this name. Add a parent scope (City@ISO) or pick the canonical place:<id>.",
+  adminPlaceRefUnverified:
+    "Unverified reference — pick a registry match from search, or it will be validated on save.",
   adminAssociation: "Association",
   adminAssocOrigin: "Origin",
   adminAssocAssociated: "Associated",
@@ -2115,6 +2133,12 @@ const spanish: Messages = {
   adminSlugsHint: "Separate multiple slugs with commas or semicolons.",
   adminPlaceRef: "Place reference",
   adminPlaceRefHint: "VN, VN:origin, place:45, place:45:popular, Hanoi@VN or Hanoi@VN:associated.",
+  adminPlaceNeedsRegistration:
+    "This locality is not in the place registry yet. Register it under Admin → Places first, then link the canonical place:<id>.",
+  adminPlaceAmbiguousHint:
+    "Multiple places share this name. Add a parent scope (City@ISO) or pick the canonical place:<id>.",
+  adminPlaceRefUnverified:
+    "Unverified reference — pick a registry match from search, or it will be validated on save.",
   adminAssociation: "Association",
   adminAssocOrigin: "Origin",
   adminAssocAssociated: "Associated",
@@ -2739,6 +2763,12 @@ const chinese: Messages = {
   adminSlugsHint: "Separate multiple slugs with commas or semicolons.",
   adminPlaceRef: "Place reference",
   adminPlaceRefHint: "VN, VN:origin, place:45, place:45:popular, Hanoi@VN or Hanoi@VN:associated.",
+  adminPlaceNeedsRegistration:
+    "This locality is not in the place registry yet. Register it under Admin → Places first, then link the canonical place:<id>.",
+  adminPlaceAmbiguousHint:
+    "Multiple places share this name. Add a parent scope (City@ISO) or pick the canonical place:<id>.",
+  adminPlaceRefUnverified:
+    "Unverified reference — pick a registry match from search, or it will be validated on save.",
   adminAssociation: "Association",
   adminAssocOrigin: "Origin",
   adminAssocAssociated: "Associated",

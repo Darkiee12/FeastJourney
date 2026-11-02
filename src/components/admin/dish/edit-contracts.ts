@@ -1,3 +1,4 @@
+import type { DishEditFailure, DishEditOutcome } from "@/modules/food-discovery/admin.functions";
 import * as AdminFns from "@/modules/food-discovery/admin.functions";
 
 /**
@@ -105,7 +106,9 @@ export type DishEditPayload =
   | DishUpdateTaxonomyPayload
   | DishUpdatePlacesPayload;
 
-type ServerFnCaller = (input: { readonly data: DishEditPayload }) => Promise<void>;
+export type { DishEditFailure, DishEditOutcome };
+
+type ServerFnCaller = (input: { readonly data: DishEditPayload }) => Promise<DishEditOutcome>;
 
 export const resolveDishEditFn = (name: DishEditFnName): ServerFnCaller | null => {
   // SAFETY: AdminFns is a static import of a committed module — the object
@@ -143,12 +146,12 @@ export class DishEditUnavailableError extends Error {
 export const invokeDishEdit = async (
   name: DishEditFnName,
   data: DishEditPayload,
-): Promise<void> => {
+): Promise<DishEditOutcome> => {
   const fn = resolveDishEditFn(name);
 
   if (fn === null) {
     throw new DishEditUnavailableError(name);
   }
 
-  await fn({ data });
+  return fn({ data });
 };
