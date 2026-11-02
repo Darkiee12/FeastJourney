@@ -75,6 +75,16 @@ export type RestaurantSearch = z.infer<typeof restaurantSearchSchema>;
 
 export const venueIdSchema = z.object({ venueId: z.uuid() });
 
+/**
+ * Bounded photo-preview request: 1..50 venue ids, the search page size.
+ * The preview read issues one IN-clause query for the whole list.
+ */
+export const venuePhotoPreviewSchema = z.object({
+  venueIds: z.array(z.uuid()).min(1).max(50),
+});
+
+export type VenuePhotoPreviewRequest = z.infer<typeof venuePhotoPreviewSchema>;
+
 export const rateRequestSchema = z.object({
   bases: z.array(currencySchema).max(12),
   quote: currencySchema,

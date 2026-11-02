@@ -10,6 +10,34 @@ const SNAP_LABELS = (copy: RestaurantCopy): Record<SheetSnap, string> => ({
   2: copy.sheetFull,
 });
 
+/** Snap thresholds shared by drag release and tests: ratio is the dragged
+ *  height as a fraction of the stage height. */
+export function snapForRatio(ratio: number): SheetSnap {
+  if (ratio < 0.27) {
+    return 0;
+  }
+
+  if (ratio < 0.66) {
+    return 1;
+  }
+
+  return 2;
+}
+
+/** Fixed snap heights: peek strip, half, near-full. The sheet never
+ *  unmounts or rekeys the map; only its own height changes. */
+export function sheetSnapHeight(snap: SheetSnap): string {
+  if (snap === 0) {
+    return "128px";
+  }
+
+  if (snap === 1) {
+    return "45%";
+  }
+
+  return "88%";
+}
+
 /** Draggable bottom sheet with three snap positions. Dragging sets height
  *  directly (no transition); release snaps with a short transform-free
  *  height transition, disabled under reduced motion. */
@@ -32,6 +60,7 @@ export function ResultsSheet({
   const drag = useRef<{ startY: number; startH: number } | null>(null);
   const [dragH, setDragH] = useState<number | null>(null);
   const snapRef = useRef(snap);
+  const peekSnapRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     snapRef.current = snap;
@@ -47,17 +76,19 @@ export function ResultsSheet({
     return () => window.removeEventListener("keydown", onKey);
   }, [onSnapChange]);
 
-  const snapHeight = (value: SheetSnap): string => {
-    if (value === 0) {
-      return "128px";
-    }
+  // Collapsing to peek hides the body (hidden removes it from Tab order
+  // and assistive tech). If focus was inside, move it to the peek snap
+  // button so keyboard users are never stranded on hidden content.
+  useEffect(() => {
+    if (snap !== 0) return;
+    const body = rootRef.current?.querySelector(".mapapp-sheet-body");
 
-    if (value === 1) {
-      return "45%";
+    if (body !== null && body !== undefined && body.contains(document.activeElement)) {
+      peekSnapRef.current?.focus({ preventScroll: true });
     }
+  }, [snap]);
 
-    return "88%";
-  };
+  const snapHeight = (value: SheetSnap): string => sheetSnapHeight(value);
 
   const beginDrag = (clientY: number) => {
     const root = rootRef.current;
@@ -102,19 +133,14 @@ export function ResultsSheet({
     const parent = root.parentElement?.getBoundingClientRect().height ?? window.innerHeight;
     const ratio = (current.startH + (current.startY - clientY)) / parent;
 
-    let next: SheetSnap = 2;
-
-    if (ratio < 0.27) {
-      next = 0;
-    } else if (ratio < 0.66) {
-      next = 1;
-    }
-
     setDragH(null);
-    onSnapChange(next);
+    onSnapChange(snapForRatio(ratio));
   };
 
   const labels = SNAP_LABELS(copy);
+  // Peek shows the drag handle plus the grounded count label only; the
+  // result list (filter chips, cards, options) stays hidden until half/full.
+  const peek = snap === 0 && dragH === null;
 
   return (
     <section
@@ -156,6 +182,7 @@ export function ResultsSheet({
           {([0, 1, 2] as const).map((value) => (
             <button
               key={value}
+              ref={value === 0 ? peekSnapRef : undefined}
               type="button"
               className="mapapp-sheet-snapbtn"
               aria-pressed={snap === value}
@@ -169,7 +196,9 @@ export function ResultsSheet({
           ))}
         </fieldset>
       </div>
-      <div className="mapapp-sheet-body">{children}</div>
+      <div className="mapapp-sheet-body" hidden={peek}>
+        {children}
+      </div>
     </section>
   );
 }

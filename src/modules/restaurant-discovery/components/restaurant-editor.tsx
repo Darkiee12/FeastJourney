@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import Map, { Marker, NavigationControl } from "react-map-gl/maplibre";
 import { z } from "zod";
 
@@ -72,18 +72,8 @@ function CoordinatePicker({
 }) {
   const [locating, setLocating] = useState(false);
   const [geoError, setGeoError] = useState("");
-  const style = z.url().safeParse(import.meta.env.VITE_MAP_STYLE_URL);
 
-  if (!style.success) {
-    return (
-      <p className="text-sm text-muted" aria-live="polite">
-        Map tiles are not configured here. Enter the branch address, then refine the pin with your
-        device location.
-      </p>
-    );
-  }
-
-  const useMyLocation = () => {
+  const useMyLocation = useCallback(() => {
     setLocating(true);
     setGeoError("");
     requestUserPosition()
@@ -96,7 +86,18 @@ function CoordinatePicker({
       .finally(() => {
         setLocating(false);
       });
-  };
+  }, [onPick]);
+
+  const style = z.url().safeParse(import.meta.env.VITE_MAP_STYLE_URL);
+
+  if (!style.success) {
+    return (
+      <p className="text-sm text-muted" aria-live="polite">
+        Map tiles are not configured here. Enter the branch address, then refine the pin with your
+        device location.
+      </p>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-2">

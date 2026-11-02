@@ -168,6 +168,74 @@ export const presentReviewed = (
   };
 };
 
+/** One deterministic preview highlight: real item identity only. */
+export interface MenuHighlight {
+  readonly id: string;
+  readonly name: string;
+  readonly dishId: string | null;
+  readonly variantCount: number;
+}
+
+/** Default preview size: a small card row, never the whole menu. */
+const DEFAULT_MENU_HIGHLIGHT_LIMIT = 3;
+
+/** Hard cap so a preview cannot grow into a full menu render. */
+const MAX_MENU_HIGHLIGHT_LIMIT = 10;
+
+/**
+ * Select up to `limit` deterministic menu highlights from reviewed
+ * offerings. Pure: no Effect, no I/O, no invented names, prices or images.
+ * Only published items with at least one variant row are eligible; items
+ * linked to a published canonical dish through approved serving evidence
+ * (`dish_id` set by the menu query) rank first, with ascending `item_id`
+ * as the deterministic tie-break so the same input always yields the same
+ * output regardless of row order.
+ */
+export const selectMenuHighlights = (
+  offerings: ReadonlyArray<MenuOffering>,
+  limit: number = DEFAULT_MENU_HIGHLIGHT_LIMIT,
+): ReadonlyArray<MenuHighlight> => {
+  if (!Number.isInteger(limit) || limit <= 0) return [];
+
+  const count = Math.min(limit, MAX_MENU_HIGHLIGHT_LIMIT);
+  const grouped = new Map<string, Array<MenuOffering>>();
+
+  for (const offering of offerings) {
+    const existing = grouped.get(offering.item_id);
+
+    if (existing === undefined) grouped.set(offering.item_id, [offering]);
+    else existing.push(offering);
+  }
+
+  const eligible: Array<{ readonly first: MenuOffering; readonly variantCount: number }> = [];
+
+  for (const variants of grouped.values()) {
+    const first = variants[0];
+
+    if (first !== undefined) eligible.push({ first, variantCount: variants.length });
+  }
+
+  const ranked = eligible.toSorted((left, right) => {
+    const leftLinked = left.first.dish_id !== null;
+    const rightLinked = right.first.dish_id !== null;
+
+    if (leftLinked !== rightLinked) return leftLinked ? -1 : 1;
+
+    if (left.first.item_id < right.first.item_id) return -1;
+
+    if (left.first.item_id > right.first.item_id) return 1;
+
+    return 0;
+  });
+
+  return ranked.slice(0, count).map(({ first, variantCount }) => ({
+    id: first.item_id,
+    name: first.item_name,
+    dishId: first.dish_id,
+    variantCount,
+  }));
+};
+
 /** Client-side curator draft: unsaved edits and saved draft rows share one shape. */
 export interface MenuDraftVariantPrice {
   readonly rawText: string;

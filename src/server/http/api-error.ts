@@ -24,6 +24,11 @@ export const apiErrorBody = (code: string, message: string, requestId: string): 
 export const troubleByTag = {
   RestaurantInputError: { status: 400, code: "invalid_request" },
   RestaurantNotFound: { status: 404, code: "not_found" },
+  UnknownVenue: { status: 404, code: "not_found" },
+  CustomerReviewNotFound: { status: 404, code: "not_found" },
+  NotReviewAuthor: { status: 403, code: "forbidden" },
+  CustomerReviewConflict: { status: 409, code: "conflict" },
+  CustomerReviewValidationFailed: { status: 400, code: "invalid_request" },
   FxUnavailable: { status: 503, code: "unavailable" },
   ScanNotFound: { status: 404, code: "not_found" },
   ScanConflict: { status: 409, code: "conflict" },

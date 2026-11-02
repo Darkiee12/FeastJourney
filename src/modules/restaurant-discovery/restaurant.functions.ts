@@ -8,6 +8,7 @@ import {
   restaurantSearchSchema,
   reviewSchema,
   venueIdSchema,
+  venuePhotoPreviewSchema,
   venueWriteSchema,
   channelSchema,
 } from "@/modules/restaurant-discovery/restaurant.schema";
@@ -137,4 +138,18 @@ export const setOfferingStatusFn = createServerFn({ method: "POST" })
     const { actor, withActor, runClientOperation } = await adminContext();
 
     return runClientOperation(withActor(actor, setOfferingStatus(data)), null);
+  });
+
+// Public preview read: search rows carry no photos, so cards resolve one
+// batched preview per visible venue list through here. Imports the owning
+// operation module directly; server/index.ts stays coordinator-owned.
+export const venuePhotoPreviewsFn = createServerFn({ method: "GET" })
+  .validator(venuePhotoPreviewSchema)
+  .handler(async ({ data }) => {
+    const { listVenuePhotoPreviews } =
+      await import("@/modules/restaurant-discovery/server/operations/discovery");
+
+    const { runClientOperation } = await import("@/server/http/run-client-operation");
+
+    return runClientOperation(listVenuePhotoPreviews(data), "search");
   });

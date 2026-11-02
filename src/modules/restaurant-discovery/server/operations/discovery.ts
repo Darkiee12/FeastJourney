@@ -1,15 +1,28 @@
 import { Data, Effect } from "effect";
 
 import { DishService, getPublishedDishIdentities } from "@/modules/food-discovery/server/index";
-import { restaurantSearchSchema } from "@/modules/restaurant-discovery/restaurant.schema";
-import type { RestaurantSearch } from "@/modules/restaurant-discovery/restaurant.schema";
+import {
+  type PhotoRef,
+  RESTAURANT_PHOTO_WIDTHS,
+  restaurantPhotoUrl,
+} from "@/modules/restaurant-discovery/components/restaurant-photos";
+import {
+  restaurantSearchSchema,
+  venuePhotoPreviewSchema,
+} from "@/modules/restaurant-discovery/restaurant.schema";
+import type {
+  RestaurantSearch,
+  VenuePhotoPreviewRequest,
+} from "@/modules/restaurant-discovery/restaurant.schema";
 import { FxRates, FxUnavailable } from "@/modules/restaurant-discovery/server/operations/fx";
 import areas from "@/modules/restaurant-discovery/server/repository/sql/areas.sql";
 import comparisons from "@/modules/restaurant-discovery/server/repository/sql/comparisons.sql";
 import currencies from "@/modules/restaurant-discovery/server/repository/sql/dish-price-currencies.sql";
 import localRanges from "@/modules/restaurant-discovery/server/repository/sql/local-price-ranges.sql";
 import menuDishCandidates from "@/modules/restaurant-discovery/server/repository/sql/menu-dish-candidates.sql";
+import sectionsQuery from "@/modules/restaurant-discovery/server/repository/sql/menu-edit-sections.sql";
 import menu from "@/modules/restaurant-discovery/server/repository/sql/menu.sql";
+import photoPublishedByVenueIds from "@/modules/restaurant-discovery/server/repository/sql/photo-published-by-venue-ids.sql";
 import searchArea from "@/modules/restaurant-discovery/server/repository/sql/search-area.sql";
 import searchDish from "@/modules/restaurant-discovery/server/repository/sql/search-dish.sql";
 import searchName from "@/modules/restaurant-discovery/server/repository/sql/search-name.sql";
@@ -31,6 +44,12 @@ export type RestaurantResult = (typeof searchArea)["~reylo"]["element"];
 
 export type DishRestaurantResult = (typeof searchDish)["~reylo"]["element"];
 
+/** One published-photo row, inferred from the shared published-photos query. */
+export type PhotoPublishedRow = (typeof photoPublishedByVenueIds)["~reylo"]["element"];
+
+/** One menu arrangement row, inferred from the shared sections query. */
+export type RestaurantMenuSectionRow = (typeof sectionsQuery)["~reylo"]["element"];
+
 const locationParameters = (input: RestaurantSearch) => ({
   area: input.area,
   cuisine: input.cuisine,
@@ -44,6 +63,36 @@ const locationParameters = (input: RestaurantSearch) => ({
 });
 
 export const listRestaurantAreas = runQuery("restaurants/areas", (sql) => areas.run(sql));
+
+/**
+ * Project one published-photo row into the shared PhotoRef contract.
+ * Mirrors the photo service publish gate: rows without reserved dimensions
+ * or alt text never reach the public contract, since the gallery would
+ * shift layout and the image is not publishable. Such rows indicate a
+ * bypassed publish gate, so they are excluded rather than rendered with
+ * invented values. PhotoRef is the versioned external contract shared by
+ * result cards and the detail gallery, so this projection is a contract
+ * boundary, not a mirror DTO.
+ */
+const toPublicPhotoRef = (row: PhotoPublishedRow, index: number): PhotoRef | null => {
+  if (row.alt_text === null || row.original_width === null || row.original_height === null) {
+    return null;
+  }
+
+  const version = Number(row.variant_version);
+
+  return {
+    assetId: row.id,
+    alt: row.alt_text,
+    primary: index === 0,
+    width: Number(row.original_width),
+    height: Number(row.original_height),
+    variants: RESTAURANT_PHOTO_WIDTHS.map((width) => ({
+      width,
+      url: restaurantPhotoUrl(row.id, version, width),
+    })),
+  };
+};
 
 export const getRestaurant = Effect.fn("restaurants.getRestaurant")(function* (
   venueId: string,
@@ -69,9 +118,42 @@ export const getRestaurant = Effect.fn("restaurants.getRestaurant")(function* (
     }),
   );
 
+  const photoRows = yield* runQuery("restaurants/detail-photos", (sql) =>
+    photoPublishedByVenueIds.run(sql, { venue_ids: [venueId] }),
+  );
+
+  const photos: Array<PhotoRef> = [];
+
+  for (const row of photoRows) {
+    const ref = toPublicPhotoRef(row, photos.length);
+
+    if (ref !== null) photos.push(ref);
+  }
+
+  // Arrangement metadata for the venue menus, restricted to published
+  // offering items so draft arrangement never leaks through the public
+  // read. presentReviewed callers build
+  // new Map(sections.flatMap(...)) from these rows; unsectioned items keep
+  // their legacy order downstream.
+  const menuIds = [...new Set(offerings.map((offering) => offering.menu_id))];
+
+  const sectionGroups = yield* Effect.forEach(
+    menuIds,
+    (menuId) =>
+      runQuery("restaurants/menu-sections", (sql) =>
+        sectionsQuery.run(sql, { menu: menuId, venue: venueId }),
+      ),
+    { concurrency: 2 },
+  );
+
+  const publishedItems = new Set(offerings.map((offering) => offering.item_id));
+  const sections = sectionGroups.flat().filter((row) => publishedItems.has(row.id));
+
   return {
     venue: detail,
     offerings,
+    photos,
+    sections,
   };
 });
 
@@ -207,4 +289,54 @@ export const searchRestaurants = Effect.fn("restaurants.searchRestaurants")(func
     ranges,
     comparisonRates,
   };
+});
+
+/** Search-result photo preview: at most this many photos per venue. */
+const MAX_PREVIEW_PHOTOS_PER_VENUE = 3;
+
+/** One venue entry in the batched photo preview read. */
+export interface VenuePhotoPreview {
+  readonly venueId: string;
+  readonly photos: ReadonlyArray<PhotoRef>;
+}
+
+/**
+ * Batched published-photo attach for venue id lists. Search rows carry no
+ * photos, so cards resolve previews through this single IN-clause query;
+ * per-venue queries would be N+1. Inputs are Zod-bounded (1..50 uuids, the
+ * search page size); every requested venue gets an entry, with an empty
+ * list where nothing publishable exists. Photos are capped per venue so one
+ * venue cannot dominate the payload.
+ */
+export const listVenuePhotoPreviews = Effect.fn("restaurants.venuePhotoPreviews")(function* (
+  request: VenuePhotoPreviewRequest,
+) {
+  const parsed = venuePhotoPreviewSchema.safeParse(request);
+
+  if (!parsed.success)
+    return yield* new RestaurantInputError({
+      reason: parsed.error.issues.map((issue) => issue.message).join("; "),
+    });
+
+  const venueIds = [...new Set(parsed.data.venueIds)];
+
+  if (venueIds.length === 0) return [];
+
+  const rows = yield* runQuery("restaurants/venue-photo-previews", (sql) =>
+    photoPublishedByVenueIds.run(sql, { venue_ids: venueIds }),
+  );
+
+  const photosByVenue = new Map<string, Array<PhotoRef>>(venueIds.map((venueId) => [venueId, []]));
+
+  for (const row of rows) {
+    const list = photosByVenue.get(row.venue_id);
+
+    if (list === undefined || list.length >= MAX_PREVIEW_PHOTOS_PER_VENUE) continue;
+
+    const ref = toPublicPhotoRef(row, list.length);
+
+    if (ref !== null) list.push(ref);
+  }
+
+  return [...photosByVenue].map(([venueId, photos]) => ({ venueId, photos }));
 });

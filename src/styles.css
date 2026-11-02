@@ -4,6 +4,9 @@
 @import "./modules/restaurant-discovery/components/menu-order.css";
 @import "./modules/restaurant-discovery/components/restaurant-search.css";
 @import "./modules/restaurant-discovery/components/mapapp.css";
+@import "./modules/restaurant-discovery/components/venue-overview.css";
+@import "./modules/restaurant-discovery/components/restaurant-menu.css";
+@import "./modules/restaurant-discovery/components/restaurant-reviews.css";
 
 @theme {
   --color-brand-blue: #2563eb;

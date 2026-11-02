@@ -5,7 +5,14 @@ import Map, { Marker, NavigationControl } from "react-map-gl/maplibre";
 import type { MapRef } from "react-map-gl/maplibre";
 import { z } from "zod";
 
-import { prefersReducedMotion } from "@/modules/restaurant-discovery/location-storage";
+import {
+  isPinSelected,
+  RestaurantPinButton,
+} from "@/modules/restaurant-discovery/components/restaurant-pins";
+import {
+  prefersReducedMotion,
+  type UserPosition,
+} from "@/modules/restaurant-discovery/location-storage";
 import {
   DEFAULT_MAP_CENTER,
   type MapCenter,
@@ -17,17 +24,15 @@ import type {
 } from "@/modules/restaurant-discovery/server/index";
 import type { Locale } from "@/shared/i18n";
 
+/** Backward-compatible re-export: UserPosition is defined once in
+ *  location-storage; the map only consumes it. */
+export type { UserPosition };
+
 export interface MapBounds {
   west: number;
   south: number;
   east: number;
   north: number;
-}
-
-export interface UserPosition {
-  readonly longitude: number;
-  readonly latitude: number;
-  readonly accuracyMeters: number | null;
 }
 
 /** Explicit camera framing requested by the parent (city apply, recenter).
@@ -314,17 +319,18 @@ export default function RestaurantMap({
             </span>
           </Marker>
         )}
-        {points.map((point, index) => (
-          <Marker key={point.id} longitude={point.longitude} latitude={point.latitude}>
-            <button
-              type="button"
-              className="restaurant-pin"
-              aria-label={`Show ${point.name}`}
-              aria-pressed={selected === point.id}
-              onClick={() => onSelect(point.id)}
-            >
-              {index + 1}
-            </button>
+        {points.map((point) => (
+          <Marker
+            key={point.id}
+            longitude={point.longitude}
+            latitude={point.latitude}
+            anchor="bottom"
+          >
+            <RestaurantPinButton
+              name={point.name}
+              selected={isPinSelected(point.id, selected)}
+              onSelect={() => onSelect(point.id)}
+            />
           </Marker>
         ))}
       </Map>

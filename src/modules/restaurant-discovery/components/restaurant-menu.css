@@ -1,0 +1,96 @@
+/* Self-fetching restaurant menu panel (PR13).
+   Scoped under .restaurant-menu-panel and .menu-panel-* only;
+   tokens come from styles.css @theme. */
+@layer components {
+  .restaurant-menu-panel {
+    display: grid;
+    gap: 0.75rem;
+    min-width: 0;
+  }
+  .menu-panel-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .menu-panel-back {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.45rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 0.5rem 1.1rem;
+    cursor: pointer;
+  }
+  .menu-panel-back:hover {
+    background: var(--color-cream);
+  }
+  .menu-panel-back:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .menu-panel-back svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .menu-panel-scroll {
+    display: grid;
+    gap: 0.75rem;
+    min-width: 0;
+  }
+  .menu-panel-loading {
+    display: grid;
+    gap: 0.6rem;
+  }
+  .menu-panel-skeleton {
+    min-height: 4rem;
+    border-radius: 0.75rem;
+    background: var(--color-cream);
+    border: 1px solid var(--color-border-soft);
+  }
+  .menu-panel-error {
+    display: grid;
+    gap: 0.6rem;
+    justify-items: start;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 1.25rem;
+  }
+  .menu-panel-retry {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    background: var(--color-food-orange-strong);
+    color: white;
+    font-weight: 700;
+    padding: 0.5rem 1.25rem;
+    cursor: pointer;
+  }
+  .menu-panel-retry:hover {
+    background: var(--color-food-orange-dark);
+  }
+  .menu-panel-retry:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .menu-panel-empty {
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 1.25rem;
+    color: var(--color-muted);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .menu-panel-back,
+    .menu-panel-retry {
+      transition: none;
+    }
+  }
+}

@@ -7,7 +7,6 @@ import {
 } from "@/modules/restaurant-discovery/components/currency-tools";
 import { InteractiveMenuView } from "@/modules/restaurant-discovery/components/interactive-menu";
 import { RestaurantMapPanel } from "@/modules/restaurant-discovery/components/restaurant-map-panel";
-import { photoLoaderSchema } from "@/modules/restaurant-discovery/components/restaurant-photos";
 import { RestaurantPhotoGallery } from "@/modules/restaurant-discovery/components/restaurant-photos-gallery";
 import { presentReviewed } from "@/modules/restaurant-discovery/menu-presentation";
 import { channelSchema } from "@/modules/restaurant-discovery/restaurant.schema";
@@ -39,7 +38,7 @@ function BackToResults({ lang }: { readonly lang: Locale }) {
 }
 
 export function RestaurantDetailPage() {
-  const { venue, offerings } = route.useLoaderData();
+  const { venue, offerings, photos, sections } = route.useLoaderData();
   const search = route.useSearch();
   const navigate = route.useNavigate();
   const preference = usePreferredCurrency();
@@ -49,11 +48,14 @@ export function RestaurantDetailPage() {
     preference.currency,
   );
 
-  // Forward-compat: the detail loader gains a typed `photos` field when
-  // photo delivery wires in (see phase report). Until then the payload
-  // parses without photos and the gallery renders its branded empty state.
-  const parsedVenue = photoLoaderSchema.safeParse(venue);
-  const photos = parsedVenue.success ? (parsedVenue.data.photos ?? []) : [];
+  // Photos and section arrangement ride alongside the venue in the
+  // loader payload; both fall back to empty so the gallery and the menu
+  // keep their branded empty states instead of crashing.
+  const galleryPhotos = photos ?? [];
+
+  const sectionMap: ReadonlyMap<string, string | null> = new Map(
+    (sections ?? []).map((row) => [row.id, row.section_key]),
+  );
 
   return (
     <article className="discovery-page">
@@ -95,7 +97,7 @@ export function RestaurantDetailPage() {
       </header>
       <section aria-labelledby="venue-photos-heading">
         <h2 id="venue-photos-heading">Photos</h2>
-        <RestaurantPhotoGallery photos={photos} venueName={venue.name} />
+        <RestaurantPhotoGallery photos={galleryPhotos} venueName={venue.name} />
       </section>
       <CurrencySelector preference={preference} />
       <div className="restaurant-detail-layout">
@@ -132,7 +134,7 @@ export function RestaurantDetailPage() {
           ) : (
             <InteractiveMenuView
               key={`order:${venue.id}:${search.channel}`}
-              menu={presentReviewed(offerings, venue.name, search.lang)}
+              menu={presentReviewed(offerings, venue.name, search.lang, sectionMap)}
               locale={search.lang}
               rates={conversion.rates}
               initialVariant={search.variant}

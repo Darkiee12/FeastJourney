@@ -5,7 +5,10 @@ import { MenuScanPage } from "@/modules/restaurant-discovery/components/menu-sca
 import { localeSearchSchema } from "@/shared/i18n";
 
 export const Route = createFileRoute("/scan")({
-  validateSearch: localeSearchSchema.extend({ venueId: z.uuid().optional() }),
+  // Accept any bounded string here: MenuScanPage validates the branch ID
+  // itself (typed "unknown branch" hint, task-surfaced errors) so a bad
+  // ?venueId degrades instead of tripping the route error boundary.
+  validateSearch: localeSearchSchema.extend({ venueId: z.string().max(36).optional() }),
   component: ScanRoute,
 });
 

@@ -2,6 +2,7 @@ export {
   searchRestaurants,
   getRestaurant,
   listRestaurantAreas,
+  listVenuePhotoPreviews,
   RestaurantInputError,
   RestaurantNotFound,
 } from "@/modules/restaurant-discovery/server/operations/discovery";
@@ -11,6 +12,9 @@ export type {
   MenuOffering,
   RestaurantResult,
   DishRestaurantResult,
+  VenuePhotoPreview,
+  PhotoPublishedRow,
+  RestaurantMenuSectionRow,
 } from "@/modules/restaurant-discovery/server/operations/discovery";
 
 export {
@@ -115,3 +119,31 @@ export {
   getRestaurantImportJob,
   listRestaurantImportJobs,
 } from "@/modules/restaurant-discovery/server/operations/bulk-import";
+
+export {
+  getRestaurantReviewSummary,
+  listRestaurantCustomerReviews,
+  submitRestaurantCustomerReview,
+  updateOwnRestaurantCustomerReview,
+  deleteOwnRestaurantCustomerReview,
+  moderateRestaurantCustomerReview,
+  CustomerReviewSubmitOutcome,
+  CustomerReviewModerateOutcome,
+  UnknownVenue,
+  NotReviewAuthor,
+  CustomerReviewNotFound,
+  CustomerReviewConflict,
+  CustomerReviewValidationFailed,
+  CUSTOMER_REVIEW_BODY_MAX,
+} from "@/modules/restaurant-discovery/server/operations/customer-reviews";
+
+export type {
+  CustomerReviewRow,
+  CustomerReviewListRow,
+  CustomerReviewSummary,
+  CustomerReviewModerationStatus,
+  CustomerReviewSubmitInput,
+  CustomerReviewPageInput,
+  CustomerReviewUpdateInput,
+  CustomerReviewModerateInput,
+} from "@/modules/restaurant-discovery/server/operations/customer-reviews";

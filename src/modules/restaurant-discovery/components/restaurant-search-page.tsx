@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link, getRouteApi } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
@@ -23,12 +24,14 @@ import type {
   FrameRequest,
 } from "@/modules/restaurant-discovery/components/restaurant-map";
 import { RestaurantMapPanel } from "@/modules/restaurant-discovery/components/restaurant-map-panel";
+import { RestaurantMenuPanel } from "@/modules/restaurant-discovery/components/restaurant-menu-panel";
+import { RestaurantReviewsPanel } from "@/modules/restaurant-discovery/components/restaurant-reviews-panel";
 import { ResultsDrawer } from "@/modules/restaurant-discovery/components/results-drawer";
 import {
   ResultsSheet,
   type SheetSnap,
 } from "@/modules/restaurant-discovery/components/results-sheet";
-import { VenuePreview } from "@/modules/restaurant-discovery/components/venue-preview";
+import { VenueOverview } from "@/modules/restaurant-discovery/components/venue-overview";
 import {
   queryGeolocationPermission,
   readSavedCamera,
@@ -39,12 +42,24 @@ import {
   type UserPosition,
 } from "@/modules/restaurant-discovery/location-storage";
 import { CITY_PRESETS, DEFAULT_MAP_CENTER } from "@/modules/restaurant-discovery/map-bounds";
+import { selectMenuHighlights } from "@/modules/restaurant-discovery/menu-presentation";
+import {
+  browsePanel,
+  menuPanel,
+  overviewPanel,
+  panelVenueId,
+  reviewsPanel,
+  type RestaurantPanel,
+} from "@/modules/restaurant-discovery/panel-state";
+import { getRestaurantReviewSummaryFn } from "@/modules/restaurant-discovery/restaurant-reviews.functions";
+import { getRestaurantFn } from "@/modules/restaurant-discovery/restaurant.functions";
 import { restaurantSearchSchema } from "@/modules/restaurant-discovery/restaurant.schema";
 import type { RestaurantSearch } from "@/modules/restaurant-discovery/restaurant.schema";
 import type {
   DishRestaurantResult,
   RestaurantResult,
 } from "@/modules/restaurant-discovery/server/index";
+import { getSessionStateFn, type SessionState } from "@/modules/user/session.functions";
 
 const route = getRouteApi("/restaurants/");
 
@@ -108,8 +123,9 @@ export function RestaurantSearchPage() {
   const copy = restaurantCopy(search.lang);
   const isDesktop = useIsDesktop();
 
-  const [selected, setSelected] = useState<string | null>(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const [panel, setPanel] = useState<RestaurantPanel>(browsePanel);
+  const selected = panelVenueId(panel);
+  const previewOpen = panel.kind !== "browse";
   const [proposedBounds, setProposedBounds] = useState<MapBounds | null>(null);
   const [message, setMessage] = useState("");
   const [locating, setLocating] = useState(false);
@@ -127,6 +143,7 @@ export function RestaurantSearchPage() {
   const firstSearch = useRef(search);
   const latestKey = useRef("");
   const listTitleRef = useRef<HTMLHeadingElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const isDishMode = data.results.dish !== null;
 
@@ -154,6 +171,12 @@ export function RestaurantSearchPage() {
   const datasetEmpty = data.areas.length === 0 && rows.length === 0;
 
   const searchKey = useMemo(() => regionSearchKey(search), [search]);
+
+  const panelKind = panel.kind;
+
+  useEffect(() => {
+    if (panelKind !== "browse") panelRef.current?.focus({ preventScroll: true });
+  }, [panelKind, selected]);
 
   useEffect(() => {
     latestKey.current = searchKey;
@@ -498,8 +521,7 @@ export function RestaurantSearchPage() {
   };
 
   const handleSelect = (id: string) => {
-    setSelected(id);
-    setPreviewOpen(true);
+    setPanel(overviewPanel(id));
 
     if (!isDesktop) setSheetSnap(1);
 
@@ -507,15 +529,9 @@ export function RestaurantSearchPage() {
   };
 
   const closePreview = (focusResults: boolean) => {
-    setPreviewOpen(false);
+    setPanel(browsePanel);
 
     if (focusResults) listTitleRef.current?.focus({ preventScroll: true });
-  };
-
-  const clearSelection = () => {
-    setSelected(null);
-    setPreviewOpen(false);
-    listTitleRef.current?.focus({ preventScroll: true });
   };
 
   const channelLabel = channelLabelFor(search.channel, copy);
@@ -557,6 +573,67 @@ export function RestaurantSearchPage() {
 
   const selectedVenue = selected === null ? undefined : rows.find((venue) => venue.id === selected);
   const selectedModel = selectedVenue === undefined ? null : modelFor(selectedVenue);
+
+  const detailQuery = useQuery({
+    queryKey: ["restaurant-detail", selected, search.channel],
+    queryFn: () => getRestaurantFn({ data: { venueId: selected ?? "", channel: search.channel } }),
+    enabled: selected !== null,
+    staleTime: 60000,
+    retry: false,
+  });
+
+  const summaryQuery = useQuery({
+    queryKey: ["customer-reviews", selected, "summary"],
+    queryFn: () => getRestaurantReviewSummaryFn({ data: { venueId: selected ?? "" } }),
+    enabled: selected !== null,
+    staleTime: 60000,
+    retry: false,
+  });
+
+  const sessionQuery = useQuery({
+    queryKey: ["session-state"],
+    queryFn: () => getSessionStateFn(),
+    staleTime: 60000,
+    retry: false,
+  });
+
+  const session: SessionState = sessionQuery.data ?? { status: "unavailable" };
+
+  const detail =
+    selected !== null && detailQuery.data !== undefined && detailQuery.data.venue.id === selected
+      ? detailQuery.data
+      : null;
+
+  const highlights = useMemo(
+    () => (detail === null ? [] : selectMenuHighlights(detail.offerings, 3)),
+    [detail],
+  );
+
+  const reviewSummary =
+    selected !== null &&
+    summaryQuery.data !== undefined &&
+    summaryQuery.data.venueId === selected &&
+    summaryQuery.data.total > 0
+      ? { total: summaryQuery.data.total, average: summaryQuery.data.average }
+      : null;
+
+  const showOverviewPanel = (venueId: string) => {
+    setPanel(overviewPanel(venueId));
+
+    if (!isDesktop) setSheetSnap(1);
+  };
+
+  const showMenuPanel = (venueId: string) => {
+    setPanel(menuPanel(venueId));
+
+    if (!isDesktop) setSheetSnap(2);
+  };
+
+  const showReviewsPanel = (venueId: string) => {
+    setPanel(reviewsPanel(venueId));
+
+    if (!isDesktop) setSheetSnap(2);
+  };
 
   const showDishZero = isDishMode && rows.length === 0 && !datasetEmpty && data.areas.length > 0;
 
@@ -688,17 +765,86 @@ export function RestaurantSearchPage() {
           </ul>
         </>
       )}
-      {previewOpen && selectedModel !== null && (
-        <VenuePreview
-          copy={copy}
-          lang={search.lang}
-          model={selectedModel}
-          onBack={() => closePreview(true)}
-          onClose={clearSelection}
-          onShowOnMap={() => {
-            if (!isDesktop) setSheetSnap(0);
-          }}
-        />
+      {(panel.kind === "overview" || panel.kind === "menu" || panel.kind === "reviews") && (
+        <div ref={panelRef} tabIndex={-1} data-panel={panel.kind}>
+          {panel.kind === "overview" &&
+            selectedModel !== null &&
+            (detail === null ? (
+              <div className="mapapp-status" aria-live="polite">
+                {detailQuery.isError ? (
+                  <>
+                    <h3>{copy.detailFailedTitle}</h3>
+                    <p>{copy.detailFailedBody}</p>
+                    <div className="mapapp-status-actions">
+                      <button
+                        type="button"
+                        className="mapapp-primary-btn"
+                        onClick={() => void detailQuery.refetch()}
+                      >
+                        {copy.retryAction}
+                      </button>
+                      <button
+                        type="button"
+                        className="mapapp-ghost-btn"
+                        onClick={() => closePreview(true)}
+                      >
+                        {copy.backToResults}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <h3>{copy.detailLoadingTitle}</h3>
+                    <p>{copy.detailLoadingBody}</p>
+                  </>
+                )}
+              </div>
+            ) : (
+              <VenueOverview
+                copy={copy}
+                highlights={highlights}
+                lang={search.lang}
+                locale={search.lang}
+                offerings={detail.offerings}
+                onBackToResults={() => closePreview(true)}
+                backToResultsLabel={copy.backToResults}
+                onOpenMenuItem={() => showMenuPanel(detail.venue.id)}
+                onShowMenu={() => showMenuPanel(detail.venue.id)}
+                onShowReviews={() => showReviewsPanel(detail.venue.id)}
+                photos={detail.photos}
+                rates={conversion.rates}
+                reviewSummary={reviewSummary}
+                venue={{
+                  id: detail.venue.id,
+                  name: detail.venue.name,
+                  businessName: detail.venue.business_name,
+                  area: detail.venue.area,
+                  address: detail.venue.address,
+                  latitude: detail.venue.latitude,
+                  longitude: detail.venue.longitude,
+                  distanceKm: selectedModel.distanceKm,
+                }}
+              />
+            ))}
+          {panel.kind === "menu" && selected !== null && (
+            <RestaurantMenuPanel
+              channel={search.channel}
+              lang={search.lang}
+              onBackToOverview={() => showOverviewPanel(selected)}
+              rates={conversion.rates}
+              venueId={selected}
+              venueName={selectedModel?.name ?? null}
+            />
+          )}
+          {panel.kind === "reviews" && selected !== null && (
+            <RestaurantReviewsPanel
+              locale={search.lang}
+              onBackToOverview={() => showOverviewPanel(selected)}
+              session={session}
+              venueId={selected}
+            />
+          )}
+        </div>
       )}
       <details className="mapapp-options">
         <summary>{copy.displayOptions}</summary>

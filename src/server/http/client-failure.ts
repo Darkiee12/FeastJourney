@@ -15,7 +15,12 @@ export function clientFailure(cause: unknown): ClientFailure {
 
   if (tag === "DishNotFound") message = "This dish is unavailable.";
 
-  if (tag === "RestaurantNotFound") message = "This restaurant is unavailable.";
+  if (tag === "RestaurantNotFound" || tag === "UnknownVenue")
+    message = "This restaurant is unavailable.";
+
+  if (tag === "CustomerReviewNotFound") message = "This review is unavailable.";
+
+  if (tag === "NotReviewAuthor") message = "You can only change your own review.";
 
   if (tag === "ScanNotFound") message = "This private scan is unavailable or has expired.";
 
@@ -24,7 +29,7 @@ export function clientFailure(cause: unknown): ClientFailure {
   if (tag === "InsufficientPermissions" || tag === "OwnershipDenied")
     message = "You do not have permission for this action.";
 
-  if (tag === "PersistenceConflict" || tag === "ScanConflict")
+  if (tag === "PersistenceConflict" || tag === "ScanConflict" || tag === "CustomerReviewConflict")
     message = "This record changed. Reload before retrying.";
 
   if (tag === "RateLimitExceeded") message = "Too many requests. Please wait before retrying.";
@@ -34,6 +39,7 @@ export function clientFailure(cause: unknown): ClientFailure {
       tag === "FxUnavailable" ||
       tag === "InvalidImage" ||
       tag === "InvalidModelOutput" ||
+      tag === "CustomerReviewValidationFailed" ||
       tag === "ScanInputError") &&
     Predicate.hasProperty(cause, "reason") &&
     Predicate.isString(cause.reason)

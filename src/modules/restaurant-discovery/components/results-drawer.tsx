@@ -20,14 +20,34 @@ export function ResultsDrawer({
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
+  const openRef = useRef(open);
+  const prevOpenRef = useRef(open);
 
   useEffect(() => {
+    openRef.current = open;
+
     if (open) {
       const heading = panelRef.current?.querySelector("h2");
 
       if (heading instanceof HTMLElement) heading.focus({ preventScroll: true });
+    } else if (prevOpenRef.current) {
+      // Collapse returns focus to the expand control so keyboard users
+      // are never stranded on the inert panel.
+      toggleRef.current?.focus({ preventScroll: true });
     }
+
+    prevOpenRef.current = open;
   }, [open]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && openRef.current) onToggle();
+    };
+
+    window.addEventListener("keydown", onKey);
+
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onToggle]);
 
   return (
     <>
