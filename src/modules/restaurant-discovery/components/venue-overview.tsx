@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { ArrowLeft, Star } from "lucide-react";
 
 import { MenuHighlights } from "@/modules/restaurant-discovery/components/menu-highlights";
@@ -67,6 +68,7 @@ export function VenueOverview({
   offerings,
   onBackToResults,
   backToResultsLabel = "Back to results",
+  fromDish = null,
   onOpenMenuItem,
   onShowMenu,
   onShowReviews,
@@ -82,6 +84,7 @@ export function VenueOverview({
   readonly offerings: ReadonlyArray<MenuOffering>;
   readonly onBackToResults?: (() => void) | undefined;
   readonly backToResultsLabel?: string | undefined;
+  readonly fromDish?: string | null | undefined;
   readonly onOpenMenuItem: (itemId: string) => void;
   readonly onShowMenu: () => void;
   readonly onShowReviews: () => void;
@@ -102,6 +105,13 @@ export function VenueOverview({
             <ArrowLeft aria-hidden="true" />
             {backToResultsLabel}
           </button>
+        )}
+        {fromDish !== null && fromDish !== "" && (
+          <p className="venue-dish-link">
+            <Link to="/dishes/$dishId" params={{ dishId: fromDish }} search={{ lang }}>
+              ← {copy.backToDish}
+            </Link>
+          </p>
         )}
         <p className="venue-eyebrow">
           {venue.area}
@@ -124,7 +134,11 @@ export function VenueOverview({
         )}
       </header>
       {ordered.length === 0 ? (
-        <RestaurantPhotoFallback name={venue.name} className="venue-photo" />
+        <RestaurantPhotoFallback
+          name={venue.name}
+          className="venue-photo"
+          label={copy.venuePhotoFallback.replace("{name}", venue.name)}
+        />
       ) : (
         <ul className="venue-gallery" aria-label={`Photos of ${venue.name}`}>
           {ordered.map((photo) => (
@@ -140,6 +154,12 @@ export function VenueOverview({
         directionsHref={directionsHref}
         onShowMenu={onShowMenu}
         onShowReviews={onShowReviews}
+        menuLabel={copy.viewMenu}
+        reviewsLabel={copy.reviewsAction}
+        scanLabel={copy.scanMenuAction}
+        directionsLabel={copy.directionsAction}
+        returnVenue={venue.id}
+        returnView="overview"
       />
       <MenuHighlights
         highlights={highlights}
@@ -150,6 +170,10 @@ export function VenueOverview({
         priceUnknown={copy.priceUnknown}
         rates={rates}
         venueId={venue.id}
+        title={copy.highlightsTitle}
+        emptyHeading={copy.highlightsEmpty}
+        scanLabel={copy.scanMenuAction}
+        returnVenue={venue.id}
       />
     </article>
   );

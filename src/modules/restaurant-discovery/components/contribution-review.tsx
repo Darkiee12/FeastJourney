@@ -99,14 +99,12 @@ function VenueSelector({
           </p>
           <p>
             <Link
-              to="/restaurants/$venueId"
-              params={{ venueId: selected.id }}
+              to="/restaurants"
               search={{
                 lang,
                 channel: "dine_in",
-                variant: undefined,
-                dish: undefined,
-                fromDish: undefined,
+                venue: selected.id,
+                view: "overview",
               }}
             >
               Inspect branch record

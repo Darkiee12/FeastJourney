@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { ArrowLeft, BookOpen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -13,15 +14,21 @@ import {
 } from "@/modules/restaurant-discovery/components/menu-item-row";
 import { MenuOrderSummary } from "@/modules/restaurant-discovery/components/menu-order-summary";
 import { MenuPagesViewer } from "@/modules/restaurant-discovery/components/menu-pages-viewer";
+import {
+  restaurantCopy,
+  type RestaurantCopy,
+} from "@/modules/restaurant-discovery/components/restaurant-copy";
 import { WaiterOrderCard } from "@/modules/restaurant-discovery/components/waiter-order-card";
 import type {
   InteractiveMenu,
   MenuSelection,
 } from "@/modules/restaurant-discovery/menu-presentation";
 import { menuBcp47TagFor, presentReviewed } from "@/modules/restaurant-discovery/menu-presentation";
+import { useMenuSelection } from "@/modules/restaurant-discovery/menu-selection-store";
 import { listMenuPagesFn } from "@/modules/restaurant-discovery/restaurant-menu-media.functions";
 import { getRestaurantFn } from "@/modules/restaurant-discovery/restaurant.functions";
 import type { RestaurantSearch } from "@/modules/restaurant-discovery/restaurant.schema";
+import type { Locale } from "@/shared/i18n";
 import type { ExchangeRate } from "@/shared/money";
 
 type MenuChannel = RestaurantSearch["channel"];
@@ -52,28 +59,34 @@ export function RestaurantMenuPanel({
   channel,
   lang,
   onBackToOverview,
+  onChannelChange,
   rates,
   venueId,
   venueName,
-  backLabel = "Back to overview",
-  errorHeading = "The menu could not load.",
-  retryLabel = "Try again",
-  loadingLabel = "Loading the reviewed menu…",
-  emptyLabel = "No curated menu offerings have been recorded for this branch yet.",
-  menuTabLabel = "Reviewed menu",
-  pagesTabLabel = "Menu pages",
+  initialExpandedItemId,
+  backLabel,
+  errorHeading,
+  retryLabel,
+  loadingLabel,
+  emptyTitle,
+  emptyBody,
+  menuTabLabel,
+  pagesTabLabel,
 }: {
   readonly channel: MenuChannel;
-  readonly lang: string;
+  readonly lang: Locale;
   readonly onBackToOverview: () => void;
+  readonly onChannelChange?: ((channel: MenuChannel) => void) | undefined;
   readonly rates?: ReadonlyMap<string, ExchangeRate> | undefined;
   readonly venueId: string;
   readonly venueName: string | null;
+  readonly initialExpandedItemId?: string | undefined;
   readonly backLabel?: string | undefined;
   readonly errorHeading?: string | undefined;
   readonly retryLabel?: string | undefined;
   readonly loadingLabel?: string | undefined;
-  readonly emptyLabel?: string | undefined;
+  readonly emptyTitle?: string | undefined;
+  readonly emptyBody?: string | undefined;
   readonly menuTabLabel?: string | undefined;
   readonly pagesTabLabel?: string | undefined;
 }) {
@@ -84,10 +97,13 @@ export function RestaurantMenuPanel({
     retry: false,
   });
 
-  // Secondary tab: published menu pages (photographs/scans). Mounted only
-  // when at least one published page exists; the reviewed menu stays the
-  // default tab.
-  const [activeTab, setActiveTab] = useState<"menu" | "pages">("menu");
+  const offerings = query.data?.offerings ?? [];
+
+  // Secondary tab: published menu pages (photographs/scans). The reviewed
+  // menu stays the default tab, except when no structured items exist but
+  // published pages do — then the pages lead (Case B). An explicit user
+  // choice always wins over the default.
+  const [tabOverride, setTabOverride] = useState<"menu" | "pages" | null>(null);
 
   const pagesQuery = useQuery({
     queryKey: ["restaurant-menu-pages", venueId],
@@ -98,7 +114,8 @@ export function RestaurantMenuPanel({
 
   const pages = pagesQuery.data ?? [];
   const showPagesTab = pagesQuery.isSuccess && pages.length > 0;
-  const tab = showPagesTab ? activeTab : "menu";
+  const offeringsEmpty = query.isSuccess && offerings.length === 0;
+  const tab = tabOverride ?? (showPagesTab && offeringsEmpty ? "pages" : "menu");
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -116,8 +133,6 @@ export function RestaurantMenuPanel({
     [venueId, channel],
   );
 
-  const offerings = query.data?.offerings ?? [];
-
   const sections =
     query.data === undefined
       ? new Map<string, string | null>()
@@ -126,22 +141,24 @@ export function RestaurantMenuPanel({
   const menu =
     query.data === undefined ? null : presentReviewed(offerings, venueName, lang, sections);
 
-  // Progressive-disclosure board state. Selection semantics mirror the
-  // shared controller exactly (MenuSelection identity, 0–99 quantities,
-  // instruction preservation); only the presentation is new. The
-  // coordinator-owned interactive-menu keeps the canonical controller —
-  // see the Agent A report for the merge (lift state or delegate here).
+  // Progressive-disclosure board state. Selections live in the shared
+  // venue+channel controller so quantities, variants, instructions, and
+  // review acknowledgements survive overview ↔ menu ↔ reviews switches.
   const copy = menuCopy(lang);
+  const rcopy: RestaurantCopy = restaurantCopy(lang);
+  const backLabelText = backLabel ?? rcopy.menuBackToOverview;
+  const errorHeadingText = errorHeading ?? rcopy.menuLoadFailed;
+  const retryLabelText = retryLabel ?? rcopy.retryAction;
+  const loadingLabelText = loadingLabel ?? rcopy.menuLoading;
+  const emptyTitleText = emptyTitle ?? rcopy.menuEmptyTitle;
+  const emptyBodyText = emptyBody ?? rcopy.menuEmptyBody;
+  const menuTabText = menuTabLabel ?? rcopy.menuReviewedTab;
+  const pagesTabText = pagesTabLabel ?? rcopy.menuPagesTab;
   const dialog = useRef<HTMLDialogElement>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(() => initialExpandedItemId ?? null);
 
-  const [activeVariants, setActiveVariants] = useState<ReadonlyMap<string, string>>(
-    () => new Map(),
-  );
-
-  const [selections, setSelections] = useState<ReadonlyArray<MenuSelection>>([]);
-
-  const [reviewed, setReviewed] = useState<ReadonlySet<string>>(() => new Set());
+  const { activeVariants, selections, reviewed, setActiveVariants, setSelections, setReviewed } =
+    useMenuSelection(venueId, channel);
 
   const availableIds =
     menu === null
@@ -308,13 +325,54 @@ export function RestaurantMenuPanel({
     );
   };
 
+  // Case C: structured items exist but no price was observed for this
+  // sales channel (channel only picks the price row; items persist).
+  const allPricesUnknown =
+    query.isSuccess &&
+    offerings.length > 0 &&
+    offerings.every((offering) => offering.amount === null);
+
+  let channelName = rcopy.dineIn;
+
+  if (channel === "takeaway") {
+    channelName = rcopy.takeaway;
+  } else if (channel === "delivery") {
+    channelName = rcopy.delivery;
+  }
+
+  const channelChannels: ReadonlyArray<MenuChannel> = ["dine_in", "takeaway", "delivery"];
+
+  const channelChipLabel = (value: MenuChannel): string => {
+    if (value === "takeaway") return rcopy.takeaway;
+
+    if (value === "delivery") return rcopy.delivery;
+
+    return rcopy.dineIn;
+  };
+
   return (
     <section className="restaurant-menu-panel" aria-label={venueName ?? "Restaurant menu"}>
       <div className="menu-panel-head">
         <button type="button" className="menu-panel-back" onClick={onBackToOverview}>
           <ArrowLeft aria-hidden="true" />
-          {backLabel}
+          {backLabelText}
         </button>
+        {onChannelChange !== undefined && (
+          <fieldset className="menu-panel-channels">
+            <legend className="sr-only">{rcopy.diningOptions}</legend>
+            {channelChannels.map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={channel === value}
+                className={channel === value ? "menu-panel-chip is-active" : "menu-panel-chip"}
+                onClick={() => onChannelChange(value)}
+              >
+                {channelChipLabel(value)}
+              </button>
+            ))}
+          </fieldset>
+        )}
       </div>
       {showPagesTab && (
         <div className="menu-panel-tabs" role="tablist" aria-label={venueName ?? "Menu views"}>
@@ -323,23 +381,23 @@ export function RestaurantMenuPanel({
             role="tab"
             aria-selected={tab === "menu"}
             className={tab === "menu" ? "menu-panel-tab is-active" : "menu-panel-tab"}
-            onClick={() => setActiveTab("menu")}
+            onClick={() => setTabOverride("menu")}
           >
-            {menuTabLabel}
+            {menuTabText}
           </button>
           <button
             type="button"
             role="tab"
             aria-selected={tab === "pages"}
             className={tab === "pages" ? "menu-panel-tab is-active" : "menu-panel-tab"}
-            onClick={() => setActiveTab("pages")}
+            onClick={() => setTabOverride("pages")}
           >
-            {pagesTabLabel} ({pages.length})
+            {pagesTabText} ({pages.length})
           </button>
         </div>
       )}
       {query.isPending && (
-        <div className="menu-panel-loading" aria-busy="true" aria-label={loadingLabel}>
+        <div className="menu-panel-loading" aria-busy="true" aria-label={loadingLabelText}>
           <div className="menu-panel-skeleton" />
           <div className="menu-panel-skeleton" />
           <div className="menu-panel-skeleton" />
@@ -347,15 +405,33 @@ export function RestaurantMenuPanel({
       )}
       {query.isError && (
         <div className="menu-panel-error" role="alert">
-          <p>{errorHeading}</p>
+          <p>{errorHeadingText}</p>
           <button type="button" className="menu-panel-retry" onClick={() => void query.refetch()}>
-            {retryLabel}
+            {retryLabelText}
           </button>
         </div>
       )}
-      {tab === "menu" && query.isSuccess && offerings.length === 0 && (
+      {tab === "menu" && offeringsEmpty && (
         <div className="menu-panel-empty" aria-live="polite">
-          {emptyLabel}
+          <BookOpen aria-hidden="true" />
+          <p>{emptyTitleText}</p>
+          <p>{emptyBodyText}</p>
+          {showPagesTab && (
+            <button
+              type="button"
+              className="menu-panel-pages-link"
+              onClick={() => setTabOverride("pages")}
+            >
+              {rcopy.menuEmptyPages} ({pages.length})
+            </button>
+          )}
+          <Link
+            className="menu-panel-scan"
+            to="/scan"
+            search={{ lang, venueId, returnVenue: venueId, returnView: "menu" }}
+          >
+            {rcopy.scanMenuAction}
+          </Link>
         </div>
       )}
       {tab === "menu" && query.isSuccess && offerings.length > 0 && menu !== null && (
@@ -366,6 +442,19 @@ export function RestaurantMenuPanel({
             menuPanelScrollTops.set(scrollKeyFor(venueId, channel), event.currentTarget.scrollTop)
           }
         >
+          {allPricesUnknown && (
+            <div className="menu-panel-channel-note" aria-live="polite">
+              <p>{rcopy.menuNoChannel.replace("{channel}", channelName)}</p>
+              <p>{rcopy.menuChannelHelp}</p>
+              <Link
+                className="menu-panel-scan"
+                to="/scan"
+                search={{ lang, venueId, returnVenue: venueId, returnView: "menu" }}
+              >
+                {rcopy.scanMenuAction}
+              </Link>
+            </div>
+          )}
           {expandedDetail === null ? (
             <div className="menu-board" lang={menuBcp47TagFor(lang)}>
               <p className="menu-order-notice">{boardNotice}</p>
@@ -435,7 +524,22 @@ export function RestaurantMenuPanel({
           </dialog>
         </div>
       )}
-      {tab === "pages" && showPagesTab && <MenuPagesViewer pages={pages} />}
+      {tab === "pages" && showPagesTab && (
+        <div className="menu-panel-pages-wrap">
+          <MenuPagesViewer pages={pages} />
+          {offeringsEmpty && (
+            <div className="menu-panel-pages-scan" aria-live="polite">
+              <Link
+                className="menu-panel-scan"
+                to="/scan"
+                search={{ lang, venueId, returnVenue: venueId, returnView: "menu" }}
+              >
+                {rcopy.menuScanUnderstand}
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

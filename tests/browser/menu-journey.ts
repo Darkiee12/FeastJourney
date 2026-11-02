@@ -149,9 +149,9 @@ try {
       response.request().postData()?.includes('"action":"revise"') === true,
   );
 
-  await page.getByRole("button", { name: "Save corrections", exact: true }).click();
+  await page.getByRole("button", { name: "Save my scan", exact: true }).click();
   check((await saved).status()).toBe(200);
-  await check(page.getByRole("button", { name: "Save corrections", exact: true })).toBeDisabled();
+  await check(page.getByRole("button", { name: "Save my scan", exact: true })).toBeDisabled();
   const card = page.locator(".menu-order-item").first();
   await card.getByRole("combobox").selectOption({ label: "Tô lớn / Large bowl" });
   await card.getByRole("button", { name: "Add one: Phở bò", exact: true }).click({ clickCount: 2 });
@@ -243,7 +243,7 @@ try {
       response.request().postData()?.includes('"action":"revise"') === true,
   );
 
-  await page.getByRole("button", { name: "Save corrections", exact: true }).click();
+  await page.getByRole("button", { name: "Save my scan", exact: true }).click();
   check((await corrected).status()).toBe(200);
   await check(consent).not.toBeChecked();
   await consent.check();

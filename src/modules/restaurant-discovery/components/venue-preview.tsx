@@ -15,12 +15,20 @@ import type { Locale } from "@/shared/i18n";
 function PhotoStrip({
   photos,
   venueName,
+  fallbackLabel,
 }: {
   readonly photos: ReadonlyArray<PhotoRef>;
   readonly venueName: string;
+  readonly fallbackLabel: string;
 }) {
   if (photos.length === 0) {
-    return <RestaurantPhotoFallback name={venueName} className="mapapp-preview-photo" />;
+    return (
+      <RestaurantPhotoFallback
+        name={venueName}
+        className="mapapp-preview-photo"
+        label={fallbackLabel}
+      />
+    );
   }
 
   const ordered = photos.toSorted((left, right) => Number(right.primary) - Number(left.primary));
@@ -83,9 +91,21 @@ export function VenuePreview({
         {model.area}
         {model.distanceKm !== null && ` · ${copy.kmAway.replace("{km}", model.distanceKm)}`}
       </p>
-      <PhotoStrip photos={photos ?? model.photos ?? []} venueName={model.name} />
+      <PhotoStrip
+        photos={photos ?? model.photos ?? []}
+        venueName={model.name}
+        fallbackLabel={copy.venuePhotoFallback.replace("{name}", model.name)}
+      />
       <h3 ref={headingRef} tabIndex={-1} className="mapapp-preview-title">
-        <Link to="/restaurants/$venueId" params={{ venueId: model.id }} search={model.detailSearch}>
+        <Link
+          to="/restaurants"
+          search={(previous) => ({
+            ...previous,
+            lang: previous.lang ?? "en",
+            venue: model.id,
+            view: "overview" as const,
+          })}
+        >
           {model.name}
         </Link>
       </h3>
@@ -117,9 +137,13 @@ export function VenuePreview({
       <div className="mapapp-preview-actions">
         <Link
           className="mapapp-preview-view"
-          to="/restaurants/$venueId"
-          params={{ venueId: model.id }}
-          search={model.detailSearch}
+          to="/restaurants"
+          search={(previous) => ({
+            ...previous,
+            lang: previous.lang ?? "en",
+            venue: model.id,
+            view: "menu" as const,
+          })}
         >
           {copy.viewMenu}
           <ArrowRight aria-hidden="true" />

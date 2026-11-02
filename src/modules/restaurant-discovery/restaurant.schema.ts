@@ -73,6 +73,32 @@ export const restaurantSearchSchema = z
 
 export type RestaurantSearch = z.infer<typeof restaurantSearchSchema>;
 
+/**
+ * Canonical in-map restaurant panel state. Deep links and browser Back
+ * restore the selected venue and panel without a second page
+ * implementation; identity (venue/view/item) and the dish back-link ride
+ * in the URL. Stripped from loaderDeps so panel transitions never refetch
+ * the result list.
+ */
+export const restaurantVenueViewSchema = z
+  .object({
+    fromDish: z.string().min(1).max(120).optional(),
+    venue: z.uuid().optional(),
+    view: z.enum(["browse", "overview", "menu", "reviews"]).default("browse"),
+    item: z.uuid().optional(),
+  })
+  .superRefine((data, context) => {
+    if (data.view !== "browse" && data.venue === undefined) {
+      context.addIssue({ code: "custom", message: "A venue is required for venue panels" });
+    }
+
+    if (data.item !== undefined && (data.view !== "menu" || data.venue === undefined)) {
+      context.addIssue({ code: "custom", message: "A menu item requires the menu panel" });
+    }
+  });
+
+export type RestaurantVenueView = z.infer<typeof restaurantVenueViewSchema>;
+
 export const venueIdSchema = z.object({ venueId: z.uuid() });
 
 /**

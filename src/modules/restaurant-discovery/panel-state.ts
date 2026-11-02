@@ -36,3 +36,21 @@ export const withVenue = (panel: RestaurantPanel, venueId: string): RestaurantPa
 
   return { ...panel, venueId };
 };
+
+/**
+ * Derive the in-map panel from URL search state. Unknown or venue-less
+ * views fall back to browse; validation rejects view-without-venue at the
+ * route boundary, so this is a safe display default only.
+ */
+export function panelForRoute(search: {
+  readonly venue?: string | undefined;
+  readonly view: "browse" | "overview" | "menu" | "reviews";
+}): RestaurantPanel {
+  if (search.view === "overview" && search.venue !== undefined) return overviewPanel(search.venue);
+
+  if (search.view === "menu" && search.venue !== undefined) return menuPanel(search.venue);
+
+  if (search.view === "reviews" && search.venue !== undefined) return reviewsPanel(search.venue);
+
+  return browsePanel;
+}

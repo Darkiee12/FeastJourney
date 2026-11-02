@@ -1,4 +1,3 @@
-import { Link } from "@tanstack/react-router";
 import { ArrowRight, MapPin } from "lucide-react";
 import type { ReactElement } from "react";
 
@@ -50,6 +49,8 @@ interface CardProps {
   readonly model: RestaurantCardModel;
   readonly selected: boolean;
   readonly onShowOnMap: (() => void) | null;
+  readonly onOpenVenue: () => void;
+  readonly onViewMenu: () => void;
 }
 
 /** Layout-only loading placeholder for a result card. Shimmer blocks
@@ -68,15 +69,27 @@ export function RestaurantCardSkeleton(): ReactElement {
 }
 
 /** One restaurant: photo, name, area, reviewed dish match with price,
- *  and a clear path to the menu. No invented content. */
-export function RestaurantCard({ copy, model, selected, onShowOnMap }: CardProps) {
+ *  and a clear path to the menu. Names and menu actions open the in-map
+ *  venue panel (no whole-page navigation); nothing here invents content. */
+export function RestaurantCard({
+  copy,
+  model,
+  selected,
+  onShowOnMap,
+  onOpenVenue,
+  onViewMenu,
+}: CardProps) {
   const photos = model.photos ?? [];
   const primary = photos.find((photo) => photo.primary) ?? photos[0];
 
   return (
     <article className="res-card" data-selected={selected}>
       {primary === undefined ? (
-        <RestaurantPhotoFallback name={model.name} className="res-photo" />
+        <RestaurantPhotoFallback
+          name={model.name}
+          className="res-photo"
+          label={copy.venuePhotoFallback.replace("{name}", model.name)}
+        />
       ) : (
         <RestaurantPhoto photo={primary} className="res-photo" />
       )}
@@ -86,13 +99,9 @@ export function RestaurantCard({ copy, model, selected, onShowOnMap }: CardProps
           {model.distanceKm !== null && ` · ${copy.kmAway.replace("{km}", model.distanceKm)}`}
         </p>
         <h3>
-          <Link
-            to="/restaurants/$venueId"
-            params={{ venueId: model.id }}
-            search={model.detailSearch}
-          >
+          <button type="button" className="res-name" onClick={onOpenVenue}>
             {model.name}
-          </Link>
+          </button>
         </h3>
         <p className="res-card-addr">{model.address}</p>
         {model.dish !== null && (
@@ -120,15 +129,10 @@ export function RestaurantCard({ copy, model, selected, onShowOnMap }: CardProps
           </div>
         )}
         <div className="res-card-foot">
-          <Link
-            className="res-view"
-            to="/restaurants/$venueId"
-            params={{ venueId: model.id }}
-            search={model.detailSearch}
-          >
+          <button type="button" className="res-view" onClick={onViewMenu}>
             {copy.viewMenu}
             <ArrowRight aria-hidden="true" />
-          </Link>
+          </button>
           {onShowOnMap !== null && (
             <button type="button" className="res-mapbtn" onClick={onShowOnMap}>
               <MapPin aria-hidden="true" />

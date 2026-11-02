@@ -8,7 +8,13 @@ export const Route = createFileRoute("/scan")({
   // Accept any bounded string here: MenuScanPage validates the branch ID
   // itself (typed "unknown branch" hint, task-surfaced errors) so a bad
   // ?venueId degrades instead of tripping the route error boundary.
-  validateSearch: localeSearchSchema.extend({ venueId: z.string().max(36).optional() }),
+  // returnVenue/returnView carry the originating restaurant context so the
+  // scanner can offer a contextual return without exposing raw history.
+  validateSearch: localeSearchSchema.extend({
+    venueId: z.string().max(36).optional(),
+    returnVenue: z.uuid().optional(),
+    returnView: z.enum(["overview", "menu", "reviews"]).optional(),
+  }),
   component: ScanRoute,
 });
 
@@ -27,6 +33,8 @@ function ScanRoute() {
       locale={search.lang}
       userId={userId}
       venueId={search.venueId}
+      returnVenue={search.returnVenue}
+      returnView={search.returnView}
     />
   );
 }

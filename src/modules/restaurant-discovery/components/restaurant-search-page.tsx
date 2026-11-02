@@ -54,14 +54,7 @@ import {
 } from "@/modules/restaurant-discovery/location-storage";
 import { CITY_PRESETS, DEFAULT_MAP_CENTER } from "@/modules/restaurant-discovery/map-bounds";
 import { selectMenuHighlights } from "@/modules/restaurant-discovery/menu-presentation";
-import {
-  browsePanel,
-  menuPanel,
-  overviewPanel,
-  panelVenueId,
-  reviewsPanel,
-  type RestaurantPanel,
-} from "@/modules/restaurant-discovery/panel-state";
+import { panelForRoute, type RestaurantPanel } from "@/modules/restaurant-discovery/panel-state";
 import { getRestaurantReviewSummaryFn } from "@/modules/restaurant-discovery/restaurant-reviews.functions";
 import { getRestaurantFn } from "@/modules/restaurant-discovery/restaurant.functions";
 import { restaurantSearchSchema } from "@/modules/restaurant-discovery/restaurant.schema";
@@ -172,13 +165,10 @@ interface MapEmptyCopy {
 function mapEmptyText(
   kind: ResultsState | null,
   copy: RestaurantCopy,
-  lang: string,
   isDishMode: boolean,
 ): MapEmptyCopy {
   if (kind === "loading") {
-    if (lang === "vi") return { body: "Đang tìm nhà hàng trong khu vực này…" };
-
-    return { body: "Searching restaurants in this area…" };
+    return { body: copy.emptySearching };
   }
 
   if (kind === "no-evidence") return { title: copy.noReviewedTitle, body: copy.noReviewedBody };
@@ -198,15 +188,32 @@ function mapEmptyText(
   return { body: copy.mapEmpty };
 }
 
-/** Detail-page href for a result card (module scope: no per-render closure). */
+/** Sheet snap for the first paint: a URL-backed venue panel must be
+ *  visible immediately, never hidden under the peek strip. */
+function initialSnapForUrl(search: {
+  readonly venue?: string | undefined;
+  readonly view: string;
+}): SheetSnap {
+  if (search.venue === undefined || search.view === "browse") return 0;
+
+  if (search.view === "overview") return 1;
+
+  return 2;
+}
+
+/** Canonical in-map href for a result card. Panel transitions stay on the
+ *  /restaurants route (same mounted map, no refetch), so Back restores the
+ *  exact list, filters, and camera. */
 function venueHrefFor(model: RestaurantCardModel): string {
   const params = new URLSearchParams();
 
   params.set("lang", model.detailSearch.lang);
   params.set("channel", model.detailSearch.channel);
+  params.set("venue", model.id);
+  params.set("view", "menu");
 
   if (model.detailSearch.variant !== undefined) {
-    params.set("variant", model.detailSearch.variant);
+    params.set("item", model.detailSearch.variant);
   }
 
   if (model.detailSearch.dish !== undefined) {
@@ -217,7 +224,7 @@ function venueHrefFor(model: RestaurantCardModel): string {
     params.set("fromDish", model.detailSearch.fromDish);
   }
 
-  return `/restaurants/${model.id}?${params.toString()}`;
+  return `/restaurants?${params.toString()}`;
 }
 
 export function RestaurantSearchPage() {
@@ -228,8 +235,13 @@ export function RestaurantSearchPage() {
   const copy = restaurantCopy(search.lang);
   const isDesktop = useIsDesktop();
 
-  const [panel, setPanel] = useState<RestaurantPanel>(browsePanel);
-  const selected = panelVenueId(panel);
+  // Canonical URL-backed restaurant state: the selected venue and panel
+  // live in ?venue=&view=, so deep links, refreshes, and browser Back
+  // restore them without a second page. Ephemeral UI (snaps, scroll,
+  // hover) stays local, and the map stays mounted because panel changes
+  // never leave this route.
+  const selected = search.venue ?? null;
+  const panel: RestaurantPanel = panelForRoute(search);
   const previewOpen = panel.kind !== "browse";
   const [proposedBounds, setProposedBounds] = useState<MapBounds | null>(null);
   const [message, setMessage] = useState("");
@@ -237,7 +249,10 @@ export function RestaurantSearchPage() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetKey, setSheetKey] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(true);
-  const [sheetSnap, setSheetSnap] = useState<SheetSnap>(0);
+  // Deep links and refreshes hydrate the venue panel from the URL; the
+  // sheet opens enough to show it instead of hiding it under the peek
+  // strip. Later panel switches manage the snap explicitly.
+  const [sheetSnap, setSheetSnap] = useState<SheetSnap>(() => initialSnapForUrl(search));
   // Local typed panel state for the in-map Results | Compare prices
   // toggle. No route change, no refetch: rows are already server-ordered.
   const [compareOpen, setCompareOpen] = useState(false);
@@ -587,6 +602,9 @@ export function RestaurantSearchPage() {
         channel: "dine_in",
         sort: "recommended",
         radius: 5000,
+        venue: undefined,
+        view: "browse",
+        item: undefined,
       },
     });
   };
@@ -628,8 +646,12 @@ export function RestaurantSearchPage() {
     });
   };
 
+  const openPanel = (venueId: string, view: "overview" | "menu" | "reviews"): void => {
+    void navigate({ search: { ...search, venue: venueId, view } });
+  };
+
   const handleSelect = (id: string) => {
-    setPanel(overviewPanel(id));
+    openPanel(id, "overview");
 
     if (!isDesktop) setSheetSnap(1);
 
@@ -637,12 +659,19 @@ export function RestaurantSearchPage() {
   };
 
   const closePreview = (focusResults: boolean) => {
-    setPanel(browsePanel);
+    void navigate({ search: { ...search, venue: undefined, view: "browse", item: undefined } });
 
     if (focusResults) listTitleRef.current?.focus({ preventScroll: true });
   };
 
   const channelLabel = channelLabelFor(search.channel, copy);
+
+  // The currency selector only earns its place when comparable priced
+  // dish evidence is on screen; otherwise it stays hidden instead of
+  // implying conversions that do not exist.
+  const showCurrency =
+    isDishMode &&
+    rows.some((venue) => isDishRow(venue) && venue.amount !== null && venue.currency !== null);
 
   const modelFor = (venue: RestaurantResult | DishRestaurantResult): RestaurantCardModel => {
     const dish = isDishRow(venue) ? venue : null;
@@ -680,11 +709,11 @@ export function RestaurantSearchPage() {
   };
 
   const selectedVenue = selected === null ? undefined : rows.find((venue) => venue.id === selected);
-  const selectedModel = selectedVenue === undefined ? null : modelFor(selectedVenue);
+  const rowModel = selectedVenue === undefined ? null : modelFor(selectedVenue);
 
-  const resultsLabel = search.lang === "vi" ? "Kết quả" : "Results";
-  const compareLabel = search.lang === "vi" ? "So sánh giá" : "Compare prices";
-  const compareGroupLabel = search.lang === "vi" ? "Chế độ xem kết quả" : "Results view";
+  const resultsLabel = copy.resultsTitle;
+  const compareLabel = copy.comparePrices;
+  const compareGroupLabel = copy.resultsViewLabel;
 
   // Comparison rows reuse the card model: same canonical dish, same
   // server ordering, no refetch. Venues without priced dish evidence are
@@ -747,6 +776,29 @@ export function RestaurantSearchPage() {
       ? detailQuery.data
       : null;
 
+  // Deep links hydrate even when the venue is outside the current result
+  // page: the detail query (keyed by venue + channel) supplies the card
+  // identity, so users never have to find the pin first.
+  let selectedModel: RestaurantCardModel | null = rowModel;
+
+  if (selectedModel === null && detail !== null) {
+    selectedModel = {
+      id: detail.venue.id,
+      name: detail.venue.name,
+      area: detail.venue.area,
+      address: detail.venue.address,
+      distanceKm: null,
+      dish: null,
+      detailSearch: {
+        lang: search.lang,
+        channel: search.channel,
+        variant: search.item,
+        dish: search.dish,
+        fromDish: search.fromDish,
+      },
+    };
+  }
+
   const highlights = useMemo(
     () => (detail === null ? [] : selectMenuHighlights(detail.offerings, 3)),
     [detail],
@@ -761,19 +813,19 @@ export function RestaurantSearchPage() {
       : null;
 
   const showOverviewPanel = (venueId: string) => {
-    setPanel(overviewPanel(venueId));
+    openPanel(venueId, "overview");
 
     if (!isDesktop) setSheetSnap(1);
   };
 
   const showMenuPanel = (venueId: string) => {
-    setPanel(menuPanel(venueId));
+    openPanel(venueId, "menu");
 
     if (!isDesktop) setSheetSnap(2);
   };
 
   const showReviewsPanel = (venueId: string) => {
-    setPanel(reviewsPanel(venueId));
+    openPanel(venueId, "reviews");
 
     if (!isDesktop) setSheetSnap(2);
   };
@@ -792,12 +844,9 @@ export function RestaurantSearchPage() {
     isLoading: navigating,
   });
 
-  const loadingLabel =
-    search.lang === "vi"
-      ? "Đang tìm nhà hàng trong khu vực này…"
-      : "Searching restaurants in this area…";
+  const loadingLabel = copy.emptySearching;
 
-  const mapEmpty = mapEmptyText(emptyKind, copy, search.lang, isDishMode);
+  const mapEmpty = mapEmptyText(emptyKind, copy, isDishMode);
 
   const countLabel =
     rows.length === 1 ? copy.placesOne : copy.placesCount.replace("{count}", String(rows.length));
@@ -967,6 +1016,8 @@ export function RestaurantSearchPage() {
                           }
                         : null
                     }
+                    onOpenVenue={() => handleSelect(venue.id)}
+                    onViewMenu={() => showMenuPanel(venue.id)}
                   />
                 </li>
               );
@@ -977,7 +1028,7 @@ export function RestaurantSearchPage() {
       {(panel.kind === "overview" || panel.kind === "menu" || panel.kind === "reviews") && (
         <div ref={panelRef} tabIndex={-1} data-panel={panel.kind}>
           {panel.kind === "overview" &&
-            selectedModel !== null &&
+            selected !== null &&
             (detail === null ? (
               <div className="mapapp-status" aria-live="polite">
                 {detailQuery.isError ? (
@@ -1017,6 +1068,7 @@ export function RestaurantSearchPage() {
                 offerings={detail.offerings}
                 onBackToResults={() => closePreview(true)}
                 backToResultsLabel={copy.backToResults}
+                fromDish={search.fromDish ?? null}
                 onOpenMenuItem={() => showMenuPanel(detail.venue.id)}
                 onShowMenu={() => showMenuPanel(detail.venue.id)}
                 onShowReviews={() => showReviewsPanel(detail.venue.id)}
@@ -1031,18 +1083,23 @@ export function RestaurantSearchPage() {
                   address: detail.venue.address,
                   latitude: detail.venue.latitude,
                   longitude: detail.venue.longitude,
-                  distanceKm: selectedModel.distanceKm,
+                  distanceKm: selectedModel?.distanceKm ?? null,
                 }}
               />
             ))}
           {panel.kind === "menu" && selected !== null && (
             <RestaurantMenuPanel
+              key={`${selected}:${search.channel}`}
               channel={search.channel}
               lang={search.lang}
               onBackToOverview={() => showOverviewPanel(selected)}
+              onChannelChange={(value) => {
+                void navigate({ search: { ...search, channel: value } });
+              }}
               rates={conversion.rates}
               venueId={selected}
               venueName={selectedModel?.name ?? null}
+              initialExpandedItemId={search.item}
             />
           )}
           {panel.kind === "reviews" && selected !== null && (
@@ -1057,7 +1114,7 @@ export function RestaurantSearchPage() {
       )}
       <details className="mapapp-options">
         <summary>{copy.displayOptions}</summary>
-        <CurrencySelector preference={preference} />
+        {showCurrency && <CurrencySelector preference={preference} />}
         <label className="mapapp-sort">
           <span>{copy.sortLabel}</span>
           <select

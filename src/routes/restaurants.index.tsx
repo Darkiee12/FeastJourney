@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { z } from "zod";
 
 import { DiscoveryError } from "@/modules/restaurant-discovery/components/discovery-error";
 import { RestaurantSearchPage } from "@/modules/restaurant-discovery/components/restaurant-search-page";
@@ -8,16 +7,23 @@ import {
   restaurantFacetsFn,
   searchRestaurantsFn,
 } from "@/modules/restaurant-discovery/restaurant.functions";
-import { restaurantSearchSchema } from "@/modules/restaurant-discovery/restaurant.schema";
+import {
+  restaurantSearchSchema,
+  restaurantVenueViewSchema,
+} from "@/modules/restaurant-discovery/restaurant.schema";
 
-// Carried from the main-track worktree (dish→restaurant bridge): preserves
-// the fromDish slug through restaurant search. Owner sign-off still needed.
-const restaurantIndexSearchSchema = restaurantSearchSchema.and(
-  z.object({ fromDish: z.string().min(1).max(120).optional() }),
-);
+// Canonical venue panel state (venue/view/item) plus the carried
+// dish→restaurant fromDish bridge. Panel identity rides in the URL for
+// shareability and Back semantics; loaderDeps strips it so panel
+// transitions never refetch the result list. Owner sign-off still needed
+// for the fromDish bridge.
+const restaurantIndexSearchSchema = restaurantSearchSchema.and(restaurantVenueViewSchema);
 
 export const Route = createFileRoute("/restaurants/")({
   validateSearch: restaurantIndexSearchSchema,
+  // Venue panel identity (venue/view/item) and the dish back-link ride in
+  // the URL for shareability and Back semantics, but never refetch the
+  // result list: parsing through the base schema strips them from deps.
   loaderDeps: ({ search }) => restaurantSearchSchema.parse(search),
   loader: async ({ deps }) => {
     const [results, areas, cuisines] = await Promise.all([

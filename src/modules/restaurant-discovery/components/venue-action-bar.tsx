@@ -18,6 +18,8 @@ export function VenueActionBar({
   reviewsLabel = "Reviews",
   scanLabel = "Scan a menu",
   directionsLabel = "Get directions",
+  returnVenue,
+  returnView = "overview",
 }: {
   readonly lang: Locale;
   readonly venueId: string;
@@ -28,6 +30,8 @@ export function VenueActionBar({
   readonly reviewsLabel?: string | undefined;
   readonly scanLabel?: string | undefined;
   readonly directionsLabel?: string | undefined;
+  readonly returnVenue?: string | undefined;
+  readonly returnView?: "overview" | "menu" | "reviews" | undefined;
 }) {
   // Compact icon+text pills: 2-column grid on narrow sheet/drawer widths,
   // wrapping row on wider screens. Utilities overlay the component-layer
@@ -42,7 +46,11 @@ export function VenueActionBar({
         <Star aria-hidden="true" />
         {reviewsLabel}
       </button>
-      <Link className="venue-action px-3.5" to="/scan" search={{ lang, venueId }}>
+      <Link
+        className="venue-action px-3.5"
+        to="/scan"
+        search={{ lang, venueId, returnVenue, returnView }}
+      >
         <ScanLine aria-hidden="true" />
         {scanLabel}
       </Link>

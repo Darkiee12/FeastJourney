@@ -1,11 +1,16 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { z } from "zod";
 
 import { DiscoveryError } from "@/modules/restaurant-discovery/components/discovery-error";
-import { RestaurantDetailPage } from "@/modules/restaurant-discovery/components/restaurant-detail-page";
-import { getRestaurantFn } from "@/modules/restaurant-discovery/restaurant.functions";
 import { channelSchema } from "@/modules/restaurant-discovery/restaurant.schema";
 
+/**
+ * Stable public permalink for one restaurant. The standalone detail page
+ * no longer exists: this route normalizes to the canonical map-first
+ * experience at /restaurants, preserving locale, channel, dish context,
+ * and the menu-item focus. The map behind never remounts because the
+ * destination is the same route family, not a second implementation.
+ */
 export const Route = createFileRoute("/restaurants/$venueId")({
   // Carried from the main-track worktree (dish → venue → dish back-links).
   // Owner sign-off still needed.
@@ -18,9 +23,31 @@ export const Route = createFileRoute("/restaurants/$venueId")({
       .optional(),
     fromDish: z.string().min(1).max(120).optional(),
   }),
-  loaderDeps: ({ search }) => ({ channel: search.channel }),
-  loader: ({ params, deps }) =>
-    getRestaurantFn({ data: { venueId: params.venueId, channel: deps.channel } }),
+  beforeLoad: ({ params, search }) => {
+    const view = search.variant !== undefined || search.dish !== undefined ? "menu" : "overview";
+
+    throw redirect({
+      to: "/restaurants",
+      search: (previous) => ({
+        ...previous,
+        lang: previous.lang ?? "en",
+        venue: params.venueId,
+        view,
+        item: search.variant,
+        channel: search.channel,
+        dish: search.dish,
+        fromDish: search.fromDish,
+      }),
+    });
+  },
   errorComponent: DiscoveryError,
-  component: RestaurantDetailPage,
+  component: VenueRedirectNotice,
 });
+
+function VenueRedirectNotice() {
+  return (
+    <div className="discovery-empty" aria-live="polite">
+      Opening the restaurant map…
+    </div>
+  );
+}

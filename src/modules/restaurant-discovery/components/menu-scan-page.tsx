@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import {
   Camera,
   ChevronDown,
@@ -33,6 +34,7 @@ import {
 } from "@/modules/restaurant-discovery/menu-scan.schema";
 import type { MenuScanDocument } from "@/modules/restaurant-discovery/menu-scan.schema";
 import { getRestaurantFn } from "@/modules/restaurant-discovery/restaurant.functions";
+import { localeSearchSchema, type Locale } from "@/shared/i18n";
 
 const english = {
   title: "Read the menu. Choose your meal.",
@@ -65,7 +67,7 @@ const english = {
   deleting: "Removing private access and scheduling photo deletion…",
   deleted:
     "Private access removed. Stored photos are deleted by retryable cleanup; this may take time.",
-  save: "Save corrections",
+  save: "Save my scan",
   unsaved: "Your corrections are visible now. Save them before contributing.",
   sourceLanguage: "Confirm the original menu language",
   unknown: "Unknown",
@@ -89,6 +91,9 @@ const english = {
     "A guest scan was created in this browser before sign-in. Choose whether to move it into this account.",
   claiming: "Moving the guest scan into your account…",
   failure: "This request could not be completed. Check your connection and retry.",
+  scanningFor: "Scanning the menu for {name}.",
+  removeBranch: "Remove restaurant association",
+  returnToRestaurant: "Back to restaurant",
 };
 
 const vietnamese: typeof english = {
@@ -122,7 +127,7 @@ const vietnamese: typeof english = {
   deleting: "Đang thu hồi truy cập và lên lịch xóa ảnh…",
   deleted:
     "Đã thu hồi truy cập riêng tư. Ảnh sẽ được xóa qua tác vụ có thể thử lại; việc này có thể cần thời gian.",
-  save: "Lưu bản sửa",
+  save: "Lưu bản quét của tôi",
   unsaved: "Bản sửa hiển thị ngay. Hãy lưu trước khi đóng góp.",
   sourceLanguage: "Xác nhận ngôn ngữ gốc của thực đơn",
   unknown: "Chưa rõ",
@@ -145,6 +150,9 @@ const vietnamese: typeof english = {
     "Một bản quét khách đã được tạo trong trình duyệt này trước khi đăng nhập. Bạn có thể chuyển bản quét vào tài khoản này.",
   claiming: "Đang chuyển bản quét vào tài khoản…",
   failure: "Không thể hoàn thành yêu cầu. Kiểm tra kết nối và thử lại.",
+  scanningFor: "Đang quét thực đơn của {name}.",
+  removeBranch: "Gỡ liên kết nhà hàng",
+  returnToRestaurant: "Về nhà hàng",
 };
 
 type SelectedPhoto = { readonly id: string; readonly file: File; readonly previewUrl: string };
@@ -295,14 +303,24 @@ export function MenuScanPage({
   locale,
   venueId,
   userId,
+  returnVenue,
+  returnView = "menu",
 }: {
   readonly locale: string;
   readonly venueId?: string;
   readonly userId?: string | null;
+  readonly returnVenue?: string | undefined;
+  readonly returnView?: "overview" | "menu" | "reviews" | undefined;
 }) {
   const copy = locale === "vi" ? vietnamese : english;
   const pageCopy = menuScanPageCopy(locale);
   const owner = userId ?? "guest";
+
+  // Route search is validated upstream, but this component accepts a plain
+  // string prop: re-validate once so return links carry a genuine Locale
+  // without a type assertion, falling back to English when unknown.
+  const langParse = localeSearchSchema.shape.lang.safeParse(locale);
+  const validatedLang: Locale = langParse.success ? langParse.data : "en";
 
   const [targetLanguage, setTargetLanguage] = useState(() => {
     const parsed = menuLanguageSchema.safeParse(locale);
@@ -311,6 +329,32 @@ export function MenuScanPage({
   });
 
   const [branchId, setBranchId] = useState(venueId ?? "");
+  // Verified source identity for scans launched from a restaurant: the
+  // venue name (never a raw UUID) with an explicit dissociation control.
+  const [verifiedBranch, setVerifiedBranch] = useState<{ id: string; name: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (venueId !== undefined && venueId !== "") {
+      const parsed = z.uuid().safeParse(venueId);
+
+      if (parsed.success) {
+        void getRestaurantFn({ data: { venueId: parsed.data, channel: "dine_in" } }).then(
+          (detail) => {
+            if (!cancelled) setVerifiedBranch({ id: parsed.data, name: detail.venue.name });
+          },
+          () => {
+            if (!cancelled) setVerifiedBranch(null);
+          },
+        );
+      }
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [venueId]);
   const [photos, setPhotos] = useState<ReadonlyArray<SelectedPhoto>>([]);
   const [view, setView] = useState<ScanView | null>(null);
   const [scanId, setScanId] = useState<string | null>(null);
@@ -615,6 +659,35 @@ export function MenuScanPage({
         <p>{copy.introduction}</p>
       </header>
       <p className="scan-privacy">{pageCopy.privacyShort}</p>
+      {returnVenue !== undefined && (
+        <p className="scan-return">
+          <Link
+            to="/restaurants"
+            search={{
+              lang: validatedLang,
+              venue: returnVenue,
+              view: returnView,
+            }}
+          >
+            ← {copy.returnToRestaurant}
+          </Link>
+        </p>
+      )}
+      {verifiedBranch !== null && branchId === verifiedBranch.id && (
+        <p className="scan-branch-verified" aria-live="polite">
+          ✓ {copy.scanningFor.replace("{name}", verifiedBranch.name)}{" "}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setBranchId("");
+              setVerifiedBranch(null);
+            }}
+          >
+            {copy.removeBranch}
+          </button>
+        </p>
+      )}
       <details className="scan-privacy-details">
         <summary>{pageCopy.privacyDetailsLabel}</summary>
         <p>
@@ -740,13 +813,15 @@ export function MenuScanPage({
               </option>
             ))}
           </select>
-          <BranchField
-            id="scan-branch"
-            value={branchId}
-            onChange={setBranchId}
-            disabled={busy}
-            copy={copy}
-          />
+          {verifiedBranch === null || branchId !== verifiedBranch.id ? (
+            <BranchField
+              id="scan-branch"
+              value={branchId}
+              onChange={setBranchId}
+              disabled={busy}
+              copy={copy}
+            />
+          ) : null}
           <ol className="scan-photo-list" aria-label={copy.pages}>
             {photos.map((photo, index) => (
               <li key={photo.id}>
@@ -838,6 +913,19 @@ export function MenuScanPage({
           >
             <Trash2 aria-hidden="true" /> {copy.delete}
           </button>
+          {returnVenue !== undefined && (
+            <Link
+              className="scan-return-link"
+              to="/restaurants"
+              search={{
+                lang: validatedLang,
+                venue: returnVenue,
+                view: returnView,
+              }}
+            >
+              ← {copy.returnToRestaurant}
+            </Link>
+          )}
         </div>
       )}
       {document !== null && view !== null && (

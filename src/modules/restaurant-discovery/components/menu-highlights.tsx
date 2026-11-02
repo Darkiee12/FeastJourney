@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { BookOpen } from "lucide-react";
 
 import { ObservedPrice } from "@/modules/restaurant-discovery/components/currency-tools";
 import type { MenuHighlight } from "@/modules/restaurant-discovery/menu-presentation";
@@ -45,6 +46,8 @@ export function MenuHighlights({
   title = "Menu highlights",
   emptyHeading = "No reviewed menu available yet",
   venueId,
+  returnVenue,
+  returnView = "menu",
 }: {
   readonly highlights: ReadonlyArray<MenuHighlight>;
   readonly lang: Locale;
@@ -57,6 +60,8 @@ export function MenuHighlights({
   readonly title?: string | undefined;
   readonly emptyHeading?: string | undefined;
   readonly venueId: string;
+  readonly returnVenue?: string | undefined;
+  readonly returnView?: "overview" | "menu" | "reviews" | undefined;
 }) {
   const capped = highlights.slice(0, HIGHLIGHT_CAP);
 
@@ -65,8 +70,13 @@ export function MenuHighlights({
       <section className="venue-highlights" aria-labelledby="venue-highlights-title">
         <h2 id="venue-highlights-title">{title}</h2>
         <output className="venue-empty">
+          <BookOpen aria-hidden="true" />
           <p>{emptyHeading}</p>
-          <Link className="venue-action" to="/scan" search={{ lang, venueId }}>
+          <Link
+            className="venue-action"
+            to="/scan"
+            search={{ lang, venueId, returnVenue, returnView }}
+          >
             {scanLabel}
           </Link>
         </output>

@@ -1,3 +1,5 @@
+import { Store } from "lucide-react";
+
 import type { PhotoRef } from "@/modules/restaurant-discovery/components/restaurant-photos";
 
 /**
@@ -37,42 +39,50 @@ export function RestaurantPhoto({
 }
 
 /**
- * Branded fallback for venues with no published photos. Same footprint
- * contract as a photo (initial tile), so cards keep their shape without
- * inventing imagery for real restaurants.
+ * Compact branded fallback for venues with no published photos. A small
+ * Store icon tile with the same footprint contract as a photo, plus a
+ * screen-reader label — never a giant initial banner, never invented
+ * imagery.
  */
 export function RestaurantPhotoFallback({
   name,
   className,
+  label,
 }: {
   readonly name: string;
   readonly className?: string | undefined;
+  readonly label?: string | undefined;
 }) {
-  const initial = name.charAt(0).toUpperCase() || "•";
-
   return (
-    <div className={className} aria-hidden="true" role="presentation">
-      <span>{initial}</span>
+    <div className={className} role="presentation">
+      <Store aria-hidden="true" />
+      <span className="sr-only">{label ?? `No verified photo for ${name}`}</span>
     </div>
   );
 }
 
 /**
  * Detail gallery: primary photo first, the published set in sort order.
- * Empty sets render one branded fallback tile, never an empty frame.
+ * Empty sets render one compact fallback tile with a screen-reader label,
+ * never an empty frame or a photo-unavailable paragraph.
  */
 export function RestaurantPhotoGallery({
   photos,
   venueName,
+  emptyLabel,
 }: {
   readonly photos: ReadonlyArray<PhotoRef>;
   readonly venueName: string;
+  readonly emptyLabel?: string | undefined;
 }) {
   if (photos.length === 0) {
     return (
       <div className="res-gallery-empty" aria-live="polite">
-        <RestaurantPhotoFallback name={venueName} className="res-photo" />
-        <p>No verified venue photos have been published for this branch yet.</p>
+        <RestaurantPhotoFallback
+          name={venueName}
+          className="res-photo"
+          label={emptyLabel ?? `No verified photo for ${venueName}`}
+        />
       </div>
     );
   }
