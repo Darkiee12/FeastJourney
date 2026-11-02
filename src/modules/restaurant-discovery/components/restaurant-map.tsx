@@ -173,9 +173,11 @@ export default function RestaurantMap({
 
       moveCamera(map, chosen, zoom);
     }
-    // Selection padding is read at focus time; the effect re-runs on venue change.
+    // Selection padding is read at focus time; the padding key re-runs the
+    // effect when the sheet/drawer geometry changes so the selected marker
+    // is never left hidden behind the sheet or drawer.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chosen]);
+  }, [chosen, selectionPadding?.leftPx, selectionPadding?.bottomRatio]);
 
   useEffect(() => {
     if (frame === null || frame === undefined || ref.current === null || !ready) return;
@@ -265,7 +267,13 @@ export default function RestaurantMap({
           latitude: initialCenter.latitude,
           zoom: initialCenter.zoom,
         }}
-        cooperativeGestures
+        // Fullscreen map owns the viewport (shell pins 100dvh, no document
+        // scroll): one-finger pan stays enabled so touch users can drag the
+        // map. cooperativeGestures would force two-finger pan plus a
+        // "use ctrl + scroll to zoom" overlay, which only makes sense for an
+        // inline map embedded in a scrolling page. Desktop trackpad scroll
+        // zooms directly; the list, addresses, and directions remain usable
+        // when tiles fail.
         attributionControl={{ compact: true }}
         onLoad={() => setReady(true)}
         onError={() => setFailed(true)}

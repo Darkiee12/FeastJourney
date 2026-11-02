@@ -59,4 +59,14 @@ export const CITY_PRESETS: ReadonlyArray<CityPreset> = [
     east: 106.1,
     north: 21.3,
   },
+  {
+    id: "bangalore",
+    longitude: 77.5946,
+    latitude: 12.9716,
+    zoom: 12,
+    west: 77.45,
+    south: 12.82,
+    east: 77.78,
+    north: 13.15,
+  },
 ];

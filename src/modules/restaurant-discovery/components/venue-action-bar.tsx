@@ -29,21 +29,24 @@ export function VenueActionBar({
   readonly scanLabel?: string | undefined;
   readonly directionsLabel?: string | undefined;
 }) {
+  // Compact icon+text pills: 2-column grid on narrow sheet/drawer widths,
+  // wrapping row on wider screens. Utilities overlay the component-layer
+  // .venue-actionbar (flex) without touching the shared stylesheet.
   return (
-    <nav className="venue-actionbar" aria-label="Venue actions">
-      <button type="button" className="venue-action" onClick={onShowMenu}>
+    <nav className="venue-actionbar grid grid-cols-2 sm:flex" aria-label="Venue actions">
+      <button type="button" className="venue-action px-3.5" onClick={onShowMenu}>
         <UtensilsCrossed aria-hidden="true" />
         {menuLabel}
       </button>
-      <button type="button" className="venue-action" onClick={onShowReviews}>
+      <button type="button" className="venue-action px-3.5" onClick={onShowReviews}>
         <Star aria-hidden="true" />
         {reviewsLabel}
       </button>
-      <Link className="venue-action" to="/scan" search={{ lang, venueId }}>
+      <Link className="venue-action px-3.5" to="/scan" search={{ lang, venueId }}>
         <ScanLine aria-hidden="true" />
         {scanLabel}
       </Link>
-      <a className="venue-action" href={directionsHref} target="_blank" rel="noreferrer">
+      <a className="venue-action px-3.5" href={directionsHref} target="_blank" rel="noreferrer">
         <Navigation aria-hidden="true" />
         {directionsLabel}
       </a>

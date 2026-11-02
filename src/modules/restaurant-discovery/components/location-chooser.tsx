@@ -25,6 +25,8 @@ export function LocationChooser({
 
     if (id === "hanoi") return copy.browseCityHanoi;
 
+    if (id === "bangalore") return "Bengaluru (Bangalore)";
+
     return id;
   };
 

@@ -83,21 +83,12 @@
   .mapapp-maptools {
     position: absolute;
     right: 0.75rem;
-    bottom: 2.5rem;
+    bottom: max(1rem, env(safe-area-inset-bottom));
     z-index: 5;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
     gap: 0.5rem;
-  }
-  .mapapp-accuracy {
-    border-radius: 9999px;
-    background: rgb(255 255 255 / 0.94);
-    border: 1px solid var(--color-border-soft);
-    color: var(--color-muted);
-    font-size: 0.78rem;
-    font-weight: 600;
-    padding: 0.25rem 0.6rem;
   }
   .mapapp-recenter {
     display: grid;
@@ -118,19 +109,9 @@
     cursor: wait;
     opacity: 0.65;
   }
-  .mapapp-recenter-dot {
-    width: 0.9rem;
-    height: 0.9rem;
-    border-radius: 9999px;
-    border: 3px solid currentcolor;
-    position: relative;
-  }
-  .mapapp-recenter-dot::after {
-    content: "";
-    position: absolute;
-    inset: 1px;
-    border-radius: 9999px;
-    background: currentcolor;
+  .mapapp-recenter svg {
+    width: 1.25rem;
+    height: 1.25rem;
   }
   .mapapp-chooser-float {
     position: absolute;
@@ -800,12 +781,12 @@
   .mapapp-search-collapsed {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.35rem;
     background: white;
     border: 1px solid var(--color-border-soft);
     border-radius: 9999px;
     box-shadow: 0 12px 32px rgb(3 10 30 / 0.25);
-    padding: 0.35rem 0.35rem 0.35rem 0.9rem;
+    padding: 0.25rem 0.25rem 0.25rem 0.8rem;
   }
   .mapapp-search-collapsed input {
     flex: 1;
@@ -834,9 +815,9 @@
     border: 1px solid var(--color-border-soft);
     border-radius: 1rem;
     box-shadow: 0 18px 50px rgb(3 10 30 / 0.35);
-    padding: 0.7rem 0.75rem 0.75rem;
+    padding: 0.6rem 0.65rem 0.65rem;
     display: grid;
-    gap: 0.55rem;
+    gap: 0.5rem;
     max-height: 100%;
     min-height: 0;
     overflow: auto;
@@ -874,13 +855,24 @@
   .mapapp-sheet-handle {
     flex: none;
     min-width: 0;
+    width: 100%;
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     gap: 0.6rem;
     padding: 0.5rem 0.75rem;
+    min-height: 2.75rem;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+    text-align: left;
     cursor: grab;
     touch-action: none;
+    appearance: none;
+  }
+  .mapapp-sheet-handle:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: -2px;
   }
   .mapapp-sheet-grip {
     width: 2.75rem;
@@ -908,30 +900,15 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .mapapp-sheet-snaps {
-    display: flex;
-    gap: 0.3rem;
+  .mapapp-sheet-chevron {
+    width: 1.1rem;
+    height: 1.1rem;
     flex: none;
-    border: 0;
-    margin: 0;
-    padding: 0;
+    color: var(--color-muted);
+    transition: transform 200ms ease-out;
   }
-  .mapapp-sheet-snapbtn {
-    min-height: 2.5rem;
-    border-radius: 9999px;
-    border: 1px solid var(--color-border-soft);
-    background: white;
-    color: var(--color-ink);
-    font-weight: 600;
-    font-size: 0.8rem;
-    padding: 0.3rem 0.7rem;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .mapapp-sheet-snapbtn[aria-pressed="true"] {
-    background: var(--color-ocean-deep);
-    border-color: var(--color-ocean-deep);
-    color: white;
+  .mapapp-sheet-chevron[data-open="true"] {
+    transform: rotate(180deg);
   }
   .mapapp-sheet-body {
     flex: 1;
@@ -983,7 +960,8 @@
   @media (prefers-reduced-motion: reduce) {
     .mapapp-drawer,
     .mapapp-sheet:not([data-dragging="true"]),
-    .mapapp-search-area {
+    .mapapp-search-area,
+    .mapapp-sheet-chevron {
       transition: none;
     }
     .mapapp-spin {

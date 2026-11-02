@@ -5,8 +5,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { restaurantCopy } from "@/modules/restaurant-discovery/components/restaurant-copy";
 import { ResultsDrawer } from "@/modules/restaurant-discovery/components/results-drawer";
 import {
+  formatSheetSummary,
+  nextSheetSnap,
   ResultsSheet,
+  sheetHandleAction,
+  sheetSnapForKey,
   sheetSnapHeight,
+  shouldSuppressSheetTap,
   snapForRatio,
 } from "@/modules/restaurant-discovery/components/results-sheet";
 
@@ -62,14 +67,17 @@ describe("sheetSnapHeight", () => {
 });
 
 describe("ResultsSheet collapse states", () => {
-  test("peek hides the body and marks only the peek button pressed", () => {
+  test("peek hides the body behind a single labelled handle", () => {
     const html = sheet(0);
 
     expect(html).toContain('data-snap="0"');
     expect(html).toContain("mapapp-sheet-body");
     expect(html).toContain(" hidden=");
-    expect(html).toContain(copy.sheetPeek);
-    expect(html.match(/aria-pressed="true"/g) ?? []).toHaveLength(1);
+    expect(html).toContain("mapapp-sheet-handle");
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain(copy.sheetExpand);
+    expect(html.match(/<button/g) ?? []).toHaveLength(1);
+    expect(html).not.toContain("aria-pressed");
   });
 
   test("half exposes the body with independent scroll region intact", () => {
@@ -78,17 +86,47 @@ describe("ResultsSheet collapse states", () => {
     expect(html).toContain('data-snap="1"');
     expect(html).not.toContain(" hidden=");
     expect(html).toContain("result list");
-    expect(html).toContain(copy.sheetHalf);
+    expect(html).toContain(copy.sheetFullList);
+    expect(html).toContain('aria-expanded="true"');
   });
 
-  test("all three snap buttons stay keyboard-reachable with pressed state", () => {
+  test("full offers collapse back to the map", () => {
     const html = sheet(2);
 
-    expect(html).toContain(copy.sheetPeek);
-    expect(html).toContain(copy.sheetHalf);
-    expect(html).toContain(copy.sheetFull);
-    expect(html.match(/<button/g) ?? []).toHaveLength(3);
-    expect(html.match(/aria-pressed="true"/g) ?? []).toHaveLength(1);
+    expect(html).toContain('data-snap="2"');
+    expect(html).toContain(copy.sheetCollapse);
+    expect(html.match(/<button/g) ?? []).toHaveLength(1);
+  });
+
+  test("handle tap cycles peek to half to full and back", () => {
+    expect(nextSheetSnap(0)).toBe(1);
+    expect(nextSheetSnap(1)).toBe(2);
+    expect(nextSheetSnap(2)).toBe(0);
+  });
+
+  test("keyboard steps snaps without a button group", () => {
+    expect(sheetSnapForKey("ArrowUp", 0)).toBe(1);
+    expect(sheetSnapForKey("ArrowDown", 2)).toBe(1);
+    expect(sheetSnapForKey("Home", 2)).toBe(0);
+    expect(sheetSnapForKey("End", 0)).toBe(2);
+    expect(sheetSnapForKey("Escape", 1)).toBe(0);
+    expect(sheetSnapForKey("Enter", 1)).toBeNull();
+  });
+
+  test("summary renders the verified count verbatim", () => {
+    expect(formatSheetSummary("30 results", null)).toBe("30 results");
+    expect(formatSheetSummary("30 results", "first 30 shown")).toBe("30 results · first 30 shown");
+  });
+
+  test("drags suppress the follow-up tap", () => {
+    expect(shouldSuppressSheetTap(100, 120)).toBe(true);
+    expect(shouldSuppressSheetTap(100, 104)).toBe(false);
+  });
+
+  test("handle action labels reuse sheet copy", () => {
+    expect(sheetHandleAction(0, copy)).toBe(copy.sheetExpand);
+    expect(sheetHandleAction(1, copy)).toBe(copy.sheetFullList);
+    expect(sheetHandleAction(2, copy)).toBe(copy.sheetCollapse);
   });
 });
 

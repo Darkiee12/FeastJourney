@@ -70,7 +70,7 @@ export function VenueOverview({
   const genuine = reviewSummary !== null && reviewSummary.total > 0 ? reviewSummary : null;
 
   return (
-    <article className="venue-overview" aria-label={venue.name}>
+    <article className="venue-overview gap-3" aria-label={venue.name}>
       <header className="venue-head">
         {onBackToResults !== undefined && (
           <button type="button" className="venue-back" onClick={onBackToResults}>

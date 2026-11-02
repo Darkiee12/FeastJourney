@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, getRouteApi } from "@tanstack/react-router";
+import { Crosshair } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
@@ -29,6 +30,7 @@ import { RestaurantReviewsPanel } from "@/modules/restaurant-discovery/component
 import { ResultsDrawer } from "@/modules/restaurant-discovery/components/results-drawer";
 import {
   ResultsSheet,
+  formatSheetSummary,
   type SheetSnap,
 } from "@/modules/restaurant-discovery/components/results-sheet";
 import { VenueOverview } from "@/modules/restaurant-discovery/components/venue-overview";
@@ -884,6 +886,20 @@ export function RestaurantSearchPage() {
 
   const chooserVisible = chooserManual || (chooserAuto && !chooserDismissed);
 
+  const accuracyLabel =
+    userPos?.accuracyMeters === null || userPos?.accuracyMeters === undefined
+      ? null
+      : copy.locationAccuracy.replace("{meters}", String(userPos.accuracyMeters));
+
+  // Peek summary stays honest: verified count plus the capped note when the
+  // server limited the list. Region context lives in the search panel body.
+  const cappedNote =
+    rows.length === search.limit
+      ? copy.placesCapped.replace("{limit}", String(search.limit))
+      : null;
+
+  const sheetSummary = formatSheetSummary(countLabel, cappedNote);
+
   return (
     <div className="mapapp">
       <a href="#mapapp-results" className="mapapp-skip">
@@ -955,11 +971,6 @@ export function RestaurantSearchPage() {
             </div>
           )}
           <div className="mapapp-maptools">
-            {userPos?.accuracyMeters !== null && userPos?.accuracyMeters !== undefined && (
-              <span className="mapapp-accuracy" aria-live="polite">
-                {copy.locationAccuracy.replace("{meters}", String(userPos.accuracyMeters))}
-              </span>
-            )}
             <button
               type="button"
               className="mapapp-recenter"
@@ -976,11 +987,19 @@ export function RestaurantSearchPage() {
                 }
               }}
               disabled={locating}
-              aria-label={copy.recenter}
-              title={copy.recenter}
+              aria-label={
+                accuracyLabel === null ? copy.recenter : `${copy.recenter} (${accuracyLabel})`
+              }
+              aria-describedby={accuracyLabel === null ? undefined : "mapapp-recenter-desc"}
+              title={accuracyLabel === null ? copy.recenter : `${copy.recenter} (${accuracyLabel})`}
             >
-              <span aria-hidden="true" className="mapapp-recenter-dot" />
+              <Crosshair aria-hidden="true" />
             </button>
+            {accuracyLabel !== null && (
+              <span id="mapapp-recenter-desc" className="sr-only" aria-live="polite">
+                {accuracyLabel}
+              </span>
+            )}
           </div>
         </div>
         {isDesktop ? (
@@ -1046,7 +1065,7 @@ export function RestaurantSearchPage() {
               snap={sheetSnap}
               onSnapChange={setSheetSnap}
               title={copy.resultsTitle}
-              summary={`${countLabel} · ${regionLabel}`}
+              summary={sheetSummary}
             >
               <div id="mapapp-results">
                 <h2 ref={listTitleRef} tabIndex={-1} className="sr-only">
