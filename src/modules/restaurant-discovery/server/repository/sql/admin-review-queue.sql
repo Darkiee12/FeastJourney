@@ -9,6 +9,7 @@ JOIN feastjourney.restaurant_menu_item_variants vr ON vr.id=p.variant_id
 JOIN feastjourney.restaurant_menu_items i ON i.id=vr.menu_item_id
 JOIN feastjourney.restaurant_sources s ON s.id=p.source_id
 LEFT JOIN feastjourney.restaurant_receipt_lines rl ON rl.observation_id=p.id
+WHERE p.review_status='pending'
 UNION ALL
 SELECT e.id,'serving'::text,v.name,i.name,NULL,NULL,NULL,
  e.match_kind||' · dish '||e.dish_id::text,e.review_status,e.observed_at,e.review_after,NULL,NULL,s.category,s.restaurant_verified,
@@ -17,4 +18,5 @@ FROM feastjourney.restaurant_serving_evidence e
 JOIN feastjourney.restaurant_venues v ON v.id=e.venue_id
 JOIN feastjourney.restaurant_menu_items i ON i.id=e.menu_item_id
 JOIN feastjourney.restaurant_sources s ON s.id=e.source_id
+WHERE e.review_status='pending'
 ORDER BY observed_at DESC,id LIMIT 200;

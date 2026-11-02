@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
+import { Info } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import {
@@ -7,7 +8,7 @@ import {
   supportedCurrenciesFn,
 } from "@/modules/restaurant-discovery/restaurant.functions";
 import { currencyPreferenceFn, saveCurrencyPreferenceFn } from "@/modules/user/currency.functions";
-import { convertAmount, formatMoney, isCurrency } from "@/shared/money";
+import { convertAmount, formatMoney, isAmount, isCurrency } from "@/shared/money";
 import type { ExchangeRate } from "@/shared/money";
 
 const rootRoute = getRouteApi("__root__");
@@ -187,6 +188,68 @@ export function useExchangeRates(bases: ReadonlyArray<string>, quote: string) {
   );
 
   return { rates, unavailable: query.isError || unique.length > 12, loading: query.isFetching };
+}
+
+export type PriceAvailability = "priced" | "unavailable";
+
+/**
+ * Price display state for comparable menu lines. Unknown prices never
+ * render as zero, "free", or "from" — they render through PriceUnavailable.
+ * Invalid amount/currency pairs (already rejected at the import boundary)
+ * are treated as unavailable rather than rendered.
+ */
+export function priceAvailability(
+  amount: string | null,
+  currency: string | null,
+): PriceAvailability {
+  if (amount === null || currency === null) return "unavailable";
+
+  if (!isAmount(amount) || !isCurrency(currency)) return "unavailable";
+
+  return "priced";
+}
+
+/**
+ * Explicit unknown-price state. Never renders ₫0, "Free", or "From ₫X":
+ * a missing price is a missing price, not a zero price.
+ */
+export function PriceUnavailable({ label = "Price unavailable" }: { label?: string }) {
+  return <p className="res-price-na">{label}</p>;
+}
+
+/**
+ * Compact source/observation context for one comparable price line.
+ * One info icon plus a single short line; the full context rides the
+ * title tooltip so dense comparison lists stay uncrowded.
+ */
+export function PriceProvenance({
+  observedAt,
+  sourceCategory,
+  channelLabel,
+  stale,
+  staleLabel = "May be out of date — confirm with the venue",
+}: {
+  observedAt: string;
+  sourceCategory: string | null;
+  channelLabel: string;
+  stale: boolean;
+  staleLabel?: string;
+}) {
+  const source = sourceCategory === null ? null : sourceCategory.replaceAll("_", " ");
+
+  const detail = [`observed ${observedAt}`, source, channelLabel, stale ? staleLabel : null]
+    .flatMap((part) => (part === null ? [] : [part]))
+    .join(" · ");
+
+  return (
+    <p className="res-match-meta" title={detail}>
+      <Info aria-hidden="true" className="res-provenance-icon" />
+      <span>
+        {observedAt}
+        {stale ? ` · ${staleLabel}` : null}
+      </span>
+    </p>
+  );
 }
 
 export function ObservedPrice({

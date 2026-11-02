@@ -28,6 +28,7 @@ export const Route = createFileRoute("/restaurants/")({
 
     return { results, areas, cuisines };
   },
+  pendingMs: 300,
   pendingComponent: () => (
     <div className="discovery-empty" aria-live="polite">
       Finding sourced restaurant records…

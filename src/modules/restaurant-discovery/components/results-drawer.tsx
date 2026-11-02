@@ -2,20 +2,32 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import type { RestaurantCopy } from "@/modules/restaurant-discovery/components/restaurant-copy";
+import type {
+  ResultsState,
+  SheetProfile,
+} from "@/modules/restaurant-discovery/components/results-sheet";
 
 /** Floating collapsible left drawer (desktop). Collapsing uses transform
- *  only; the map underneath never resizes or remounts. */
+ *  only; the map underneath never resizes or remounts. `profile` mirrors
+ *  the sheet contract (`results` | `empty` | `detail`): it only tags
+ *  `data-profile` for the compact zero-state styling owned by the page
+ *  stylesheet — open/collapse, focus, and Escape behavior are identical
+ *  across profiles, and `detail` stays fully expandable. */
 export function ResultsDrawer({
   copy,
   open,
   onToggle,
   title,
+  state,
+  profile = "results",
   children,
 }: {
   copy: RestaurantCopy;
   open: boolean;
   onToggle: () => void;
   title: string;
+  state?: ResultsState | null | undefined;
+  profile?: SheetProfile | undefined;
   children: React.ReactNode;
 }) {
   const panelRef = useRef<HTMLElement>(null);
@@ -58,6 +70,8 @@ export function ResultsDrawer({
         inert={!open}
         className="mapapp-drawer"
         data-open={open}
+        data-state={state ?? undefined}
+        data-profile={profile}
       >
         <div className="mapapp-drawer-head">
           <h2 tabIndex={-1} className="mapapp-drawer-title">

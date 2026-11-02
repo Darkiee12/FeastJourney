@@ -213,8 +213,10 @@ describe("results loading skeletons hold layout", () => {
   test("dish carousel skeleton reserves media aspect at results padding", () => {
     const html = renderToStaticMarkup(DishCarouselSkeleton());
 
-    expect(html).toContain("aspect-[4/3]");
-    expect(html).toContain("md:min-h-[22rem]");
+    expect(html).toContain("--dish-feature-media-mobile");
+    expect(html).toContain("--dish-feature-stage-desktop");
+    expect(html).not.toContain("aspect-[4/3]");
+    expect(html).not.toContain("md:min-h-[22rem]");
     expect(html).toContain("motion-reduce:animate-none");
   });
 

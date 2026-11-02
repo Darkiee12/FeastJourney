@@ -30,14 +30,16 @@ import type { Locale } from "@/shared/i18n";
 
 /**
  * Single location control for the homepage discovery section: one compact
- * indicator ("Vietnam · Change location") that opens one focused selector.
- * The lead integrator mounts this and wires the four explicit callbacks;
- * geolocation fires only when the visitor taps "Use my location", and a
- * denial keeps the existing carousel content with a quiet inline note.
+ * indicator ("Vietnam", "Hanoi, Vietnam", "Worldwide", or "Choose location")
+ * that opens one focused selector. The lead integrator mounts this and wires
+ * the four explicit callbacks; geolocation fires only when the visitor taps
+ * "Use my location", and a denial keeps the existing carousel content with a
+ * quiet inline note.
  *
  * Loading, error, and empty carousel states belong to the section shell
  * (Agent C), not to this control: this file owns only the locating spinner
- * text and the denial note next to the trigger.
+ * text and the denial note next to the trigger, plus the header/status copy
+ * helpers the section shell renders in its stable header slot.
  */
 
 /** One destination entry in the "Choose a destination" submenu. */
@@ -179,6 +181,80 @@ const vietnameseCopy: DiscoveryLocationCopy = {
 
 export const discoveryLocationCopyFor = (lang: Locale): DiscoveryLocationCopy =>
   lang === "vi" ? vietnameseCopy : englishCopy;
+
+/**
+ * Header-slot copy for the discovery section: the location indicator states
+ * and the reserved loading-status line. Kept separate from
+ * DiscoveryLocationCopy so that copy-key contract stays untouched.
+ */
+export interface DiscoveryHeaderCopy {
+  /** Worldwide indicator, e.g. "Worldwide". */
+  readonly worldwide: string;
+  /** Unresolved indicator, e.g. "Choose location". */
+  readonly chooseLocation: string;
+  /** First-load status, e.g. "Finding dishes…". */
+  readonly findingDishes: string;
+  /** Background-refetch status, e.g. "Updating dishes…". */
+  readonly updatingDishes: string;
+  /** Background failure note shown while previous results stay visible. */
+  readonly dishesFailed: string;
+  /** Retry affordance next to the failure note. */
+  readonly retryDishes: string;
+}
+
+const englishHeaderCopy: DiscoveryHeaderCopy = {
+  chooseLocation: "Choose location",
+  dishesFailed: "Couldn't update dishes — showing previous results.",
+  findingDishes: "Finding dishes…",
+  retryDishes: "Retry",
+  updatingDishes: "Updating dishes…",
+  worldwide: "Worldwide",
+};
+
+const vietnameseHeaderCopy: DiscoveryHeaderCopy = {
+  chooseLocation: "Chọn vị trí",
+  dishesFailed: "Không cập nhật được món — vẫn hiện kết quả trước.",
+  findingDishes: "Đang tìm món…",
+  retryDishes: "Thử lại",
+  updatingDishes: "Đang cập nhật món…",
+  worldwide: "Khắp thế giới",
+};
+
+export const discoveryHeaderCopyFor = (lang: Locale): DiscoveryHeaderCopy =>
+  lang === "vi" ? vietnameseHeaderCopy : englishHeaderCopy;
+
+/**
+ * Meaningful location indicator from the served geographic scope
+ * (city > country > worldwide). A worldwide scope always reads as worldwide
+ * with the globe icon, never as a country; an empty label never invents a
+ * place and falls back to the choose-location prompt. Never calls country
+ * dishes "nearby": the label names the served place with the pin icon.
+ */
+/** Location indicator resolved from the served geographic scope. */
+export interface DiscoveryIndicator {
+  readonly icon: "globe" | "pin";
+  readonly label: string;
+}
+
+export const discoveryIndicatorFor = (input: {
+  readonly scope: DiscoveryServedScope | null;
+  readonly regionName: string | null;
+  readonly lang: Locale;
+}): DiscoveryIndicator => {
+  const copy = discoveryHeaderCopyFor(input.lang);
+
+  if (input.scope === "worldwide") {
+    return { icon: "globe", label: copy.worldwide };
+  }
+
+  const name = input.regionName?.trim() ?? "";
+
+  if (name !== "") {
+    return { icon: "pin", label: name };
+  }
+
+  return { icon: "pin", label: copy.chooseLocation };
+};
 
 /** Client-side country filter: localized label, English label text, or ISO code. */
 export function filterCountryOptions(
@@ -554,15 +630,15 @@ export function DiscoveryLocation(props: DiscoveryLocationProps) {
             aria-label={`${props.currentLabel} · ${copy.changeLocation}`}
             className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border-2 border-ink bg-white px-5 text-sm font-bold whitespace-nowrap text-ink transition hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <MapPinIcon aria-hidden="true" className="size-4 flex-none" />
+            {props.selection === "worldwide" ? (
+              <Globe2Icon aria-hidden="true" className="size-4 flex-none" />
+            ) : (
+              <MapPinIcon aria-hidden="true" className="size-4 flex-none" />
+            )}
             <span className="inline-block max-w-28 min-w-0 truncate min-[480px]:max-w-44">
               {props.currentLabel}
             </span>
-            <span aria-hidden="true" className="opacity-60">
-              ·
-            </span>
-            <span>{copy.changeLocation}</span>
-            <ChevronDownIcon aria-hidden="true" className="size-4 flex-none" />
+            <ChevronDownIcon aria-hidden="true" className="size-4 flex-none opacity-60" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" aria-label={copy.menuLabel}>

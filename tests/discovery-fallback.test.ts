@@ -80,8 +80,10 @@ describe("discovery loading state", () => {
 
     expect(html).toContain("Finding dishes for you…");
     expect(html).toContain("rounded-3xl");
-    expect(html).toContain("aspect-[4/3]");
-    expect(html).toContain("md:min-h-[22rem]");
+    expect(html).toContain("--dish-feature-media-mobile");
+    expect(html).toContain("--dish-feature-stage-desktop");
+    expect(html).not.toContain("aspect-[4/3]");
+    expect(html).not.toContain("md:min-h-[22rem]");
     expect(html).toContain("<output");
   });
 });

@@ -49,6 +49,7 @@ import { RankingConfig, resolveRankingConfig, serverEnv } from "@/server/env";
 import {
   MetaClient,
   type MetaAuthError,
+  MAX_REASON_LENGTH,
   MetaInvalidOutput,
   type MetaPermanentError,
   type MetaRankContext,
@@ -296,17 +297,24 @@ export const locationLogFields = (
 
 /**
  * Ranking-model context. Carries occasion, mood, an optional cuisine or
- * country label, and the resolved exclusion terms — never coordinates,
- * never venue claims. The model only re-ranks the candidate rows it is
- * given. Exclusion terms travel in the user message only (untrusted data,
- * never system instructions); eligibility itself is enforced in SQL before
- * the model is consulted.
+ * country label, and the RESOLVED canonical exclusion names — never raw
+ * diner terms, never coordinates, never venue claims. The model only
+ * re-ranks the candidate rows it is given, and its output only reorders
+ * that bounded set: it can never mint dishes, edit the catalog, publish,
+ * or trigger any privileged operation (authorization lives outside the
+ * model, in the service and transport). Production callers always pass the
+ * canonical list; the raw-input fallback exists only so older unit call
+ * sites keep compiling while they migrate. Eligibility itself is enforced
+ * in SQL before the model is consulted.
  */
-export const toRankContext = (input: RecommendDishesInput): MetaRankContext => ({
+export const toRankContext = (
+  input: RecommendDishesInput,
+  canonicalExclusions?: ReadonlyArray<string>,
+): MetaRankContext => ({
   cuisineOrRegion: input.cuisine ?? scopeCountryOf(input),
   mood: input.mood,
   occasion: input.meal,
-  excludedIngredients: [...input.excludedIngredients],
+  excludedIngredients: [...(canonicalExclusions ?? input.excludedIngredients)],
 });
 
 export type RecommendationError =
@@ -627,11 +635,13 @@ const enrichRows = (
 /**
  * Server-side approximation of the reason claim allowlist (cuisine,
  * meal-category, region, exclusion-respect only). Any reason matching a
- * banned class — safety/allergy, health, popularity/social-proof, or
- * opening-hours — invalidates the whole payload (MetaInvalidOutput →
- * deterministic fallback + warning). Grounding to the supplied context is
- * prompt-enforced; this denylist is the fail-safe backstop. Fail-safe by
- * design: an over-eager pattern only costs AI ordering, never leaks a claim.
+ * banned class — safety/allergy, health/medical, popularity/social-proof,
+ * opening-hours, price, instruction-override/role-play, markup/links, or
+ * multiline smuggling — invalidates the whole payload (MetaInvalidOutput →
+ * deterministic fallback + warning, no model text shown). Grounding to the
+ * supplied context is prompt-enforced; this denylist is the fail-safe
+ * backstop. Fail-safe by design: an over-eager pattern only costs AI
+ * ordering, never leaks a claim.
  */
 const BANNED_REASON_CLAIMS: ReadonlyArray<{ readonly tag: string; readonly pattern: RegExp }> = [
   {
@@ -641,7 +651,7 @@ const BANNED_REASON_CLAIMS: ReadonlyArray<{ readonly tag: string; readonly patte
   {
     tag: "health",
     pattern:
-      /\b(health|healthy|unhealthy|nutriti\w*|calories?|diet\w*|low-?fat|protein-?rich|vitamins?)\b/i,
+      /\b(health|healthy|unhealthy|nutriti\w*|calories?|diet\w*|low-?fat|protein-?rich|vitamins?|medica\w*|doctor|diagnos\w*|prescri\w*|treatment|cure[sd]?|medicine)\b/i,
   },
   {
     tag: "popularity",
@@ -652,9 +662,24 @@ const BANNED_REASON_CLAIMS: ReadonlyArray<{ readonly tag: string; readonly patte
     tag: "hours",
     pattern: /\b(open|opening|hours|open-?late|late-?night|closes?|24\s?\/\s?7)\b/i,
   },
+  {
+    tag: "price",
+    pattern: /([$€£¥]\s?\d|\bprices?\b|\bcosts?\b|\bcheap\b|\bexpensive\b|\baffordable\b)/i,
+  },
+  {
+    tag: "instruction",
+    pattern:
+      /\b(ignore|disregard|forget|override|bypass)\b[^.]{0,60}\b(instructions?|rules?|system|prompt|filters?|exclusions?|policy|policies)\b|\b(system prompt|jailbreak|developer mode|do anything now|as an ai|as a language model)\b/i,
+  },
+  {
+    tag: "markup",
+    pattern: /<[^>\s]+[^>]*>|&\w+;|https?:\/\/|javascript:|on\w+\s*=/i,
+  },
 ];
 
-const validateRankedResult = (
+const HAS_NEWLINE = /[\r\n\u2028\u2029]/;
+
+export const validateRankedResult = (
   result: RankingResult,
   candidates: ReadonlyArray<RecommendationCandidateRow>,
   outputLimit: number,
@@ -700,6 +725,18 @@ const validateRankedResult = (
     for (const reason of reasons) {
       if (reason.trim().length === 0) {
         return yield* new MetaInvalidOutput({ reason: "Meta ranking contained an empty reason" });
+      }
+
+      if (reason.length > MAX_REASON_LENGTH) {
+        return yield* new MetaInvalidOutput({
+          reason: `Meta ranking reason exceeded ${MAX_REASON_LENGTH.toString()} characters`,
+        });
+      }
+
+      if (HAS_NEWLINE.test(reason)) {
+        return yield* new MetaInvalidOutput({
+          reason: "Meta ranking reason contained line breaks",
+        });
       }
 
       for (const { tag, pattern } of BANNED_REASON_CLAIMS) {
@@ -875,6 +912,7 @@ export const museRankInput = <Row>(sortedAll: ReadonlyArray<Row>): ReadonlyArray
 const rankWithMuse = (
   candidates: ReadonlyArray<RecommendationCandidateRow>,
   input: RecommendDishesInput,
+  canonicalExclusions: ReadonlyArray<string>,
   config: MuseRankingConfig,
   deterministicIds: ReadonlyArray<string>,
   outputLimit: number,
@@ -889,7 +927,7 @@ const rankWithMuse = (
 
   return Effect.flatMap(
     Effect.flatMap(MetaClient, (client) =>
-      client.rank(rankInput, toRankContext(input), config).pipe(
+      client.rank(rankInput, toRankContext(input, canonicalExclusions), config).pipe(
         Effect.annotateLogs({
           backend: "muse",
           modelId: config.modelId,
@@ -935,6 +973,7 @@ const finishRecommendations = (
   input: RecommendDishesInput,
   sortedAll: ReadonlyArray<RecommendationCandidateRow>,
   warnings: ReadonlyArray<string>,
+  canonicalExclusions: ReadonlyArray<string>,
   limits: RankingLimits,
   muse: MuseRankingConfig | null,
   guestGated: boolean,
@@ -999,6 +1038,7 @@ const finishRecommendations = (
     const ranked = yield* rankWithMuse(
       rankInput,
       input,
+      canonicalExclusions,
       muse,
       deterministicIds,
       limits.outputLimit,
@@ -1049,6 +1089,7 @@ const serveCountryCandidates = (
   input: RecommendDishesInput,
   warnings: ReadonlyArray<string>,
   excluded: ReadonlySet<bigint>,
+  canonicalExclusions: ReadonlyArray<string>,
   limits: RankingLimits,
   muse: MuseRankingConfig | null,
   guestGated: boolean,
@@ -1076,6 +1117,7 @@ const serveCountryCandidates = (
       input,
       rankAllDeterministic(candidates, input),
       warnings,
+      canonicalExclusions,
       limits,
       muse,
       guestGated,
@@ -1122,6 +1164,7 @@ const serveCityCandidates = (
   input: RecommendDishesInput,
   warnings: ReadonlyArray<string>,
   excluded: ReadonlySet<bigint>,
+  canonicalExclusions: ReadonlyArray<string>,
   limits: RankingLimits,
   muse: MuseRankingConfig | null,
   guestGated: boolean,
@@ -1151,6 +1194,7 @@ const serveCityCandidates = (
         input,
         rankAllDeterministic(candidates, input),
         warnings,
+        canonicalExclusions,
         limits,
         muse,
         guestGated,
@@ -1192,6 +1236,7 @@ const serveCityCandidates = (
             ...warnings,
             `No dishes from this city yet — showing dishes from across ${countryName} instead.`,
           ],
+          canonicalExclusions,
           limits,
           muse,
           guestGated,
@@ -1221,6 +1266,7 @@ const serveRecommendations = (
   input: RecommendDishesInput,
   warnings: ReadonlyArray<string>,
   excluded: ReadonlySet<bigint>,
+  canonicalExclusions: ReadonlyArray<string>,
   limits: RankingLimits,
   muse: MuseRankingConfig | null,
   guestGated: boolean,
@@ -1263,17 +1309,46 @@ const serveRecommendations = (
           input,
           sortedAll,
           scopedWarnings,
+          canonicalExclusions,
           limits,
           muse,
           guestGated,
           "nearby",
         );
       }),
-    City: (city) => serveCityCandidates(city, input, warnings, excluded, limits, muse, guestGated),
+    City: (city) =>
+      serveCityCandidates(
+        city,
+        input,
+        warnings,
+        excluded,
+        canonicalExclusions,
+        limits,
+        muse,
+        guestGated,
+      ),
     Country: () =>
-      serveCountryCandidates(input, warnings, excluded, limits, muse, guestGated, "country"),
+      serveCountryCandidates(
+        input,
+        warnings,
+        excluded,
+        canonicalExclusions,
+        limits,
+        muse,
+        guestGated,
+        "country",
+      ),
     Worldwide: () =>
-      serveCountryCandidates(input, warnings, excluded, limits, muse, guestGated, "worldwide"),
+      serveCountryCandidates(
+        input,
+        warnings,
+        excluded,
+        canonicalExclusions,
+        limits,
+        muse,
+        guestGated,
+        "worldwide",
+      ),
   });
 };
 
@@ -1282,10 +1357,14 @@ export const RecommendationServiceLive = Layer.effect(
   Effect.gen(function* () {
     const ingredients = yield* IngredientRepository;
 
-    const resolveExclusionId = (
+    const resolveExclusion = (
       term: string,
       locale: string,
-    ): Effect.Effect<bigint | null, DatabaseError, Database> =>
+    ): Effect.Effect<
+      { readonly id: bigint; readonly name: string } | null,
+      DatabaseError,
+      Database
+    > =>
       Effect.gen(function* () {
         const key = normalizeSearchKey(term);
 
@@ -1294,10 +1373,10 @@ export const RecommendationServiceLive = Layer.effect(
         }
 
         const primary = yield* ingredients.resolveByKey(key, locale, 1);
-        const direct = primary[0]?.ingredientId;
+        const direct = primary[0];
 
         if (direct !== undefined) {
-          return direct;
+          return { id: direct.ingredientId, name: direct.name };
         }
 
         if (locale === "en") {
@@ -1305,8 +1384,9 @@ export const RecommendationServiceLive = Layer.effect(
         }
 
         const fallback = yield* ingredients.resolveByKey(key, "en", 1);
+        const resolved = fallback[0];
 
-        return fallback[0]?.ingredientId ?? null;
+        return resolved === undefined ? null : { id: resolved.ingredientId, name: resolved.name };
       });
 
     const recommend = (
@@ -1323,16 +1403,26 @@ export const RecommendationServiceLive = Layer.effect(
 
         const warnings: Array<string> = [];
         const excluded = new Set<bigint>();
+        // Canonical registry names for the model prompt, in resolution
+        // order. Unresolvable raw terms NEVER enter this list: they keep
+        // their explicit user-facing warning and are excluded from both SQL
+        // and the model request. No ingredient records are created from
+        // free text; unknown stays unknown.
+        const canonicalExclusions: Array<string> = [];
 
         for (const term of input.excludedIngredients) {
-          const resolved = yield* resolveExclusionId(term, input.locale);
+          const resolved = yield* resolveExclusion(term, input.locale);
 
           if (resolved === null) {
             warnings.push(
               `Could not match exclusion "${term}" to a known ingredient; it was not applied as a filter.`,
             );
           } else {
-            excluded.add(resolved);
+            excluded.add(resolved.id);
+
+            if (!canonicalExclusions.includes(resolved.name)) {
+              canonicalExclusions.push(resolved.name);
+            }
           }
         }
 
@@ -1360,13 +1450,37 @@ export const RecommendationServiceLive = Layer.effect(
               Effect.andThen(Effect.fail(new RecommendationMisconfigured({ reason }))),
             ),
           Deterministic: (config) =>
-            serveRecommendations(input, warnings, excluded, config, null, false),
+            serveRecommendations(
+              input,
+              warnings,
+              excluded,
+              canonicalExclusions,
+              config,
+              null,
+              false,
+            ),
           Muse: (config) => {
             if (isGuest) {
-              return serveRecommendations(input, warnings, excluded, config, null, true);
+              return serveRecommendations(
+                input,
+                warnings,
+                excluded,
+                canonicalExclusions,
+                config,
+                null,
+                true,
+              );
             }
 
-            return serveRecommendations(input, warnings, excluded, config, config, false);
+            return serveRecommendations(
+              input,
+              warnings,
+              excluded,
+              canonicalExclusions,
+              config,
+              config,
+              false,
+            );
           },
         });
       });

@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowRight, MapPin } from "lucide-react";
+import type { ReactElement } from "react";
 
 import { ObservedPrice } from "@/modules/restaurant-discovery/components/currency-tools";
 import type { RestaurantCopy } from "@/modules/restaurant-discovery/components/restaurant-copy";
@@ -49,6 +50,21 @@ interface CardProps {
   readonly model: RestaurantCardModel;
   readonly selected: boolean;
   readonly onShowOnMap: (() => void) | null;
+}
+
+/** Layout-only loading placeholder for a result card. Shimmer blocks
+ *  only; no price, evidence, or rating content is rendered here (price
+ *  semantics stay with the card body and E-owned components). */
+export function RestaurantCardSkeleton(): ReactElement {
+  return (
+    <article className="res-card" aria-hidden="true">
+      <div className="res-card-body mapapp-skel" aria-hidden="true">
+        <span className="mapapp-skel-line narrow" />
+        <span className="mapapp-skel-line wide" />
+        <span className="mapapp-skel-line" />
+      </div>
+    </article>
+  );
 }
 
 /** One restaurant: photo, name, area, reviewed dish match with price,

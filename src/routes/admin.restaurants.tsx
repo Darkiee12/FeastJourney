@@ -16,6 +16,7 @@ import { ContributionReview } from "@/modules/restaurant-discovery/components/co
 import { DiscoveryError } from "@/modules/restaurant-discovery/components/discovery-error";
 import {
   RestaurantDashboard,
+  type DashboardTab,
   type DashboardVenue,
   type VenueStatusFilter,
 } from "@/modules/restaurant-discovery/components/restaurant-dashboard";
@@ -522,6 +523,10 @@ const customerReviewModerationClient: CustomerReviewModerationClient = {
   },
 };
 
+function scrollToSection(id: string): void {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+}
+
 function RestaurantAdmin() {
   const { queue, canReview, cuisines, initialPage } = Route.useLoaderData();
   const router = useRouter();
@@ -543,6 +548,8 @@ function RestaurantAdmin() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [selection, setSelection] = useState<ReadonlyArray<string>>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorKey, setEditorKey] = useState(0);
   const [editing, setEditing] = useState<EditorVenue | null>(null);
@@ -708,6 +715,50 @@ function RestaurantAdmin() {
     );
   };
 
+  // Detail selection is state-only (no URL mutation) so browser back and
+  // deep-link behavior stay exactly as before. The manage grant was verified
+  // server-side by the loader; every mutation re-verified per operation.
+  const selectedVenue = venues.find((venue) => venue.id === selectedId) ?? null;
+
+  const handleSelectVenue = (venue: DashboardVenue | null) => {
+    setSelectedId(venue?.id ?? null);
+
+    if (venue !== null) setActiveTab("overview");
+  };
+
+  // Menu and Reviews tabs scroll to their existing workflow sections.
+  // Overview, Photos, and Sources render inline with buttons that open the
+  // existing editor — no new components, no navigation change.
+  const handleTabChange = (tab: DashboardTab) => {
+    setActiveTab(tab);
+
+    if (selectedVenue === null) return;
+
+    if (tab === "menu") {
+      setMenuVenueId(selectedVenue.id);
+      scrollToSection("menu-management");
+    }
+
+    if (tab === "reviews") scrollToSection("customer-reviews");
+  };
+
+  const handleManagePhotos = (venue: DashboardVenue) => {
+    openEdit(venue);
+  };
+
+  const handleArchive = (venue: DashboardVenue) => {
+    if (venue.status === "archived") {
+      setMessage("Branch is already archived.");
+
+      return;
+    }
+
+    void run(
+      async () => venuesStatusFn({ data: { ids: [venue.id], status: "archived" } }),
+      `Archived ${venue.name}. Historical observations are retained.`,
+    );
+  };
+
   const template = JSON.stringify(
     {
       venueId: menuVenueId,
@@ -763,8 +814,27 @@ function RestaurantAdmin() {
 
   return (
     <div className="flex flex-col gap-4" lang="en">
+      <nav aria-label="Breadcrumb">
+        <ol className="flex flex-wrap items-center gap-1 text-sm text-muted">
+          <li>Admin</li>
+          <li aria-hidden="true">/</li>
+          {selectedVenue === null ? (
+            <li aria-current="page" className="font-semibold text-ink">
+              Restaurants
+            </li>
+          ) : (
+            <>
+              <li className="font-semibold text-ink">Restaurants</li>
+              <li aria-hidden="true">/</li>
+              <li aria-current="page" className="font-semibold text-ink">
+                {selectedVenue.name}
+              </li>
+            </>
+          )}
+        </ol>
+      </nav>
       <AdminPageHeading
-        title="Restaurants & menus"
+        title="Restaurants"
         description="Record real branches and source observations. Imported prices and serving matches remain pending until reviewed."
       />
 
@@ -810,6 +880,122 @@ function RestaurantAdmin() {
         onManageMenus={(venue) => {
           setMenuVenueId(venue.id);
           document.getElementById("menu-management")?.scrollIntoView({ behavior: "smooth" });
+        }}
+        onManagePhotos={handleManagePhotos}
+        onArchive={handleArchive}
+        canEdit
+        canArchive
+        selectedId={selectedId}
+        activeTab={activeTab}
+        onSelectVenue={handleSelectVenue}
+        onTabChange={handleTabChange}
+        renderTabPanel={(venue, tab) => {
+          if (tab === "overview") {
+            const cuisineNames = venue.cuisineIds.map((id) => cuisinesById.get(id) ?? `#${id}`);
+
+            return (
+              <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="font-semibold">Branch</dt>
+                  <dd>{venue.name}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold">Business</dt>
+                  <dd>{venue.businessName}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold">Address</dt>
+                  <dd>
+                    {venue.address} · {venue.area} · {venue.countryCode}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-semibold">Cuisines</dt>
+                  <dd>{cuisineNames.length === 0 ? "—" : cuisineNames.join(", ")}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold">Sources</dt>
+                  <dd>
+                    {venue.sourceCount} {venue.sourceCount === 1 ? "source" : "sources"} ·{" "}
+                    {venue.pendingCount + venue.pendingEvidence} pending
+                  </dd>
+                </div>
+                <div className="flex flex-wrap items-end gap-2">
+                  <AdminGhostButton type="button" onClick={() => openEdit(venue)}>
+                    Edit details
+                  </AdminGhostButton>
+                </div>
+              </dl>
+            );
+          }
+
+          if (tab === "menu") {
+            return (
+              <div className="flex flex-col gap-2 text-sm">
+                <p>
+                  Official menu entry and structured imports stay in this workflow below. Prices and
+                  serving matches remain pending until reviewed.
+                </p>
+                <div>
+                  <AdminGhostButton
+                    type="button"
+                    onClick={() => {
+                      setMenuVenueId(venue.id);
+                      scrollToSection("menu-management");
+                    }}
+                  >
+                    Open menu management
+                  </AdminGhostButton>
+                </div>
+              </div>
+            );
+          }
+
+          if (tab === "photos") {
+            return (
+              <div className="flex flex-col gap-2 text-sm">
+                <p>Venue photos are managed in the existing branch editor.</p>
+                <div>
+                  <AdminGhostButton type="button" onClick={() => openEdit(venue)}>
+                    Open photo editor
+                  </AdminGhostButton>
+                </div>
+              </div>
+            );
+          }
+
+          if (tab === "reviews") {
+            return (
+              <div className="flex flex-col gap-2 text-sm">
+                <p>
+                  Traveler-authored reviews are moderated in the customer reviews section below.
+                  Decisions only publish, reject, or remove whole reviews.
+                </p>
+                <div>
+                  <AdminGhostButton
+                    type="button"
+                    onClick={() => scrollToSection("customer-reviews")}
+                  >
+                    Open customer reviews
+                  </AdminGhostButton>
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div className="flex flex-col gap-2 text-sm">
+              <p>
+                Source observations and attribution live in the existing branch editor. Imports are
+                added in menu management below.
+              </p>
+              <div>
+                <AdminGhostButton type="button" onClick={() => openEdit(venue)}>
+                  Open sources in editor
+                </AdminGhostButton>
+              </div>
+            </div>
+          );
         }}
         onBulkArchive={() => bulkStatus("archived")}
         onBulkPublish={() => bulkStatus("published")}
@@ -1071,13 +1257,19 @@ function RestaurantAdmin() {
           ))}
         </ul>
       </AdminSection>
-      <AdminSection title="Customer reviews">
-        <p className="mb-3 text-sm text-muted">
-          Traveler-authored reviews. Separate from menu, price, serving, and scan queues: decisions
-          here only publish, reject, or remove whole reviews. Review text is never edited.
-        </p>
-        <RestaurantReviewModeration canReview={canReview} client={customerReviewModerationClient} />
-      </AdminSection>
+      <div id="customer-reviews" className="scroll-mt-4">
+        <AdminSection title="Customer reviews">
+          <p className="mb-3 text-sm text-muted">
+            Traveler-authored reviews. Separate from menu, price, serving, and scan queues:
+            decisions here only publish, reject, or remove whole reviews. Review text is never
+            edited.
+          </p>
+          <RestaurantReviewModeration
+            canReview={canReview}
+            client={customerReviewModerationClient}
+          />
+        </AdminSection>
+      </div>
     </div>
   );
 }

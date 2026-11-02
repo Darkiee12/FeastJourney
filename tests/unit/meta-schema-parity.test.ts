@@ -50,7 +50,7 @@ describe("provider schema parity", () => {
       type: "array",
       items: { type: "string", maxLength: MAX_REASON_LENGTH },
     });
-    expect(MAX_REASON_LENGTH).toBe(140);
+    expect(MAX_REASON_LENGTH).toBe(340);
   });
 
   test("provider schema stays within the strict:true subset", () => {

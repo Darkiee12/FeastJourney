@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
-import { createElement } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
@@ -8,6 +16,7 @@ import {
   carouselDisplayIndex,
   carouselWrappedIndex,
   DISH_CAROUSEL_AUTOPLAY_MS,
+  DishCarousel,
   dishCarouselIngredientNames,
   dishCarouselTitle,
   DishCarouselSkeleton,
@@ -19,6 +28,8 @@ import {
 } from "@/components/home/recommend/recommendation-rail";
 import type { DishSummary } from "@/modules/food-discovery/server/domain/dish";
 import type { CarouselCard } from "@/modules/food-discovery/server/operations/dish-service";
+import type { FavoriteStatusQuery } from "@/modules/user/components/save-dish-button";
+import type { SessionState } from "@/modules/user/session.functions";
 import { messagesFor } from "@/shared/i18n";
 
 /**
@@ -225,9 +236,12 @@ describe("carousel loading skeleton", () => {
     expect(html).toContain('aria-hidden="true"');
     expect(html).toContain("rounded-3xl");
     expect(html).toContain("border-border-soft");
-    // Media side reserves the final aspect up front: no layout shift.
-    expect(html).toContain("aspect-[4/3]");
-    expect(html).toContain("md:min-h-[22rem]");
+    // Media frame reserves a bounded height up front (never the intrinsic
+    // image size): no layout shift between skeleton, load, and settle.
+    expect(html).toContain("--dish-feature-media-mobile");
+    expect(html).toContain("--dish-feature-stage-desktop");
+    expect(html).not.toContain("aspect-[4/3]");
+    expect(html).not.toContain("md:min-h-[22rem]");
     // Info side matches the slide grid and padding.
     expect(html).toContain("md:grid-cols-[45%_55%]");
     expect(html).toContain("p-6");
@@ -235,6 +249,8 @@ describe("carousel loading skeleton", () => {
     // Pulse is motion-safe like the rest of the carousel.
     expect(html).toContain("animate-pulse");
     expect(html).toContain("motion-reduce:animate-none");
+    // Action row mirrors the shared DishActions: three 44px circles.
+    expect(html.split("h-11 w-11").length - 1).toBe(3);
   });
 });
 
@@ -369,5 +385,109 @@ describe("recommendation rail", () => {
     expect(html).toContain('loading="lazy"');
     expect(html).toContain("40vw");
     expect(html).not.toContain("1600w");
+  });
+});
+
+describe("in-card Muse reason strip", () => {
+  const guestSession: SessionState = { status: "signed-out" };
+
+  const idleFavorites: FavoriteStatusQuery = {
+    data: [],
+    isPending: false,
+    isError: false,
+    refetch: () => undefined,
+    dataUpdatedAt: 0,
+  };
+
+  const renderCarousel = async (
+    reason: ReactNode | undefined,
+    layout?: "full" | "compact",
+  ): Promise<string> => {
+    // Save buttons need a query client; links need the router. The shared
+    // carousel owns both integrations, so the harness provides both. The
+    // optional props carry explicit `| undefined` in DishCarouselProps, so
+    // they pass straight through with no conditional spreads.
+    const queryClient = new QueryClient();
+
+    const node = createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      createElement(DishCarousel, {
+        items: [
+          carouselItem(),
+          carouselItem({ id: "202", slug: "pho-bo", name: "Phở Bò", englishName: "Pho Bo" }),
+        ],
+        copy: messagesFor("en"),
+        lang: "en",
+        session: guestSession,
+        favoriteStatus: idleFavorites,
+        label: "Recommended dishes",
+        layout,
+        reason,
+      }),
+    );
+
+    const rootRoute = createRootRoute();
+
+    const restaurantsRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/restaurants",
+      component: () => null,
+    });
+
+    const dishRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/dishes/$dishId",
+      component: () => null,
+    });
+
+    const testRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/",
+      component: () => node,
+    });
+
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([restaurantsRoute, dishRoute, testRoute]),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    });
+
+    await router.load();
+
+    return renderToStaticMarkup(createElement(RouterProvider, { router }));
+  };
+
+  test("full layout renders the strip above the image inside the card border", async () => {
+    const html = await renderCarousel(createElement("p", null, "WHY-PHO-MARKER"));
+
+    expect(html).toContain("WHY-PHO-MARKER");
+    expect(html).toContain("md:col-span-2");
+    expect(html).toContain("md:h-32");
+    expect(html).toContain("bg-cream/60");
+    expect(html).toContain("h-[var(--dish-feature-media-mobile,clamp(180px,48vw,240px))]");
+    // Strip precedes the media frame in DOM order on every slide.
+    expect(html.indexOf("WHY-PHO-MARKER")).toBeLessThan(
+      html.indexOf("h-[var(--dish-feature-media-mobile,clamp(180px,48vw,240px))]"),
+    );
+    // Media column and content column follow the strip.
+    expect(html).toContain("md:grid-cols-[45%_55%]");
+  });
+
+  test("no reason renders no strip container", async () => {
+    const html = await renderCarousel(undefined);
+
+    expect(html).not.toContain("bg-cream/60");
+    expect(html).not.toContain("md:col-span-2");
+    expect(html).not.toContain("md:h-32");
+    expect(html).toContain("h-[var(--dish-feature-media-mobile,clamp(180px,48vw,240px))]");
+  });
+
+  test("compact layout renders the strip above the thumb row", async () => {
+    const html = await renderCarousel(createElement("p", null, "WHY-PHO-MARKER"), "compact");
+
+    expect(html).toContain("WHY-PHO-MARKER");
+    expect(html).toContain("bg-cream/60");
+    expect(html).toContain("h-28 w-28");
+    expect(html.indexOf("WHY-PHO-MARKER")).toBeLessThan(html.indexOf("h-28 w-28"));
   });
 });

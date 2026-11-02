@@ -24,6 +24,31 @@ export interface VenueOverviewIdentity {
   readonly distanceKm: string | null;
 }
 
+/** Layout-only loading placeholder for the venue overview. Shimmer
+ *  blocks only; no invented name, price, photo, or rating content. */
+export function VenueOverviewSkeleton({
+  label,
+  hint,
+}: {
+  readonly label: string;
+  readonly hint?: string | undefined;
+}) {
+  return (
+    <div
+      className="mapapp-skel venue-overview"
+      aria-live="polite"
+      aria-busy="true"
+      aria-label={label}
+    >
+      <p className="mapapp-note">{label}</p>
+      {hint !== undefined && hint !== "" ? <p className="mapapp-note">{hint}</p> : null}
+      <span className="mapapp-skel-line wide" aria-hidden="true" />
+      <span className="mapapp-skel-line" aria-hidden="true" />
+      <span className="mapapp-skel-line narrow" aria-hidden="true" />
+    </div>
+  );
+}
+
 /** Genuine aggregate only: published customer reviews. Null (or zero
  *  total) renders no rating row — never an invented score. */
 export interface VenueRatingSummary {

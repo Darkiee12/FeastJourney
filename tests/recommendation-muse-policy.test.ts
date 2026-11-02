@@ -456,19 +456,25 @@ const enclosingOwner = (lines: Array<string>, at: number): string => {
 };
 
 describe("provider-call sites (slide navigation must stay model-free)", () => {
-  test("recommend.mutate fires only from submit/surprise/retry/restore paths", async () => {
+  test("recommendation provider refires only from explicit retry (Back/remount are cache hits)", async () => {
     const source = await Bun.file(QUIZ_FLOW).text();
     const lines = source.split("\n");
 
-    const owners = lines
+    // The old remount-mutate is gone: no recommend.mutate call sites remain.
+    // Route remounts restore from the keyed query cache with zero new calls.
+    expect(lines.some((line) => line.includes("recommend.mutate"))).toBe(false);
+
+    // Exactly one explicit provider trigger: retry → recommend.refetch().
+    const refetchOwners = lines
       .map((line, index) => ({ line, index }))
-      .filter(({ line }) => line.includes("recommend.mutate"))
+      .filter(({ line }) => line.includes("recommend.refetch"))
       .map(({ index }) => enclosingOwner(lines, index));
 
-    expect(owners.length).toBeGreaterThan(0);
-    expect(owners.toSorted()).toEqual(
-      ["retry", "startSearch", "surprise", "useEffect", "useEffect"].toSorted(),
-    );
+    expect(refetchOwners).toEqual(["retry"]);
+
+    // The keyed results query never refetches on window focus: an
+    // expensive Muse ranking must not rerun on tab switches.
+    expect(source.includes("refetchOnWindowFocus: false")).toBe(true);
   });
 
   test("step navigation handlers never call the provider", async () => {
@@ -514,5 +520,29 @@ describe("provider-call sites (slide navigation must stay model-free)", () => {
     ]) {
       expect(bodyOf(handler).includes("recommend.mutate")).toBe(false);
     }
+  });
+
+  test("slide changes only move the carousel index; provider stays quiet", async () => {
+    const source = await Bun.file(QUIZ_FLOW).text();
+    const lines = source.split("\n");
+    const indexLines = lines.filter((line) => line.includes("onIndexChange"));
+
+    expect(indexLines.length).toBeGreaterThan(0);
+
+    for (const line of indexLines) {
+      expect(line).toContain("setRailIndex");
+    }
+  });
+});
+
+describe("in-card reason placement (no duplicate explanation card)", () => {
+  test("active slide reason flows into the carousel slot; no sibling card", async () => {
+    const source = await Bun.file(QUIZ_FLOW).text();
+
+    expect(source).toContain("reason={activeReasonNode}");
+    expect(source).not.toContain("renderSelectedReason");
+    // The active dish follows the selected slide, so the strip always
+    // matches the visible card without a second model request.
+    expect(source).toContain("carouselItems[railIndex]");
   });
 });

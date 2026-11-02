@@ -1089,4 +1089,70 @@
       border-radius: 1.25rem 0 0 1.25rem;
     }
   }
+  /* Dish-gated restaurant entry actions (dish page + results sheet).
+     Compact pair beside dish content; never rendered without a dish. */
+  .dish-price-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
+  }
+  .dish-price-action {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    padding: 0.5rem 1rem;
+    color: var(--color-ink);
+    font-weight: 600;
+    font-size: 0.875rem;
+    text-decoration: none;
+  }
+  .dish-price-action:hover {
+    background: var(--color-cream);
+  }
+  .dish-price-action svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  /* Price comparison view: honest ranking, originals primary. */
+  .price-compare {
+    display: grid;
+    gap: 0.75rem;
+  }
+  .price-compare-list {
+    display: grid;
+    gap: 0.5rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .price-compare-row {
+    display: grid;
+    gap: 0.25rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 0.75rem 1rem;
+  }
+  .price-compare-row > a {
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+  .price-compare-rank {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--color-food-orange-strong);
+  }
+  .price-compare-empty {
+    display: grid;
+    gap: 0.5rem;
+    border: 1px dashed var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 1rem;
+  }
 }

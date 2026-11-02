@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, getRouteApi } from "@tanstack/react-router";
-import { Crosshair } from "lucide-react";
+import { Link, getRouteApi, useRouterState } from "@tanstack/react-router";
+import { Crosshair, MapPin } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
@@ -15,6 +15,10 @@ import {
   MapSearchBar,
   type SearchPick,
 } from "@/modules/restaurant-discovery/components/map-search-bar";
+import {
+  PriceComparePanel,
+  type PriceCompareRow,
+} from "@/modules/restaurant-discovery/components/price-compare-panel";
 import { RestaurantCard } from "@/modules/restaurant-discovery/components/restaurant-card";
 import type { RestaurantCardModel } from "@/modules/restaurant-discovery/components/restaurant-card";
 import { restaurantCopy } from "@/modules/restaurant-discovery/components/restaurant-copy";
@@ -31,9 +35,14 @@ import { ResultsDrawer } from "@/modules/restaurant-discovery/components/results
 import {
   ResultsSheet,
   formatSheetSummary,
+  resolveResultsState,
+  type ResultsState,
   type SheetSnap,
 } from "@/modules/restaurant-discovery/components/results-sheet";
-import { VenueOverview } from "@/modules/restaurant-discovery/components/venue-overview";
+import {
+  VenueOverview,
+  VenueOverviewSkeleton,
+} from "@/modules/restaurant-discovery/components/venue-overview";
 import {
   queryGeolocationPermission,
   readSavedCamera,
@@ -117,6 +126,100 @@ function regionSearchKey(search: RestaurantSearch): string {
   });
 }
 
+/** In-sheet loading placeholder: the map stays mounted behind it, no
+ *  global blocking spinner, no fake percent, no timers. */
+export function SearchResultsSkeleton({ label }: { label: string }) {
+  return (
+    <div className="mapapp-skeleton" aria-live="polite" aria-busy="true" aria-label={label}>
+      <p className="mapapp-note">{label}</p>
+      <ul className="mapapp-list" aria-hidden="true">
+        {[0, 1, 2].map((index) => (
+          <li key={index} className="mapapp-skel-card">
+            <span className="mapapp-skel-line wide" />
+            <span className="mapapp-skel-line" />
+            <span className="mapapp-skel-line narrow" />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Peek-strip label for an empty result set. The verified count never
+ *  dominates an empty sheet: the peek shows the concise state title. */
+function emptyPeekLabel(kind: ResultsState, copy: RestaurantCopy): string {
+  if (kind === "no-evidence") return copy.noReviewedTitle;
+
+  if (kind === "no-area") return copy.noAreaTitle;
+
+  if (kind === "no-scope") return copy.chooserTitle;
+
+  if (kind === "empty-catalog") return copy.emptyDatasetTitle;
+
+  if (kind === "no-match") return copy.noMatchTitle;
+
+  return copy.resultsTitle;
+}
+
+/** Map-overlay copy for each empty condition. Basemap labels stay
+ *  untouched: this text only describes the app record set. */
+/** Overlay copy contract for the map when pins cannot be shown. */
+interface MapEmptyCopy {
+  readonly title?: string;
+  readonly body: string;
+}
+
+function mapEmptyText(
+  kind: ResultsState | null,
+  copy: RestaurantCopy,
+  lang: string,
+  isDishMode: boolean,
+): MapEmptyCopy {
+  if (kind === "loading") {
+    if (lang === "vi") return { body: "Đang tìm nhà hàng trong khu vực này…" };
+
+    return { body: "Searching restaurants in this area…" };
+  }
+
+  if (kind === "no-evidence") return { title: copy.noReviewedTitle, body: copy.noReviewedBody };
+
+  if (kind === "no-area") return { title: copy.noAreaTitle, body: copy.noAreaBody };
+
+  if (kind === "no-scope") return { title: copy.chooserTitle, body: copy.chooserBody };
+
+  if (kind === "empty-catalog") {
+    return { title: copy.emptyDatasetTitle, body: copy.emptyDatasetBody };
+  }
+
+  if (kind === "no-match") return { title: copy.noMatchTitle, body: copy.noMatchBody };
+
+  if (isDishMode) return { body: copy.noReviewedBody };
+
+  return { body: copy.mapEmpty };
+}
+
+/** Detail-page href for a result card (module scope: no per-render closure). */
+function venueHrefFor(model: RestaurantCardModel): string {
+  const params = new URLSearchParams();
+
+  params.set("lang", model.detailSearch.lang);
+  params.set("channel", model.detailSearch.channel);
+
+  if (model.detailSearch.variant !== undefined) {
+    params.set("variant", model.detailSearch.variant);
+  }
+
+  if (model.detailSearch.dish !== undefined) {
+    params.set("dish", model.detailSearch.dish);
+  }
+
+  if (model.detailSearch.fromDish !== undefined) {
+    params.set("fromDish", model.detailSearch.fromDish);
+  }
+
+  return `/restaurants/${model.id}?${params.toString()}`;
+}
+
 export function RestaurantSearchPage() {
   const data = route.useLoaderData();
   const search = route.useSearch();
@@ -135,6 +238,9 @@ export function RestaurantSearchPage() {
   const [sheetKey, setSheetKey] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [sheetSnap, setSheetSnap] = useState<SheetSnap>(0);
+  // Local typed panel state for the in-map Results | Compare prices
+  // toggle. No route change, no refetch: rows are already server-ordered.
+  const [compareOpen, setCompareOpen] = useState(false);
   const [frame, setFrame] = useState<FrameRequest | null>(null);
   const [userPos, setUserPos] = useState<UserPosition | null>(null);
   const [chooserManual, setChooserManual] = useState(false);
@@ -576,6 +682,41 @@ export function RestaurantSearchPage() {
   const selectedVenue = selected === null ? undefined : rows.find((venue) => venue.id === selected);
   const selectedModel = selectedVenue === undefined ? null : modelFor(selectedVenue);
 
+  const resultsLabel = search.lang === "vi" ? "Kết quả" : "Results";
+  const compareLabel = search.lang === "vi" ? "So sánh giá" : "Compare prices";
+  const compareGroupLabel = search.lang === "vi" ? "Chế độ xem kết quả" : "Results view";
+
+  // Comparison rows reuse the card model: same canonical dish, same
+  // server ordering, no refetch. Venues without priced dish evidence are
+  // kept so the panel can render its honest empty/unpriced states.
+  const compareRows: ReadonlyArray<PriceCompareRow> = isDishMode
+    ? rows.flatMap((venue) => {
+        const model = modelFor(venue);
+
+        if (model.dish === null) {
+          return [];
+        }
+
+        return [
+          {
+            venueId: model.id,
+            venueName: model.name,
+            area: model.area,
+            itemName: model.dish.itemName,
+            variantName: model.dish.variantName,
+            amount: model.dish.amount,
+            currency: model.dish.currency,
+            evidenceDate: model.dish.evidenceDate,
+            stale: model.dish.stale,
+            channelLabel: model.dish.channelLabel,
+            sourceCategory: model.dish.sourceCategory,
+            rate: model.dish.rate,
+            venueHref: venueHrefFor(model),
+          },
+        ];
+      })
+    : [];
+
   const detailQuery = useQuery({
     queryKey: ["restaurant-detail", selected, search.channel],
     queryFn: () => getRestaurantFn({ data: { venueId: selected ?? "", channel: search.channel } }),
@@ -637,15 +778,26 @@ export function RestaurantSearchPage() {
     if (!isDesktop) setSheetSnap(2);
   };
 
-  const showDishZero = isDishMode && rows.length === 0 && !datasetEmpty && data.areas.length > 0;
+  const navigating = useRouterState({ select: (state) => state.isLoading });
 
-  const showDatasetZero = rows.length === 0 && (datasetEmpty || !hasScope);
+  // Distinct empty conditions share one resolver with the sheet, drawer,
+  // and map overlay: loading / no-scope / no-evidence / no-area /
+  // empty-catalog / no-match are never conflated.
+  const emptyKind: ResultsState | null = resolveResultsState({
+    rows: rows.length,
+    isDishMode,
+    datasetEmpty,
+    hasScope,
+    hasArea: data.areas.length > 0,
+    isLoading: navigating,
+  });
 
-  const showFiltersTight =
-    rows.length === 0 && hasScope && !isDishMode && !datasetEmpty && data.areas.length > 0;
+  const loadingLabel =
+    search.lang === "vi"
+      ? "Đang tìm nhà hàng trong khu vực này…"
+      : "Searching restaurants in this area…";
 
-  const showNoArea =
-    rows.length === 0 && hasScope && !isDishMode && !datasetEmpty && data.areas.length === 0;
+  const mapEmpty = mapEmptyText(emptyKind, copy, search.lang, isDishMode);
 
   const countLabel =
     rows.length === 1 ? copy.placesOne : copy.placesCount.replace("{count}", String(rows.length));
@@ -666,7 +818,27 @@ export function RestaurantSearchPage() {
           {copy.priceNote}
         </p>
       )}
-      {showDatasetZero && (
+      {emptyKind === "loading" && <SearchResultsSkeleton label={loadingLabel} />}
+      {emptyKind === "no-scope" && (
+        <div className="mapapp-status" aria-live="polite">
+          <h3>{copy.chooserTitle}</h3>
+          <p>{copy.chooserBody}</p>
+          <div className="mapapp-status-actions">
+            <button
+              type="button"
+              className="mapapp-primary-btn"
+              onClick={() => setChooserManual(true)}
+            >
+              <MapPin aria-hidden="true" />
+              {copy.regionChoose}
+            </button>
+            <Link className="mapapp-ghost-btn" to="/dishes" search={{ lang: search.lang }}>
+              {copy.emptyExplore}
+            </Link>
+          </div>
+        </div>
+      )}
+      {emptyKind === "empty-catalog" && (
         <div className="mapapp-status" aria-live="polite">
           <h3>{copy.emptyDatasetTitle}</h3>
           <p>{copy.emptyDatasetBody}</p>
@@ -680,18 +852,13 @@ export function RestaurantSearchPage() {
           </div>
         </div>
       )}
-      {isDishMode && datasetEmpty && (
-        <p aria-live="polite" className="mapapp-note">
-          {copy.noReviewedBody}
-        </p>
-      )}
-      {showDishZero && (
+      {emptyKind === "no-evidence" && (
         <div className="mapapp-status" aria-live="polite">
           <h3>{copy.noReviewedTitle}</h3>
           <p>{copy.noReviewedBody}</p>
           <div className="mapapp-status-actions">
             <button type="button" className="mapapp-primary-btn" onClick={clearDish}>
-              {copy.browseNearby}
+              {copy.clearDish}
             </button>
             <button type="button" className="mapapp-ghost-btn" onClick={expandArea}>
               {copy.expandArea}
@@ -702,7 +869,7 @@ export function RestaurantSearchPage() {
           </div>
         </div>
       )}
-      {showFiltersTight && (
+      {emptyKind === "no-match" && (
         <div className="mapapp-status" aria-live="polite">
           <h3>{copy.noMatchTitle}</h3>
           <p>{copy.noMatchBody}</p>
@@ -716,12 +883,20 @@ export function RestaurantSearchPage() {
           </div>
         </div>
       )}
-      {showNoArea && (
+      {emptyKind === "no-area" && (
         <div className="mapapp-status" aria-live="polite">
           <h3>{copy.noAreaTitle}</h3>
           <p>{copy.noAreaBody}</p>
           <div className="mapapp-status-actions">
-            <button type="button" className="mapapp-primary-btn" onClick={expandArea}>
+            <button
+              type="button"
+              className="mapapp-primary-btn"
+              onClick={() => setChooserManual(true)}
+            >
+              <MapPin aria-hidden="true" />
+              {copy.regionChoose}
+            </button>
+            <button type="button" className="mapapp-ghost-btn" onClick={expandArea}>
               {copy.expandArea}
             </button>
             <button type="button" className="mapapp-ghost-btn" onClick={clearAll}>
@@ -737,7 +912,39 @@ export function RestaurantSearchPage() {
             {rows.length === search.limit &&
               ` · ${copy.placesCapped.replace("{limit}", String(search.limit))}`}
           </p>
-          <ul className="mapapp-list" hidden={previewOpen && selectedModel !== null}>
+          {isDishMode && (
+            <fieldset className="mapapp-viewtoggle">
+              <legend className="sr-only">{compareGroupLabel}</legend>{" "}
+              <button
+                type="button"
+                aria-pressed={!compareOpen}
+                className="mapapp-ghost-btn"
+                onClick={() => setCompareOpen(false)}
+              >
+                {resultsLabel}
+              </button>
+              <button
+                type="button"
+                aria-pressed={compareOpen}
+                className="mapapp-ghost-btn"
+                onClick={() => setCompareOpen(true)}
+              >
+                {compareLabel}
+              </button>
+            </fieldset>
+          )}
+          {isDishMode && compareOpen && !(previewOpen && selectedModel !== null) && (
+            <PriceComparePanel
+              rows={compareRows}
+              sortMode={search.sort}
+              ratesAvailable={!conversion.unavailable}
+              locale={search.lang}
+            />
+          )}
+          <ul
+            className="mapapp-list"
+            hidden={(previewOpen && selectedModel !== null) || (isDishMode && compareOpen)}
+          >
             {rows.map((venue) => {
               const model = modelFor(venue);
 
@@ -795,10 +1002,10 @@ export function RestaurantSearchPage() {
                     </div>
                   </>
                 ) : (
-                  <>
-                    <h3>{copy.detailLoadingTitle}</h3>
-                    <p>{copy.detailLoadingBody}</p>
-                  </>
+                  <VenueOverviewSkeleton
+                    label={copy.detailLoadingTitle}
+                    hint={copy.detailLoadingBody}
+                  />
                 )}
               </div>
             ) : (
@@ -891,14 +1098,15 @@ export function RestaurantSearchPage() {
       ? null
       : copy.locationAccuracy.replace("{meters}", String(userPos.accuracyMeters));
 
-  // Peek summary stays honest: verified count plus the capped note when the
-  // server limited the list. Region context lives in the search panel body.
   const cappedNote =
     rows.length === search.limit
       ? copy.placesCapped.replace("{limit}", String(search.limit))
       : null;
 
-  const sheetSummary = formatSheetSummary(countLabel, cappedNote);
+  const sheetSummary =
+    emptyKind === null
+      ? formatSheetSummary(countLabel, cappedNote)
+      : emptyPeekLabel(emptyKind, copy);
 
   return (
     <div className="mapapp">
@@ -916,7 +1124,8 @@ export function RestaurantSearchPage() {
               onCamera={reportCamera}
               lang={search.lang}
               center={initialCenter}
-              emptyNote={isDishMode ? copy.noReviewedBody : copy.mapEmpty}
+              emptyTitle={mapEmpty.title}
+              emptyNote={mapEmpty.body}
               frame={frame}
               selectionPadding={
                 isDesktop
@@ -938,6 +1147,8 @@ export function RestaurantSearchPage() {
               type="button"
               className="mapapp-search-area"
               onClick={() => {
+                // Pan never resets the dish: the spread preserves the
+                // canonical dish filter; only the region is reframed.
                 void navigate({
                   search: {
                     ...search,
@@ -1008,6 +1219,7 @@ export function RestaurantSearchPage() {
             open={drawerOpen}
             onToggle={() => setDrawerOpen((open) => !open)}
             title={copy.resultsTitle}
+            state={emptyKind}
           >
             <MapSearchBar
               copy={copy}
@@ -1066,6 +1278,7 @@ export function RestaurantSearchPage() {
               onSnapChange={setSheetSnap}
               title={copy.resultsTitle}
               summary={sheetSummary}
+              state={emptyKind}
             >
               <div id="mapapp-results">
                 <h2 ref={listTitleRef} tabIndex={-1} className="sr-only">

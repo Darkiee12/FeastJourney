@@ -1,3 +1,4 @@
+import { ChevronDown } from "lucide-react";
 import * as maplibre from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { useEffect, useRef, useState } from "react";
@@ -63,7 +64,168 @@ const FALLBACK_COPY_EN = {
   failed: "The map could not load. The list and directions remain available.",
   empty: "No restaurant locations in view. Pan the map, or pick a city to start.",
   userLocation: "Your location",
+  searchWider: "Search a wider area",
+  widening: "Searching a wider area…",
 };
+
+/** Warm production basemap palette (decorative paint overrides only).
+ *  Applied on top of VITE_MAP_STYLE_URL without replacing the provider
+ *  style: cream land, soft-blue water, light-green parks, muted arterials.
+ *  Only eligible app records get interactive pins; basemap labels are
+ *  never converted into pins. Pins stay brand red, user dot stays blue. */
+export const WARM_BASEMAP = {
+  land: "#FAF6EC",
+  water: "#BFDDF0",
+  park: "#D8EACD",
+  building: "#EFE7D8",
+  roadMajor: "#EFCF96",
+  roadMinor: "#FFFFFF",
+  labelHalo: "#FFFFFF",
+} as const;
+
+/** One decorative paint override from the closed warm palette. Keys are the
+ *  only paint properties this pass ever touches; values are plain style-spec
+ *  JSON (colors, halo width), so no parsing or assertion is needed at the
+ *  provider boundary. */
+export interface WarmPaintEntry {
+  readonly name:
+    | "background-color"
+    | "fill-color"
+    | "line-color"
+    | "text-halo-color"
+    | "text-halo-width";
+  readonly value: string | number;
+}
+
+/** Decorative paint for one style layer, matched by layer id pattern.
+ *  Returns null when the layer keeps the provider default. Pure and
+ *  unit-testable; the caller guards every setPaintProperty. */
+export function warmLayerPaint(
+  layerId: string,
+  layerType: string,
+): ReadonlyArray<WarmPaintEntry> | null {
+  const id = layerId.toLowerCase();
+
+  if (layerType === "background") {
+    return [{ name: "background-color", value: WARM_BASEMAP.land }];
+  }
+
+  if (/water|ocean|river|lake|bay|harbour|harbor|canal/.test(id)) {
+    return [{ name: "fill-color", value: WARM_BASEMAP.water }];
+  }
+
+  if (/park|green|forest|wood|grass|garden|pitch|playground|golf|nature/.test(id)) {
+    return [{ name: "fill-color", value: WARM_BASEMAP.park }];
+  }
+
+  if (/building|built/.test(id)) {
+    return [{ name: "fill-color", value: WARM_BASEMAP.building }];
+  }
+
+  if (/^land|landuse|landcover|earth/.test(id)) {
+    return [{ name: "fill-color", value: WARM_BASEMAP.land }];
+  }
+
+  if (/motorway|trunk|primary|arterial/.test(id)) {
+    if (layerType === "line") return [{ name: "line-color", value: WARM_BASEMAP.roadMajor }];
+
+    return null;
+  }
+
+  if (/road|street|secondary|tertiary|minor|path|footway/.test(id)) {
+    if (layerType === "line") return [{ name: "line-color", value: WARM_BASEMAP.roadMinor }];
+
+    return null;
+  }
+
+  if (layerType === "symbol") {
+    return [
+      { name: "text-halo-color", value: WARM_BASEMAP.labelHalo },
+      { name: "text-halo-width", value: 1 },
+    ];
+  }
+
+  return null;
+}
+
+/** Best-effort warm pass over the loaded provider style. Decorative
+ *  only: unsupported layers are skipped and a failed pass never breaks
+ *  the map, attribution, or controls. Re-run after each style load. */
+export function applyWarmBasemap(map: maplibre.Map): void {
+  try {
+    const layers = map.getStyle().layers;
+
+    for (const layer of layers) {
+      const paint = warmLayerPaint(layer.id, layer.type);
+
+      if (paint === null) continue;
+
+      for (const entry of paint) {
+        try {
+          map.setPaintProperty(layer.id, entry.name, entry.value);
+        } catch {
+          // Layer does not support this paint key; keep provider default.
+        }
+      }
+    }
+  } catch {
+    // Decorative only: the provider style remains fully usable.
+  }
+}
+
+/** Radius steps (meters) offered by the existing radius control in
+ *  restaurant-filters-sheet.tsx (RADII). Mirrored here so the map-empty
+ *  overlay and search-wider stepping use the same scale without owning
+ *  the schema: every value stays inside restaurant.schema.ts
+ *  (100..50000, default 5000). If the sheet list changes, update this
+ *  tuple in the same pass — the coordinator owns the sheet. */
+export const SUPPORTED_RADII = [1000, 5000, 10000, 25000, 50000] as const;
+
+export type SupportedRadius = (typeof SUPPORTED_RADII)[number];
+
+/** Next wider radius step for a point+radius search, or null when the
+ *  current radius already covers the widest supported step. Pure and
+ *  unit-testable; the caller preserves dish identity and keeps the map
+ *  mounted while navigating. */
+export function nextSupportedRadius(radiusMeters: number): SupportedRadius | null {
+  if (!Number.isFinite(radiusMeters)) return SUPPORTED_RADII[0];
+
+  for (const step of SUPPORTED_RADII) {
+    if (step > radiusMeters) return step;
+  }
+
+  return null;
+}
+
+/** Bounds widening for viewport (bounds-constrained) searches: scales the
+ *  span around its center by `factor` (default doubles it). Antimeridian
+ *  crossings unwrap before scaling; latitude clamps to [-90, 90] and
+ *  longitudes normalize via normalizedMapBounds. Pure and unit-testable. */
+export function expandedMapBounds(bounds: MapBounds, factor = 2): MapBounds {
+  const safeFactor = Number.isFinite(factor) && factor > 1 ? factor : 2;
+  const crosses = bounds.east < bounds.west;
+  const east = crosses ? bounds.east + 360 : bounds.east;
+  const centerLng = (bounds.west + east) / 2;
+  const centerLat = (bounds.south + bounds.north) / 2;
+  const halfLng = ((east - bounds.west) / 2) * safeFactor;
+  const halfLat = ((bounds.north - bounds.south) / 2) * safeFactor;
+
+  if (halfLng * 2 >= 360) {
+    return {
+      west: -180,
+      south: Math.max(-90, centerLat - halfLat),
+      east: 180,
+      north: Math.min(90, centerLat + halfLat),
+    };
+  }
+
+  return normalizedMapBounds(
+    centerLng - halfLng,
+    centerLat - halfLat,
+    centerLng + halfLng,
+    centerLat + halfLat,
+  );
+}
 
 function fallbackCopy(lang: Locale) {
   if (lang === "vi") {
@@ -73,6 +235,8 @@ function fallbackCopy(lang: Locale) {
       failed: "Không tải được bản đồ. Danh sách và chỉ đường vẫn dùng được.",
       empty: "Chưa có vị trí nhà hàng trong tầm nhìn. Kéo bản đồ, hoặc chọn thành phố để bắt đầu.",
       userLocation: "Vị trí của bạn",
+      searchWider: "Tìm khu vực rộng hơn",
+      widening: "Đang tìm khu vực rộng hơn…",
     };
   }
 
@@ -102,11 +266,17 @@ export default function RestaurantMap({
   lang,
   center,
   emptyNote,
+  emptyTitle,
   frame,
   selectionPadding,
   userPosition,
   fitKey,
   suppressInitialFit,
+  onSearchWider,
+  searchWiderLabel,
+  searchWiderBusy,
+  radiusLabel,
+  onOpenRadius,
 }: {
   points: ReadonlyArray<RestaurantResult | DishRestaurantResult>;
   selected: string | null;
@@ -116,11 +286,29 @@ export default function RestaurantMap({
   lang: Locale;
   center?: MapCenter;
   emptyNote?: string;
+  emptyTitle?: string;
   frame?: FrameRequest | null;
   selectionPadding?: SelectionPadding;
   userPosition?: UserPosition | null;
   fitKey?: string;
   suppressInitialFit?: boolean;
+  /** Empty-overlay "search wider" action. Rendered only when the handler
+   *  is provided (and only while no pins are shown). The parent owns the
+   *  navigation: it must preserve dish identity, step radius via
+   *  nextSupportedRadius for point+radius searches or widen bounds via
+   *  expandedMapBounds for viewport searches, and keep this map mounted. */
+  onSearchWider?: () => void;
+  /** Accessible label for the widen action; falls back to honest map copy. */
+  searchWiderLabel?: string;
+  /** Truthful busy state while the wider search navigates; the map stays
+   *  mounted and interactive underneath. */
+  searchWiderBusy?: boolean;
+  /** Radius chip label (e.g. "Within 5 km"). Rendered only together with
+   *  onOpenRadius, with a ⌄ affordance — never a disposable X. */
+  radiusLabel?: string;
+  /** Opens the existing radius options (the filters sheet). The parent
+   *  wires this to the same control that edits radius/bounds. */
+  onOpenRadius?: () => void;
 }) {
   const ref = useRef<MapRef>(null);
   const [failed, setFailed] = useState(false);
@@ -275,7 +463,18 @@ export default function RestaurantMap({
         // zooms directly; the list, addresses, and directions remain usable
         // when tiles fail.
         attributionControl={{ compact: true }}
-        onLoad={() => setReady(true)}
+        onLoad={() => {
+          // Warm the provider style without replacing it; attribution,
+          // pan/zoom, and list/sheet interactions are untouched. The map
+          // instance comes from the component ref, so no event assertion.
+          const map = ref.current?.getMap();
+
+          if (map !== undefined) {
+            applyWarmBasemap(map);
+          }
+
+          setReady(true);
+        }}
         onError={() => setFailed(true)}
         onMoveEnd={(event) => {
           const target = event.target;
@@ -343,9 +542,40 @@ export default function RestaurantMap({
         ))}
       </Map>
       {points.length === 0 && (
-        <p className="discovery-map-empty" aria-live="polite">
-          {emptyNote ?? copy.empty}
-        </p>
+        <div className="discovery-map-empty" aria-live="polite">
+          {emptyTitle !== undefined && emptyTitle !== "" ? (
+            <strong className="discovery-map-empty-title">{emptyTitle}</strong>
+          ) : null}
+          <p>{emptyNote ?? copy.empty}</p>
+          {onSearchWider !== undefined || onOpenRadius !== undefined ? (
+            <div className="discovery-map-empty-actions">
+              {onSearchWider !== undefined ? (
+                <button
+                  type="button"
+                  className="mapapp-primary-btn"
+                  onClick={onSearchWider}
+                  disabled={searchWiderBusy === true}
+                  aria-busy={searchWiderBusy === true}
+                >
+                  {searchWiderBusy === true
+                    ? copy.widening
+                    : (searchWiderLabel ?? copy.searchWider)}
+                </button>
+              ) : null}
+              {radiusLabel !== undefined && onOpenRadius !== undefined ? (
+                <button
+                  type="button"
+                  className="mapapp-chip-btn"
+                  onClick={onOpenRadius}
+                  aria-haspopup="dialog"
+                >
+                  <span className="mapapp-chip-label">{radiusLabel}</span>
+                  <ChevronDown aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       )}
     </div>
   );

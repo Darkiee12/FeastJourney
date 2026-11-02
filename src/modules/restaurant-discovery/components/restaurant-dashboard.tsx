@@ -1,14 +1,23 @@
+import { Archive, BookOpen, Ellipsis, Image as ImageIcon, Pencil } from "lucide-react";
+import { useState, type ReactNode } from "react";
+
 import { AdminSelect } from "@/components/admin/select";
 import {
   AdminCard,
+  AdminConfirmDialog,
   AdminEmptyState,
   AdminGhostButton,
   AdminPrimaryButton,
   AdminSecondaryButton,
   AdminTable,
   AdminToolbar,
-  adminGhostButtonClass,
 } from "@/components/admin/ui";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export interface DashboardVenue {
   readonly id: string;
@@ -29,6 +38,32 @@ export interface DashboardVenue {
 
 export type VenueStatusFilter = "" | "draft" | "published" | "archived";
 
+export type DashboardTab = "overview" | "menu" | "photos" | "reviews" | "sources";
+
+const DASHBOARD_TAB_LABELS: ReadonlyMap<string, string> = new Map([
+  ["overview", "Overview"],
+  ["menu", "Menu"],
+  ["photos", "Photos"],
+  ["reviews", "Reviews"],
+  ["sources", "Sources"],
+]);
+
+export const DASHBOARD_TABS: ReadonlyArray<DashboardTab> = [
+  "overview",
+  "menu",
+  "photos",
+  "reviews",
+  "sources",
+];
+
+export function dashboardTabLabel(tab: DashboardTab): string {
+  return DASHBOARD_TAB_LABELS.get(tab) ?? tab;
+}
+
+export function isDashboardTab(value: string): value is DashboardTab {
+  return DASHBOARD_TAB_LABELS.has(value);
+}
+
 const STATUS_CLASS: ReadonlyMap<string, string> = new Map([
   ["draft", "border-amber-200 bg-amber-50 text-amber-800"],
   ["published", "border-green-200 bg-green-50 text-green-800"],
@@ -36,6 +71,15 @@ const STATUS_CLASS: ReadonlyMap<string, string> = new Map([
 ]);
 
 const PAGE_SIZE = 20;
+
+/**
+ * Compact icon control for one restaurant row action. Every instance is a
+ * native button with an accessible name plus a visible tooltip, a 44px
+ * minimum target, and a focus ring — icon-only buttons never rely on color
+ * or position alone (see fixing-accessibility).
+ */
+const rowIconButtonClass =
+  "inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-lg border border-border-soft bg-white text-ink hover:bg-cream focus-visible:ring-2 focus-visible:ring-brand-blue/40 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50";
 
 function StatusBadge({ status }: { readonly status: string }) {
   const tone = STATUS_CLASS.get(status) ?? "border-border-soft bg-cream text-muted";
@@ -67,6 +111,15 @@ export function RestaurantDashboard({
   onManageMenus,
   onBulkArchive,
   onBulkPublish,
+  selectedId,
+  activeTab,
+  onSelectVenue,
+  onTabChange,
+  onManagePhotos,
+  onArchive,
+  canEdit,
+  canArchive,
+  renderTabPanel,
 }: {
   readonly venues: ReadonlyArray<DashboardVenue>;
   readonly total: number;
@@ -87,12 +140,55 @@ export function RestaurantDashboard({
   readonly onManageMenus: (venue: DashboardVenue) => void;
   readonly onBulkArchive: () => void;
   readonly onBulkPublish: () => void;
+  /** Controlled detail selection. Null (default) hides the tab panel. */
+  readonly selectedId?: string | null | undefined;
+  /** Controlled detail tab. Defaults to overview. */
+  readonly activeTab?: DashboardTab | undefined;
+  /** Row/tap selection. Absent keeps the table read-only for selection. */
+  readonly onSelectVenue?: ((venue: DashboardVenue | null) => void) | undefined;
+  readonly onTabChange?: ((tab: DashboardTab) => void) | undefined;
+  /** Opens the existing photo UI (editor). Defaults to onEdit. */
+  readonly onManagePhotos?: ((venue: DashboardVenue) => void) | undefined;
+  /** Single-venue archive via the existing status endpoint. No hard delete. */
+  readonly onArchive?: ((venue: DashboardVenue) => void) | undefined;
+  /** Manage grant hint for Edit/Menu/Photos. Server still enforces. */
+  readonly canEdit?: boolean | undefined;
+  /** Manage grant hint for Archive. Review is not required to archive. */
+  readonly canArchive?: boolean | undefined;
+  /** Tab body supplied by the route from existing components. */
+  readonly renderTabPanel?: ((venue: DashboardVenue, tab: DashboardTab) => ReactNode) | undefined;
 }) {
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const allPageSelected =
     venues.length > 0 && venues.every((venue) => selection.includes(venue.id));
+
+  const editAllowed = canEdit ?? true;
+  const archiveAllowed = canArchive ?? true;
+  const tab = activeTab ?? "overview";
+  const selectedVenue = venues.find((venue) => venue.id === selectedId) ?? null;
+  const [archiveTarget, setArchiveTarget] = useState<DashboardVenue | null>(null);
+
+  const handlePhotos = (venue: DashboardVenue): void => {
+    if (onManagePhotos !== undefined) {
+      onManagePhotos(venue);
+    } else {
+      onEdit(venue);
+    }
+  };
+
+  const closeArchiveConfirm = (): void => {
+    setArchiveTarget(null);
+  };
+
+  const confirmArchive = (): void => {
+    if (archiveTarget !== null && onArchive !== undefined) {
+      onArchive(archiveTarget);
+    }
+
+    setArchiveTarget(null);
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -130,7 +226,7 @@ export function RestaurantDashboard({
           ]}
         />
         <AdminPrimaryButton type="button" disabled={busy} onClick={onCreate}>
-          Add branch
+          Add restaurant
         </AdminPrimaryButton>
       </AdminToolbar>
 
@@ -156,13 +252,13 @@ export function RestaurantDashboard({
         <AdminEmptyState
           message={
             total === 0
-              ? "No branches yet. Add the first branch to start recording source-backed venues."
-              : "No branches match this search."
+              ? "No restaurants yet. Add the first restaurant to start recording source-backed venues."
+              : "No restaurants match this search."
           }
           action={
             total === 0 ? (
               <AdminPrimaryButton type="button" disabled={busy} onClick={onCreate}>
-                Add branch
+                Add restaurant
               </AdminPrimaryButton>
             ) : undefined
           }
@@ -183,19 +279,26 @@ export function RestaurantDashboard({
                   onChange={onToggleSelectPage}
                 />
               </th>
-              <th className="px-3 py-2">Branch</th>
-              <th className="px-3 py-2">Business</th>
-              <th className="px-3 py-2">State</th>
-              <th className="px-3 py-2">Cuisines</th>
-              <th className="px-3 py-2">Sources</th>
-              <th className="px-3 py-2">Actions</th>
+              <th scope="col" className="px-3 py-2">
+                Branch
+              </th>
+              <th scope="col" className="px-3 py-2">
+                Business
+              </th>
+              <th scope="col" className="px-3 py-2">
+                Status
+              </th>
+              <th scope="col" className="px-3 py-2">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody>
             {venues.map((venue) => {
               const checked = selection.includes(venue.id);
-              const cuisineNames = venue.cuisineIds.map((id) => cuisinesById.get(id) ?? `#${id}`);
-              const pending = venue.pendingCount + venue.pendingEvidence;
+              const isSelected = selectedVenue?.id === venue.id;
+              const archiveDisabled = busy || !archiveAllowed || venue.status === "archived";
+              const editDisabled = busy || !editAllowed;
 
               return (
                 <tr key={venue.id} className="border-b border-border-soft last:border-0">
@@ -212,7 +315,16 @@ export function RestaurantDashboard({
                     />
                   </td>
                   <td className="px-3 py-2">
-                    <p className="font-semibold">{venue.name}</p>
+                    <button
+                      type="button"
+                      disabled={busy || onSelectVenue === undefined}
+                      onClick={() => onSelectVenue?.(venue)}
+                      aria-pressed={isSelected}
+                      title={`Open details for ${venue.name}`}
+                      className="rounded-md text-left font-semibold underline decoration-brand-blue/40 underline-offset-2 hover:decoration-brand-blue focus-visible:ring-2 focus-visible:ring-brand-blue/40 focus-visible:outline-none disabled:no-underline disabled:opacity-60"
+                    >
+                      {venue.name}
+                    </button>
                     <p className="text-xs text-muted">
                       {venue.area} · {venue.countryCode}
                     </p>
@@ -222,30 +334,89 @@ export function RestaurantDashboard({
                   <td className="px-3 py-2">
                     <StatusBadge status={venue.status} />
                   </td>
-                  <td className="px-3 py-2 text-sm">
-                    {cuisineNames.length === 0 ? "—" : cuisineNames.join(", ")}
-                  </td>
-                  <td className="px-3 py-2 text-sm">
-                    {venue.sourceCount} {venue.sourceCount === 1 ? "source" : "sources"}
-                    {pending > 0 && ` · ${pending} pending`}
-                  </td>
                   <td className="px-3 py-2">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => onEdit(venue)}
-                      className={`${adminGhostButtonClass} mr-1`}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => onManageMenus(venue)}
-                      className={adminGhostButtonClass}
-                    >
-                      Menus
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        aria-label={`Edit ${venue.name}`}
+                        title={`Edit ${venue.name}`}
+                        disabled={editDisabled}
+                        onClick={() => onEdit(venue)}
+                        className={rowIconButtonClass}
+                      >
+                        <Pencil aria-hidden="true" className="size-4" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Manage menu for ${venue.name}`}
+                        title={`Manage menu for ${venue.name}`}
+                        disabled={editDisabled}
+                        onClick={() => onManageMenus(venue)}
+                        className={rowIconButtonClass}
+                      >
+                        <BookOpen aria-hidden="true" className="size-4" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Manage photos for ${venue.name}`}
+                        title={`Manage photos for ${venue.name}`}
+                        disabled={editDisabled}
+                        onClick={() => handlePhotos(venue)}
+                        className={rowIconButtonClass}
+                      >
+                        <ImageIcon aria-hidden="true" className="size-4" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Archive ${venue.name}`}
+                        title={`Archive ${venue.name}`}
+                        disabled={archiveDisabled}
+                        onClick={() => setArchiveTarget(venue)}
+                        className={rowIconButtonClass}
+                      >
+                        <Archive aria-hidden="true" className="size-4" />
+                      </button>
+                      <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label={`More actions for ${venue.name}`}
+                            title={`More actions for ${venue.name}`}
+                            disabled={busy}
+                            className={`${rowIconButtonClass} border-transparent`}
+                          >
+                            <Ellipsis aria-hidden="true" className="size-4" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem disabled={editDisabled} onSelect={() => onEdit(venue)}>
+                            <Pencil aria-hidden="true" className="size-4" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={editDisabled}
+                            onSelect={() => onManageMenus(venue)}
+                          >
+                            <BookOpen aria-hidden="true" className="size-4" />
+                            Manage menu
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={editDisabled}
+                            onSelect={() => handlePhotos(venue)}
+                          >
+                            <ImageIcon aria-hidden="true" className="size-4" />
+                            Manage photos
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={archiveDisabled}
+                            onSelect={() => setArchiveTarget(venue)}
+                          >
+                            <Archive aria-hidden="true" className="size-4" />
+                            Archive
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </td>
                 </tr>
               );
@@ -254,7 +425,97 @@ export function RestaurantDashboard({
         </AdminTable>
       )}
 
-      <nav aria-label="Branch pages" className="flex items-center justify-between gap-2 text-sm">
+      {selectedVenue !== null && (
+        <section
+          aria-label={`Details for ${selectedVenue.name}`}
+          className="rounded-2xl border border-border-soft bg-white p-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-bold">{selectedVenue.name}</h2>
+            {onSelectVenue !== undefined && (
+              <AdminGhostButton type="button" onClick={() => onSelectVenue(null)}>
+                Close details
+              </AdminGhostButton>
+            )}
+          </div>
+          <div
+            role="tablist"
+            aria-label={`Sections for ${selectedVenue.name}`}
+            className="mt-3 flex flex-wrap gap-1"
+          >
+            {DASHBOARD_TABS.map((entry) => {
+              const selected = tab === entry;
+
+              return (
+                <button
+                  key={entry}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => onTabChange?.(entry)}
+                  className={`inline-flex min-h-11 items-center rounded-full border px-4 text-sm font-semibold focus-visible:ring-2 focus-visible:ring-brand-blue/40 focus-visible:outline-none ${
+                    selected
+                      ? "border-food-orange bg-cream font-bold text-food-orange-dark"
+                      : "border-border-soft bg-white text-ink hover:bg-cream"
+                  }`}
+                >
+                  {dashboardTabLabel(entry)}
+                </button>
+              );
+            })}
+          </div>
+          <div role="tabpanel" className="mt-3">
+            {renderTabPanel !== undefined ? (
+              renderTabPanel(selectedVenue, tab)
+            ) : (
+              <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="font-semibold">Business</dt>
+                  <dd>{selectedVenue.businessName}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold">Address</dt>
+                  <dd>
+                    {selectedVenue.address} · {selectedVenue.area} · {selectedVenue.countryCode}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-semibold">Status</dt>
+                  <dd>
+                    <StatusBadge status={selectedVenue.status} />
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-semibold">Cuisines</dt>
+                  <dd>
+                    {selectedVenue.cuisineIds.length === 0
+                      ? "—"
+                      : selectedVenue.cuisineIds
+                          .map((id) => cuisinesById.get(id) ?? `#${id}`)
+                          .join(", ")}
+                  </dd>
+                </div>
+              </dl>
+            )}
+          </div>
+        </section>
+      )}
+
+      <AdminConfirmDialog
+        open={archiveTarget !== null}
+        title={archiveTarget === null ? "Archive restaurant" : `Archive ${archiveTarget.name}?`}
+        description="The branch leaves the public list. Sources, prices and serving history are retained; nothing is deleted."
+        confirmLabel="Archive branch"
+        cancelLabel="Cancel"
+        pending={busy}
+        onConfirm={confirmArchive}
+        onCancel={closeArchiveConfirm}
+      />
+
+      <nav
+        aria-label="Restaurant pages"
+        className="flex items-center justify-between gap-2 text-sm"
+      >
         <p aria-live="polite">
           Page {page} of {pageCount} · {total} {total === 1 ? "branch" : "branches"}
         </p>

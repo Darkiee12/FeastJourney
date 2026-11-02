@@ -90,12 +90,39 @@ export function RestaurantFiltersSheet({
           <div className="res-sheet-head">
             <Dialog.Title className="res-sheet-title">{copy.filtersTitle}</Dialog.Title>
             <Dialog.Close asChild>
-              <button type="button" aria-label={copy.filters} className="res-icon-btn">
+              <button type="button" aria-label={copy.filtersClose} className="res-icon-btn">
                 <X aria-hidden="true" />
               </button>
             </Dialog.Close>
           </div>
           <form onSubmit={submit} className="res-sheet-body">
+            {dishActive && (
+              <div className="res-field">
+                <p className="res-hint">{copy.dishEvidence}</p>
+                <button
+                  type="button"
+                  className="res-ghost"
+                  onClick={() => {
+                    setPortion("");
+                    setBudget("");
+                    setCurrency("");
+                    onOpenChange(false);
+                    onApply({
+                      dish: undefined,
+                      portion: undefined,
+                      budget: undefined,
+                      currency: undefined,
+                      sort:
+                        search.sort === "price_low" || search.sort === "price_high"
+                          ? "recommended"
+                          : search.sort,
+                    });
+                  }}
+                >
+                  {copy.clearDish}
+                </button>
+              </div>
+            )}
             <div className="res-field">
               <label htmlFor="sheet-cuisine">{copy.cuisine}</label>
               <select

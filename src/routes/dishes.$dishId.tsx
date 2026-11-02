@@ -1,7 +1,6 @@
 import {
   createFileRoute,
   getRouteApi,
-  Link,
   notFound,
   useNavigate,
   useRouter,
@@ -11,6 +10,7 @@ import { z } from "zod";
 
 import { getDishFn } from "@/modules/food-discovery/food.functions";
 import type { DishProfile } from "@/modules/food-discovery/server/domain/dish";
+import { DishPriceActions } from "@/modules/restaurant-discovery/components/dish-price-actions";
 import {
   SaveDishButton,
   statusForDish,
@@ -208,13 +208,13 @@ function DishDetail() {
         <time dateTime={new Date(dish.lastUpdate * 1000).toISOString()}>{updatedLabel}</time>
       </p>
 
-      <Link
-        className="discovery-action mt-5"
-        to="/restaurants"
-        search={{ lang, dish: dish.id, fromDish: dish.slug }}
-      >
-        {lang === "vi" ? "Tìm nhà hàng phục vụ món này" : "Find restaurants serving this"}
-      </Link>
+      <DishPriceActions
+        dishId={dish.id}
+        dishSlug={dish.slug}
+        lang={lang}
+        restaurantsLabel={lang === "vi" ? "Nhà hàng" : "Restaurants"}
+        compareLabel={lang === "vi" ? "So sánh giá" : "Compare prices"}
+      />
       <div className="mt-5">
         <SaveDishButton
           dishId={dish.id}

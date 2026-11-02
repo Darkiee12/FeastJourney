@@ -439,7 +439,12 @@ export function RestaurantEditor({
         </fieldset>
 
         {editing && (
-          <section aria-label="Source and attribution summary" className="flex flex-col gap-2">
+          <section
+            id="restaurant-editor-sources"
+            aria-label="Source and attribution summary"
+            className="flex scroll-mt-4 flex-col gap-2"
+          >
+            {" "}
             <h3 className="text-sm font-semibold">Sources & attribution</h3>
             {sources.length === 0 ? (
               <p className="text-sm text-muted">
@@ -473,7 +478,12 @@ export function RestaurantEditor({
         )}
 
         {editing && photoClient !== undefined && (
-          <section aria-label="Venue photos" className="flex flex-col gap-2">
+          <section
+            id="restaurant-editor-photos"
+            aria-label="Venue photos"
+            className="flex scroll-mt-4 flex-col gap-2"
+          >
+            {" "}
             <h3 className="text-sm font-semibold">Photos</h3>
             <RestaurantPhotoManager
               venueId={venue.id}

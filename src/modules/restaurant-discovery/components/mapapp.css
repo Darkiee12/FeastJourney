@@ -240,6 +240,22 @@
   .mapapp-ghost-btn:hover {
     background: var(--color-cream);
   }
+  /* Results | Compare prices toggle: compact chip group, pressed state
+     reads as the active view. Dish-scoped searches only. */
+  .mapapp-viewtoggle {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+  }
+  .mapapp-viewtoggle .mapapp-ghost-btn[aria-pressed="true"] {
+    border-color: var(--color-ink);
+    background: var(--color-ink);
+    color: white;
+  }
   .mapapp-spin {
     animation: mapapp-spin 1s linear infinite;
   }
@@ -412,6 +428,13 @@
     padding: 0.35rem;
     max-height: 19rem;
     overflow: auto;
+    list-style: none;
+    margin: 0;
+  }
+  .mapapp-suggest > li {
+    margin: 0;
+    padding: 0;
+    min-width: 0;
   }
   .mapapp-suggest button {
     display: grid;
@@ -957,6 +980,112 @@
       transition: none;
     }
   }
+  /* Warm production basemap decision (implemented in
+     restaurant-map.tsx WARM_BASEMAP/applyWarmBasemap): keep MapLibre +
+     VITE_MAP_STYLE_URL; warm via decorative paint (cream land #FAF6EC,
+     soft-blue water #BFDDF0, light-green parks #D8EACD, muted amber
+     arterials #EFCF96, white minors, haloed labels). Recommended tile
+     provider: MapTiler Streets (vector, vi labels, key + domain lock,
+     usage billing + alerts) or CARTO Voyager (positron/voyager, OSM
+     attribution). Never tile.openstreetmap.org as a production CDN.
+     Attribution stays compact-visible; pins (#E53935) and user dot
+     (brand blue) are the only saturated marks. Zoom 13-17 framing is
+     owned by the map camera; cooperativeGestures stays off. */
+  .mapapp-mapwrap .discovery-map-empty {
+    position: absolute;
+    left: 50%;
+    bottom: 4.25rem;
+    translate: -50% 0;
+    z-index: 4;
+    max-width: min(22rem, calc(100% - 2rem));
+    display: grid;
+    gap: 0.2rem;
+    background: rgb(255 255 255 / 0.94);
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    box-shadow: 0 8px 24px rgb(3 10 30 / 0.18);
+    padding: 0.6rem 0.85rem;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+    pointer-events: none;
+    text-align: center;
+  }
+  .discovery-map-empty-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+  .discovery-map-empty p {
+    margin: 0;
+  }
+  /* Empty-overlay actions (map-owned): the overlay itself never
+     intercepts gestures (pointer-events none above); only these buttons
+     opt back in so pan/zoom keep working around them. Widen preserves
+     dish identity via the parent navigation; the radius chip opens the
+     existing radius options dialog (⌄ affordance, never a bare X). */
+  .discovery-map-empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    justify-content: center;
+    margin-top: 0.35rem;
+    pointer-events: auto;
+  }
+  .discovery-map-empty-actions .mapapp-primary-btn,
+  .discovery-map-empty-actions .mapapp-chip-btn {
+    min-height: 2.5rem;
+    font-size: 0.85rem;
+    padding: 0.4rem 1rem;
+  }
+  .discovery-map-empty-actions .mapapp-chip-btn:focus-visible,
+  .discovery-map-empty-actions .mapapp-primary-btn:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  /* Skeleton shimmer for in-sheet / card / venue loading states. Opacity
+     and background-position only; disabled under reduced motion. */
+  .mapapp-skel {
+    display: grid;
+    gap: 0.45rem;
+  }
+  .mapapp-skeleton {
+    display: grid;
+    gap: 0.6rem;
+  }
+  .mapapp-skel-card {
+    display: grid;
+    gap: 0.45rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 0.9rem 1rem;
+    list-style: none;
+  }
+  .mapapp-skel-line {
+    display: block;
+    height: 0.85rem;
+    border-radius: 9999px;
+    background: linear-gradient(
+      90deg,
+      var(--color-cream) 25%,
+      var(--color-border-soft) 50%,
+      var(--color-cream) 75%
+    );
+    background-size: 200% 100%;
+    animation: mapapp-skel 1.4s ease-in-out infinite;
+  }
+  .mapapp-skel-line.wide {
+    height: 1.1rem;
+    width: 75%;
+  }
+  .mapapp-skel-line.narrow {
+    width: 40%;
+  }
+  @keyframes mapapp-skel {
+    to {
+      background-position: -200% 0;
+    }
+  }
   @media (prefers-reduced-motion: reduce) {
     .mapapp-drawer,
     .mapapp-sheet:not([data-dragging="true"]),
@@ -965,6 +1094,9 @@
       transition: none;
     }
     .mapapp-spin {
+      animation: none;
+    }
+    .mapapp-skel-line {
       animation: none;
     }
   }

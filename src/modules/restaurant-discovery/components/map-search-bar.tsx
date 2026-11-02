@@ -284,6 +284,7 @@ export function MapSearchBar({
             role="combobox"
             aria-expanded={suggestions.length > 0}
             aria-controls={listId}
+            aria-activedescendant={active >= 0 ? `${listId}-option-${active}` : undefined}
             placeholder={copy.appSearchPlaceholder}
             value={text}
             onChange={(event) => {
@@ -297,29 +298,32 @@ export function MapSearchBar({
         <div className="mapapp-search-actions">{actionButtons}</div>
       </div>
       {suggestions.length > 0 && (
-        <div id={listId} className="mapapp-suggest">
+        <ul id={listId} className="mapapp-suggest" aria-label={copy.appSearchLabel}>
           {suggestions.map((suggestion, index) => (
-            <button
-              key={suggestion.key}
-              ref={(element) => {
-                itemRefs.current[index] = element;
-              }}
-              type="button"
-              data-active={index === active}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => choose(suggestion)}
-              onMouseEnter={() => setActive(index)}
-            >
-              <span className="mapapp-suggest-kind">{suggestion.hint}</span>
-              <span className="mapapp-suggest-label">{suggestion.label}</span>
-              {suggestion.kind === "text" && (
-                <span className="mapapp-suggest-enter">
-                  {copy.suggestHint} “{suggestion.label}”
-                </span>
-              )}
-            </button>
+            <li key={suggestion.key}>
+              <button
+                ref={(element) => {
+                  itemRefs.current[index] = element;
+                }}
+                id={`${listId}-option-${index}`}
+                type="button"
+                aria-current={index === active || undefined}
+                data-active={index === active}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => choose(suggestion)}
+                onMouseEnter={() => setActive(index)}
+              >
+                <span className="mapapp-suggest-kind">{suggestion.hint}</span>
+                <span className="mapapp-suggest-label">{suggestion.label}</span>
+                {suggestion.kind === "text" && (
+                  <span className="mapapp-suggest-enter">
+                    {copy.suggestHint} “{suggestion.label}”
+                  </span>
+                )}
+              </button>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </div>
   );
