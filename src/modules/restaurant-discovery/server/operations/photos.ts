@@ -67,16 +67,14 @@ export const DERIVATIVE_QUALITY = 80;
 /**
  * Licenses the editor may attach. `unknown` is storable at draft stage but
  * never publishable; anything outside this list is rejected at the boundary.
+ * Canonical list lives in the browser-safe `restaurant-photos.schema`
+ * (imported here so server and transport share one source).
  */
-export const SUPPORTED_PHOTO_LICENSES = [
-  "own-work",
-  "cc0",
-  "cc-by",
-  "cc-by-sa",
-  "licensed",
-] as const;
+import { SUPPORTED_PHOTO_LICENSES } from "@/modules/restaurant-discovery/restaurant-photos.schema";
 
-export type PhotoLicense = (typeof SUPPORTED_PHOTO_LICENSES)[number];
+export { SUPPORTED_PHOTO_LICENSES };
+
+export type { PhotoLicense } from "@/modules/restaurant-discovery/restaurant-photos.schema";
 
 export const PUBLISHABLE_PHOTO_LICENSES: ReadonlySet<string> = new Set(SUPPORTED_PHOTO_LICENSES);
 

@@ -1,6 +1,20 @@
 import { z } from "zod";
 
-import { SUPPORTED_PHOTO_LICENSES } from "@/modules/restaurant-discovery/server/operations/photos";
+/**
+ * Licenses the editor may attach. Single source of truth, kept in this
+ * browser-safe module (zod only): the server service imports it from here
+ * so the browser bundle never pulls in the server operation module
+ * (sharp/postgres/S3) through this schema.
+ */
+export const SUPPORTED_PHOTO_LICENSES = [
+  "own-work",
+  "cc0",
+  "cc-by",
+  "cc-by-sa",
+  "licensed",
+] as const;
+
+export type PhotoLicense = (typeof SUPPORTED_PHOTO_LICENSES)[number];
 
 /**
  * Browser transport schemas for first-party venue photography.
