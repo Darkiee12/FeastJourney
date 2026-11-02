@@ -10,6 +10,7 @@ import {
 import {
   formatPlaceContext,
   isCanonicalPlaceId,
+  isVerifiedPlaceRef,
   parsePlaceRef,
 } from "@/components/admin/places/place-grammar";
 import { adminPlaceDetailFn, adminPlacesListFn } from "@/modules/food-discovery/place.functions";
@@ -137,6 +138,18 @@ function ReferencePlaceSelector({
   const [searchOpen, setSearchOpen] = useState(false);
 
   const preview = previewFor(value, lang);
+  const unverified = preview.text !== null && !isVerifiedPlaceRef(value);
+  const unverifiedHintId = `${id}-unverified-hint`;
+
+  let describedBy = `${id}-hint`;
+
+  if (preview.invalid) {
+    describedBy += ` ${id}-error`;
+  }
+
+  if (unverified) {
+    describedBy += ` ${unverifiedHintId}`;
+  }
 
   const searchAvailable = placeFnAvailable("adminPlacesListFn");
 
@@ -180,7 +193,7 @@ function ReferencePlaceSelector({
         id={id}
         value={value}
         autoComplete="off"
-        aria-describedby={`${id}-hint${preview.invalid ? ` ${id}-error` : ""}`}
+        aria-describedby={describedBy}
         aria-invalid={preview.invalid}
         onChange={(event) => {
           onChange(event.target.value);
@@ -197,6 +210,11 @@ function ReferencePlaceSelector({
       {preview.text !== null ? (
         <p aria-live="polite" className="text-sm font-semibold text-food-orange-dark">
           {preview.text}
+        </p>
+      ) : null}
+      {unverified ? (
+        <p id={unverifiedHintId} className="text-sm text-muted">
+          {copy.adminPlaceRefUnverified}
         </p>
       ) : null}
       {preview.invalid ? (

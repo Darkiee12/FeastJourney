@@ -16,6 +16,17 @@ export class InvalidSearchFilter extends Data.TaggedError("InvalidSearchFilter")
   readonly reason: string;
 }> {}
 
+/**
+ * A dish↔place reference names a locality the registry does not contain
+ * (unknown id, ISO, or city name, or a parent-ISO scope mismatch). Carries
+ * the server-built reason so curators learn the locality must be
+ * registered first. Replaces the generic InvalidSearchFilter at the four
+ * resolvePlaceRefLocal miss sites; everything else keeps its existing tag.
+ */
+export class UnknownPlace extends Data.TaggedError("UnknownPlace")<{
+  readonly reason: string;
+}> {}
+
 export class InvalidLocale extends Data.TaggedError("InvalidLocale")<{
   readonly locale: string;
 }> {}

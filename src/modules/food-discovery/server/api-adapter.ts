@@ -25,6 +25,7 @@ import {
   encodeCursor,
 } from "@/modules/food-discovery/server/operations/cursor";
 import type { DishService } from "@/modules/food-discovery/server/operations/dish-service";
+import type { AmbiguousPlace } from "@/modules/food-discovery/server/operations/place-admin-service";
 import type { PlaceRepository } from "@/modules/food-discovery/server/repository/place-repository";
 import type { Authorization } from "@/modules/user/server/operations/authorization";
 import type { RoleRepository } from "@/modules/user/server/repository/role-repository";
@@ -94,6 +95,7 @@ import type {
   InvalidLocale,
   InvalidRelationship,
   PlaceNotFound,
+  UnknownPlace,
 } from "@/modules/food-discovery/server/domain/errors";
 import { isDbIdString } from "@/modules/food-discovery/server/domain/ids";
 import type {
@@ -121,6 +123,8 @@ type ApiFailure =
   | IngredientNotFound
   | PlaceNotFound
   | InvalidSearchFilter
+  | UnknownPlace
+  | AmbiguousPlace
   | InvalidLocale
   | InvalidJsonBody
   | InvalidDishData
