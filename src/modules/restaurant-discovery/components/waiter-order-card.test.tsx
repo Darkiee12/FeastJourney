@@ -72,7 +72,7 @@ const plainSelection = (quantity: number): ReadonlyArray<MenuSelection> => [
 const copy = menuCopy("en");
 
 describe("WaiterOrderCard", () => {
-  test("venue, original names and large quantities lead; translations secondary", () => {
+  test("venue, original names and large quantities lead; translations hidden by default", () => {
     const markup = renderToStaticMarkup(
       <WaiterOrderCard menu={menu(priced)} selections={plainSelection(2)} locale="en" />,
     );
@@ -80,7 +80,8 @@ describe("WaiterOrderCard", () => {
     expect(markup).toContain("Quán Phở Thật");
     expect(markup).toContain("Phở bò");
     expect(markup).toContain("Tô thường");
-    expect(markup).toContain("Beef noodle soup");
+    expect(markup).not.toContain("Beef noodle soup");
+    expect(markup).toContain(copy.showTranslations);
     expect(markup).toContain(copy.notSubmitted);
     expect(markup).toContain("VND");
   });
@@ -95,7 +96,7 @@ describe("WaiterOrderCard", () => {
     expect(markup).toContain(copy.reviewRequired);
   });
 
-  test("reviewed special requests render in both languages", () => {
+  test("reviewed special requests render the original; the toggle reveals the rest", () => {
     const markup = renderToStaticMarkup(
       <WaiterOrderCard
         menu={menu(priced)}
@@ -106,7 +107,6 @@ describe("WaiterOrderCard", () => {
     );
 
     expect(markup).toContain("Ít cay giúp tôi");
-    expect(markup).toContain("Less spicy please");
     expect(markup).not.toContain(copy.reviewRequired);
   });
 
@@ -129,7 +129,7 @@ describe("WaiterOrderCard", () => {
       />,
     );
 
-    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain('aria-pressed="false"');
     expect(markup).toContain(`aria-label="${copy.back}"`);
   });
 

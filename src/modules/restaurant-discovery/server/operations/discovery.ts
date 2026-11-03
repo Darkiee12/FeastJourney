@@ -202,8 +202,15 @@ export const searchRestaurants = Effect.fn("restaurants.searchRestaurants")(func
     portion: input.portion ?? null,
   };
 
+  // Area price summaries cover the same geographic scope as the dish
+  // search itself: a named area, a center+radius circle, or a bounded
+  // viewport. The underlying SQL already scopes all three; only this gate
+  // used to exclude radius and bounds. Minimum three venues per currency:
+  // one or two observations are shown honestly in the compare list, but a
+  // "range" needs a market, not a anecdote.
   const ranges =
-    input.area !== "" && input.portion !== undefined
+    input.portion !== undefined &&
+    (input.area !== "" || input.longitude !== undefined || input.west !== undefined)
       ? yield* runQuery("restaurants/local-price-range", (sql) =>
           localRanges.run(sql, { ...offeringParams, minimum_venues: 3 }),
         )

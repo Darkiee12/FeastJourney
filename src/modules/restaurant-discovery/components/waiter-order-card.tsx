@@ -61,8 +61,6 @@ function WaiterOrderLine({
 }) {
   const price = line.variant.price;
 
-  const entered = line.instruction.trim() !== "" || line.originalLanguageInstruction.trim() !== "";
-
   const bothEntered =
     line.instruction.trim() !== "" && line.originalLanguageInstruction.trim() !== "";
 
@@ -106,26 +104,15 @@ function WaiterOrderLine({
           {line.instruction}
         </p>
       )}
-      {!showInstruction && entered && (
-        <p role="note" className="mt-2 text-xs font-semibold">
-          ⚠ {copy.reviewRequired}
-        </p>
-      )}
       {line.lineAmount !== null &&
       price !== null &&
       price.currency !== null &&
       isCurrency(price.currency) ? (
         <p className="mt-1 text-sm">
-          {copy.linePrice}: {formatMoney(line.lineAmount, price.currency, locale)}{" "}
-          <span>{price.currency}</span>
+          {formatMoney(line.lineAmount, price.currency, locale)} <span>{price.currency}</span>
         </p>
       ) : (
         <p className="mt-1 text-sm font-semibold">⚠ {copy.unknownPrice}</p>
-      )}
-      {line.item.uncertainties.length > 0 && (
-        <p className="mt-1 text-xs">
-          ⚠ {copy.uncertainty}: {line.item.uncertainties.join("; ")}
-        </p>
       )}
       {onVariant !== undefined && line.item.variants.length > 1 && (
         <div className="mt-2">
@@ -221,7 +208,9 @@ export function WaiterOrderCard({
   readonly onVariant?: ((previousVariantId: string, nextVariantId: string) => void) | undefined;
 }) {
   const titleId = useId();
-  const [showTranslations, setShowTranslations] = useState(true);
+  // Waiter-facing mode hides translations by default: staff match the
+  // printed originals. The toggle stays one tap away for the traveler.
+  const [showTranslations, setShowTranslations] = useState(false);
   const copy = menuCopy(locale);
   const toggleLabels = translationToggleLabels ?? translationToggleFallback(copy);
   const sourceLanguage = menu.sourceLanguage ?? "und";
@@ -233,6 +222,20 @@ export function WaiterOrderCard({
   const lines = orderLines(menu, selections);
   const subtotal = menuSubtotal(menu, selections);
   const quantity = selections.reduce((total, selection) => total + selection.quantity, 0);
+
+  // One footer-level warning instead of a repeated per-line notice.
+  const anyNeedsReview = lines.some((line) => {
+    const entered =
+      line.instruction.trim() !== "" || line.originalLanguageInstruction.trim() !== "";
+
+    const bothEntered =
+      line.instruction.trim() !== "" && line.originalLanguageInstruction.trim() !== "";
+
+    return entered && !(bothEntered && (reviewedVariantIds?.has(line.variant.id) ?? false));
+  });
+
+  // One card-level note instead of repeated per-line warnings.
+  const uncertainties = [...new Set(lines.flatMap((line) => line.item.uncertainties))];
 
   const subtotalText = MenuSubtotal.$match(subtotal, {
     Empty: () => copy.empty,
@@ -278,13 +281,10 @@ export function WaiterOrderCard({
           {originalIntroduction}
         </p>
       )}
-      {translatedIntroduction !== undefined && (
+      {showTranslations && translatedIntroduction !== undefined && (
         <p lang={menu.targetLanguage} className="mt-1 text-sm text-muted">
           {translatedIntroduction}
         </p>
-      )}
-      {menu.sourceLanguage === null && (
-        <p className="mt-1 text-xs font-semibold">⚠ {copy.unknownLanguage}</p>
       )}
       <ol className="mt-2 list-none p-0">
         {lines.map((line) => (
@@ -306,11 +306,30 @@ export function WaiterOrderCard({
         <p aria-live="polite" className="text-lg font-extrabold">
           {subtotalText}
         </p>
-        <p className="mt-1 text-xs">{copy.fees}</p>
-        {menu.provenance === "private_scan" && <p className="mt-1 text-xs">{copy.privateOrder}</p>}
-        {menu.provenance === "draft" && <p className="mt-1 text-xs">{copy.draftOrder}</p>}
+        {anyNeedsReview && (
+          <p role="note" className="mt-2 text-xs font-semibold">
+            ⚠ {copy.reviewRequired}
+          </p>
+        )}
+        {(uncertainties.length > 0 ||
+          menu.sourceLanguage === null ||
+          menu.provenance !== "reviewed") && (
+          <details className="mt-2 text-xs">
+            <summary>{copy.sourceDetails}</summary>
+            {menu.sourceLanguage === null && (
+              <p className="mt-1 font-semibold">⚠ {copy.unknownLanguage}</p>
+            )}
+            {uncertainties.length > 0 && (
+              <p className="mt-1">
+                ⚠ {copy.uncertainty}: {uncertainties.join("; ")}
+              </p>
+            )}
+            {menu.provenance === "private_scan" && <p className="mt-1">{copy.privateOrder}</p>}
+            {menu.provenance === "draft" && <p className="mt-1">{copy.draftOrder}</p>}
+          </details>
+        )}
         <p role="note" className="mt-3 rounded-xl border-2 border-ink p-3 text-sm font-bold">
-          ⚠ {copy.notSubmitted}
+          ⚠ {copy.notSubmitted} {copy.fees}
         </p>
       </footer>
     </section>

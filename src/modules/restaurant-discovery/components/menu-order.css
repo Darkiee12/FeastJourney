@@ -435,6 +435,10 @@
 }
 
 .menu-row-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   font-size: clamp(0.875rem, 3.8vw, 1rem);
   font-weight: 700;
   line-height: 1.35;
@@ -442,6 +446,10 @@
 }
 
 .menu-row-original {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 0.8125rem;
   line-height: 1.4;
   color: var(--color-muted);

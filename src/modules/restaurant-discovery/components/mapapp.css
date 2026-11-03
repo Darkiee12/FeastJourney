@@ -539,6 +539,38 @@
     color: var(--color-ink);
     font-size: 0.95rem;
   }
+  .mapapp-price-scope {
+    display: grid;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+  .mapapp-price-scope-head {
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 700;
+    font-size: 0.88rem;
+    color: var(--color-ink);
+  }
+  .mapapp-price-scope-range {
+    margin: 0;
+    min-width: 0;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+  .mapapp-price-scope-range span {
+    font-weight: 700;
+  }
+  .mapapp-price-scope .mapapp-ghost-btn {
+    justify-self: start;
+    min-height: 2.5rem;
+    font-size: 0.85rem;
+    padding: 0.4rem 1rem;
+  }
   .mapapp-note {
     font-size: 0.85rem;
     color: var(--color-muted);

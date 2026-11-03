@@ -31,6 +31,7 @@ const english = {
   back: "Back to menu",
   orderTitle: "Your order to show",
   notSubmitted: "Show this card to the waiter. No order has been submitted.",
+  sourceDetails: "Source and safety notes",
   subtotal: "Estimated menu subtotal",
   fees: "Confirm taxes, service charges, discounts and final prices with the waiter.",
   priceCheck: "Some prices or currencies are unknown. Ask the waiter for a total.",
@@ -94,6 +95,13 @@ const english = {
   hideTranslations: "Hide translations",
   openDetails: "View details",
   addToOrder: "Add to order",
+  menuLanguageLabel: "Menu language",
+  menuLanguageUnavailable: "Not available yet",
+  moreLanguagesLabel: "More languages",
+  hinglishLabel: "Hinglish style",
+  hinglishUnavailable:
+    "No reviewed Hinglish text for these dishes yet — showing English. Original names are preserved below.",
+  helpAddMenu: "Help add this menu",
 };
 
 const vietnamese: typeof english = {
@@ -128,6 +136,7 @@ const vietnamese: typeof english = {
   back: "Quay lại thực đơn",
   orderTitle: "Phiếu gọi món của bạn",
   notSubmitted: "Đưa phiếu này cho nhân viên xem. Chưa có đơn nào được gửi.",
+  sourceDetails: "Ghi chú về nguồn và an toàn",
   subtotal: "Tạm tính theo thực đơn",
   fees: "Xác nhận thuế, phí phục vụ, giảm giá và giá cuối cùng với nhân viên.",
   priceCheck: "Một số giá hoặc tiền tệ chưa rõ. Hãy hỏi nhân viên về tổng tiền.",
@@ -191,6 +200,13 @@ const vietnamese: typeof english = {
   hideTranslations: "Ẩn bản dịch",
   openDetails: "Xem chi tiết",
   addToOrder: "Thêm vào phiếu gọi",
+  menuLanguageLabel: "Ngôn ngữ thực đơn",
+  menuLanguageUnavailable: "Chưa có",
+  moreLanguagesLabel: "Ngôn ngữ khác",
+  hinglishLabel: "Kiểu Hinglish",
+  hinglishUnavailable:
+    "Chưa có bản Hinglish đã duyệt cho các món này — đang hiện tiếng Anh. Tên gốc được giữ nguyên bên dưới.",
+  helpAddMenu: "Giúp thêm thực đơn này",
 };
 
 const menuTranslations: ReadonlyMap<string, typeof english> = new Map([

@@ -165,6 +165,9 @@ const english = {
   resultsViewLabel: "Results view",
   venuePhotoFallback: "No verified photo for {name}",
   backToRestaurant: "Back to restaurant",
+  priceSummaryWithin: "Within {radius}",
+  priceSummaryMapArea: "In this map area",
+  priceSummaryVenues: "{count} restaurants with comparable prices",
   menuLoading: "Loading the reviewed menu…",
   menuLoadFailed: "The menu could not load.",
 };
@@ -335,6 +338,9 @@ const vietnamese: typeof english = {
   resultsViewLabel: "Chế độ xem kết quả",
   venuePhotoFallback: "Chưa có ảnh đã kiểm chứng cho {name}",
   backToRestaurant: "Về nhà hàng",
+  priceSummaryWithin: "Trong {radius}",
+  priceSummaryMapArea: "Trong khu vực bản đồ này",
+  priceSummaryVenues: "{count} nhà hàng có giá so sánh được",
   menuLoading: "Đang tải thực đơn đã duyệt…",
   menuLoadFailed: "Không tải được thực đơn.",
 };

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft, BookOpen } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
 import { menuCopy } from "@/modules/restaurant-discovery/components/menu-copy";
@@ -12,6 +12,7 @@ import {
   MenuItemRow,
   rowDisplayNameFor,
 } from "@/modules/restaurant-discovery/components/menu-item-row";
+import { MenuLanguageSelector } from "@/modules/restaurant-discovery/components/menu-language-selector";
 import { MenuOrderSummary } from "@/modules/restaurant-discovery/components/menu-order-summary";
 import { MenuPagesViewer } from "@/modules/restaurant-discovery/components/menu-pages-viewer";
 import {
@@ -19,6 +20,13 @@ import {
   type RestaurantCopy,
 } from "@/modules/restaurant-discovery/components/restaurant-copy";
 import { WaiterOrderCard } from "@/modules/restaurant-discovery/components/waiter-order-card";
+import {
+  HINGLISH_STYLE,
+  detectMenuBrowserLanguage,
+  readSavedMenuLanguage,
+  resolveMenuLanguage,
+  writeSavedMenuLanguage,
+} from "@/modules/restaurant-discovery/menu-language";
 import type {
   InteractiveMenu,
   MenuSelection,
@@ -37,13 +45,33 @@ type MenuChannel = RestaurantSearch["channel"];
  *  Keyed by venue + channel; never leaves the browser. */
 const menuPanelScrollTops: Map<string, number> = new Map();
 
-const scrollKeyFor = (venueId: string, channel: MenuChannel): string => `${venueId}:${channel}`;
+const scrollKeyFor = (venueId: string, channel: MenuChannel, menuLang: string): string =>
+  `${venueId}:${channel}:${menuLang}`;
 
 /** Published section keys render as traveler-facing headings ("wine_list"
  *  → "wine list"). Mirrors the shared controller's projection; the panel
  *  owns no section vocabulary of its own. */
 const humanizeSection = (section: string): string =>
   section.replaceAll("-", " ").replaceAll("_", " ");
+
+/** Same-tab notice for menu-language saves (cross-tab arrives via
+ *  the storage event). Mirrors the currency preference store. */
+const menuLanguageStoreEvent = "feastjourney-menu-language";
+
+const changeMenuLanguage = (value: string): void => {
+  writeSavedMenuLanguage(value);
+  window.dispatchEvent(new Event(menuLanguageStoreEvent));
+};
+
+const subscribeToMenuLanguage = (notify: () => void): (() => void) => {
+  window.addEventListener("storage", notify);
+  window.addEventListener(menuLanguageStoreEvent, notify);
+
+  return () => {
+    window.removeEventListener("storage", notify);
+    window.removeEventListener(menuLanguageStoreEvent, notify);
+  };
+};
 
 type BoardItem = InteractiveMenu["items"][number];
 
@@ -63,6 +91,7 @@ export function RestaurantMenuPanel({
   rates,
   venueId,
   venueName,
+  countryCode,
   initialExpandedItemId,
   backLabel,
   errorHeading,
@@ -80,6 +109,7 @@ export function RestaurantMenuPanel({
   readonly rates?: ReadonlyMap<string, ExchangeRate> | undefined;
   readonly venueId: string;
   readonly venueName: string | null;
+  readonly countryCode: string | null;
   readonly initialExpandedItemId?: string | undefined;
   readonly backLabel?: string | undefined;
   readonly errorHeading?: string | undefined;
@@ -98,6 +128,39 @@ export function RestaurantMenuPanel({
   });
 
   const offerings = query.data?.offerings ?? [];
+
+  // Independent menu-reading language: explicit session choice > saved
+  // preference > app language > browser language > English. Switching it
+  // re-projects the already-fetched rows client-side — zero new requests,
+  // no discovery rerun, no map remount.
+  //
+  // Browser globals (saved preference, navigator.languages) are unreadable
+  // during SSR and differ per visitor, so they enter through the external
+  // store: the server snapshot resolves from the app language only, which
+  // is exactly what the server rendered — hydration agrees, then the
+  // client snapshot folds saved/browser preferences in with a normal
+  // update. Reading them during render would both crash runtimes without
+  // navigator.languages and mismatch hydration.
+  const menuLang = useSyncExternalStore(
+    subscribeToMenuLanguage,
+    () =>
+      resolveMenuLanguage({
+        app: lang,
+        browser: detectMenuBrowserLanguage(navigator.languages),
+        saved: readSavedMenuLanguage(),
+      }),
+    () => resolveMenuLanguage({ app: lang }),
+  );
+
+  const projectionLang = menuLang === HINGLISH_STYLE ? "en" : menuLang;
+
+  const availableTranslations: ReadonlyArray<string> = [
+    ...new Set(
+      offerings.flatMap((offering) =>
+        offering.translation_language === null ? [] : [offering.translation_language],
+      ),
+    ),
+  ];
 
   // Secondary tab: published menu pages (photographs/scans). The reviewed
   // menu stays the default tab, except when no structured items exist but
@@ -120,17 +183,20 @@ export function RestaurantMenuPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const saved = menuPanelScrollTops.get(scrollKeyFor(venueId, channel));
+    const saved = menuPanelScrollTops.get(scrollKeyFor(venueId, channel, menuLang));
 
     if (scrollRef.current !== null && saved !== undefined) scrollRef.current.scrollTop = saved;
-  }, [venueId, channel]);
+  }, [venueId, channel, menuLang]);
 
   useEffect(
     () => () => {
       if (scrollRef.current !== null)
-        menuPanelScrollTops.set(scrollKeyFor(venueId, channel), scrollRef.current.scrollTop);
+        menuPanelScrollTops.set(
+          scrollKeyFor(venueId, channel, menuLang),
+          scrollRef.current.scrollTop,
+        );
     },
-    [venueId, channel],
+    [venueId, channel, menuLang],
   );
 
   const sections =
@@ -139,7 +205,9 @@ export function RestaurantMenuPanel({
       : new Map<string, string | null>(query.data.sections.map((row) => [row.id, row.section_key]));
 
   const menu =
-    query.data === undefined ? null : presentReviewed(offerings, venueName, lang, sections);
+    query.data === undefined
+      ? null
+      : presentReviewed(offerings, venueName, projectionLang, sections);
 
   // Progressive-disclosure board state. Selections live in the shared
   // venue+channel controller so quantities, variants, instructions, and
@@ -357,6 +425,18 @@ export function RestaurantMenuPanel({
           <ArrowLeft aria-hidden="true" />
           {backLabelText}
         </button>
+        <MenuLanguageSelector
+          id={`menu-lang-${venueId}`}
+          value={menuLang}
+          available={availableTranslations}
+          countryCode={countryCode}
+          onChange={changeMenuLanguage}
+          languageLabel={copy.menuLanguageLabel}
+          hinglishLabel={copy.hinglishLabel}
+          hinglishUnavailable={copy.hinglishUnavailable}
+          unavailableLabel={copy.menuLanguageUnavailable}
+          moreLanguagesLabel={copy.moreLanguagesLabel}
+        />
         {onChannelChange !== undefined && (
           <fieldset className="menu-panel-channels">
             <legend className="sr-only">{rcopy.diningOptions}</legend>
@@ -432,6 +512,13 @@ export function RestaurantMenuPanel({
           >
             {rcopy.scanMenuAction}
           </Link>
+          <Link
+            className="menu-panel-contribute"
+            to="/scan"
+            search={{ lang, venueId, returnVenue: venueId, returnView: "menu" }}
+          >
+            {copy.helpAddMenu}
+          </Link>
         </div>
       )}
       {tab === "menu" && query.isSuccess && offerings.length > 0 && menu !== null && (
@@ -439,7 +526,10 @@ export function RestaurantMenuPanel({
           ref={scrollRef}
           className="menu-panel-scroll"
           onScroll={(event) =>
-            menuPanelScrollTops.set(scrollKeyFor(venueId, channel), event.currentTarget.scrollTop)
+            menuPanelScrollTops.set(
+              scrollKeyFor(venueId, channel, menuLang),
+              event.currentTarget.scrollTop,
+            )
           }
         >
           {allPricesUnknown && (

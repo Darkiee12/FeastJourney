@@ -64,6 +64,7 @@ import type {
   RestaurantResult,
 } from "@/modules/restaurant-discovery/server/index";
 import { getSessionStateFn, type SessionState } from "@/modules/user/session.functions";
+import { formatMoney } from "@/shared/money";
 
 const route = getRouteApi("/restaurants/");
 
@@ -851,17 +852,32 @@ export function RestaurantSearchPage() {
   const countLabel =
     rows.length === 1 ? copy.placesOne : copy.placesCount.replace("{count}", String(rows.length));
 
+  // Price-scope label mirrors the actual geographic filter: center+radius
+  // reports "Within X km", a bounded viewport reports "In this map area"
+  // (never a false radius), otherwise the named area.
+  let priceScopeLabel = copy.priceSummaryMapArea;
+
+  if (search.longitude !== undefined) {
+    const radiusText = search.radius >= 1000 ? `${search.radius / 1000} km` : `${search.radius} m`;
+
+    priceScopeLabel = copy.priceSummaryWithin.replace("{radius}", radiusText);
+  } else if (search.area !== "") {
+    priceScopeLabel = search.area;
+  }
+
   const resultsBody = (
     <>
-      <FilterChips
-        copy={copy}
-        search={search}
-        lang={search.lang}
-        dishName={dishName}
-        dishSlug={dishSlug}
-        cuisineLabel={cuisineLabel}
-        onPatch={applyPatch}
-      />
+      {!previewOpen && (
+        <FilterChips
+          copy={copy}
+          search={search}
+          lang={search.lang}
+          dishName={dishName}
+          dishSlug={dishSlug}
+          cuisineLabel={cuisineLabel}
+          onPatch={applyPatch}
+        />
+      )}
       {conversion.unavailable && (
         <p aria-live="polite" className="mapapp-note">
           {copy.priceNote}
@@ -961,6 +977,30 @@ export function RestaurantSearchPage() {
             {rows.length === search.limit &&
               ` · ${copy.placesCapped.replace("{limit}", String(search.limit))}`}
           </p>
+          {isDishMode && dishName !== null && data.results.ranges.length > 0 && (
+            <div className="mapapp-price-scope" aria-live="polite">
+              <p className="mapapp-price-scope-head">
+                {dishName} · {priceScopeLabel}
+              </p>
+              {data.results.ranges.map((range) => (
+                <p key={range.currency} className="mapapp-price-scope-range">
+                  {formatMoney(range.minimum, range.currency, search.lang)}
+                  {" – "}
+                  {formatMoney(range.maximum, range.currency, search.lang)}{" "}
+                  <span>{range.currency}</span>
+                  {" · "}
+                  {copy.priceSummaryVenues.replace("{count}", String(range.venue_count))}
+                </p>
+              ))}
+              <button
+                type="button"
+                className="mapapp-ghost-btn"
+                onClick={() => setCompareOpen(true)}
+              >
+                {compareLabel}
+              </button>
+            </div>
+          )}
           {isDishMode && (
             <fieldset className="mapapp-viewtoggle">
               <legend className="sr-only">{compareGroupLabel}</legend>{" "}
@@ -1099,6 +1139,7 @@ export function RestaurantSearchPage() {
               rates={conversion.rates}
               venueId={selected}
               venueName={selectedModel?.name ?? null}
+              countryCode={detail?.venue.country_code ?? null}
               initialExpandedItemId={search.item}
             />
           )}
@@ -1115,35 +1156,6 @@ export function RestaurantSearchPage() {
       <details className="mapapp-options">
         <summary>{copy.displayOptions}</summary>
         {showCurrency && <CurrencySelector preference={preference} />}
-        <label className="mapapp-sort">
-          <span>{copy.sortLabel}</span>
-          <select
-            value={search.sort}
-            onChange={(event) => {
-              const value = event.target.value;
-
-              if (
-                value === "recommended" ||
-                value === "nearest" ||
-                value === "price_low" ||
-                value === "price_high"
-              ) {
-                applyPatch({ sort: value });
-              }
-            }}
-          >
-            <option value="recommended">{copy.sortRecommended}</option>
-            <option value="nearest" disabled={search.longitude === undefined}>
-              {copy.sortNearest}
-            </option>
-            <option value="price_low" disabled={!isDishMode}>
-              {copy.sortPriceLow}
-            </option>
-            <option value="price_high" disabled={!isDishMode}>
-              {copy.sortPriceHigh}
-            </option>
-          </select>
-        </label>
       </details>
     </>
   );
