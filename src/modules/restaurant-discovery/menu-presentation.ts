@@ -1,10 +1,18 @@
 import { BigDecimal, Data } from "effect";
 
+import {
+  currencyProvenanceFromCode,
+  currencyProvenanceToCode,
+  priceAssociationFromCode,
+  priceAssociationToCode,
+  type CurrencyProvenanceCode,
+  type PriceAssociationCode,
+} from "@/modules/restaurant-discovery/menu-price-evidence";
 import type { MenuScanDocument } from "@/modules/restaurant-discovery/menu-scan.schema";
 import { localizationSourceFingerprint } from "@/modules/restaurant-discovery/menu-source-hash";
 import type { MenuOffering } from "@/modules/restaurant-discovery/server/operations/discovery";
 import type { MenuLocalizationRow } from "@/modules/restaurant-discovery/server/operations/menu-localizations";
-import { isAmount, isCurrency } from "@/shared/money";
+import { isAmount, isCurrency, type ExchangeRate } from "@/shared/money";
 
 /** One browser-safe presentation contract for reviewed rows and private drafts. */
 export interface InteractiveMenu {
@@ -42,12 +50,97 @@ export interface InteractiveMenu {
         readonly amount: string | null;
         readonly currency: string | null;
         readonly taxTreatment: string;
+        /**
+         * Additive currency evidence (BT `menu-price-evidence`):
+         * printed | inferred | user-confirmed | unknown. Absent on legacy
+         * rows — readers must fall back with `priceTrustOf`, never assume.
+         */
+        readonly currencyProvenance?: CurrencyProvenanceCode | undefined;
+        /**
+         * Additive item/price linkage (BT): clear | ambiguous |
+         * unavailable. Absent on legacy rows — see `priceAssociationOf`.
+         */
+        readonly association?: PriceAssociationCode | undefined;
+        /** Short reviewer-facing association note; never a second channel. */
+        readonly associationNote?: string | null | undefined;
       } | null;
       readonly provenance: string;
       readonly sourceUrl?: string | null;
     }>;
   }>;
 }
+
+export type PriceCurrencyProvenance = CurrencyProvenanceCode;
+
+export type PriceAssociation = PriceAssociationCode;
+
+/**
+ * Currency evidence for one variant price. Present codes pass through
+ * BT's `provenanceOf` (validated tagged union); legacy rows without the
+ * field keep their previous rendering as printed — the legacy pipeline
+ * only stored explicitly observed currency, so this preserves rather than
+ * reinterprets (BT's absent→unknown default stays the server-resolution
+ * safe choice). Conversion never upgrades this trust — see the currency
+ * control.
+ */
+export const priceTrustOf = (
+  price: {
+    readonly currencyProvenance?: CurrencyProvenanceCode | undefined;
+  } | null,
+): PriceCurrencyProvenance => {
+  if (price?.currencyProvenance === undefined) return "printed";
+
+  return currencyProvenanceToCode(currencyProvenanceFromCode(price.currencyProvenance));
+};
+
+/**
+ * Item/price linkage for one variant price. Ambiguous associations keep
+ * their printed amount visible but must never receive a confident
+ * converted amount — conversion renders only for `clear`.
+ */
+export const priceAssociationOf = (
+  price: {
+    readonly amount: string | null;
+    readonly association?: PriceAssociationCode | undefined;
+    readonly associationNote?: string | null | undefined;
+  } | null,
+): PriceAssociation => {
+  if (price === null || price.amount === null) return "unavailable";
+
+  return priceAssociationToCode(
+    priceAssociationFromCode(price.association, price.associationNote ?? null),
+  );
+};
+
+/**
+ * Confident-conversion gate for one variant price. Returns the shared FX
+ * rate only when conversion is honest: a valid amount + currency, a clear
+ * item/price association, and known currency evidence. Ambiguous,
+ * unavailable, or unknown-currency prices render original-only — never a
+ * converted guess, never zero. Inferred sources keep converting but must
+ * carry BOTH uncertainties at the call site (see PriceConfidenceNote in
+ * menu-item-row); conversion never upgrades trust.
+ */
+export const conversionRateFor = (
+  price: {
+    readonly amount: string | null;
+    readonly currency: string | null;
+    readonly currencyProvenance?: CurrencyProvenanceCode | undefined;
+    readonly association?: PriceAssociationCode | undefined;
+    readonly associationNote?: string | null | undefined;
+  } | null,
+  rates: ReadonlyMap<string, ExchangeRate> | undefined,
+): ExchangeRate | undefined => {
+  if (price === null || price.amount === null || price.currency === null) return undefined;
+
+  if (!isAmount(price.amount) || !isCurrency(price.currency)) return undefined;
+
+  if (priceAssociationOf(price) !== "clear") return undefined;
+
+  if (priceTrustOf(price) === "unknown") return undefined;
+
+  return rates?.get(price.currency);
+};
 
 export const presentScan = (
   document: MenuScanDocument,
@@ -65,6 +158,20 @@ export const presentScan = (
     dishId: null,
     variants: item.variants.map((variant) => ({
       ...variant,
+      // Additive BT evidence round-trips verbatim through the spread;
+      // legacy rows carry no extras and keep their previous rendering.
+      price:
+        variant.price === null
+          ? null
+          : {
+              rawText: variant.price.rawText,
+              amount: variant.price.amount,
+              currency: variant.price.currency,
+              currencyProvenance: variant.price.currencyProvenance,
+              association: variant.price.association,
+              associationNote: variant.price.associationNote,
+              taxTreatment: variant.price.taxTreatment,
+            },
       provenance: "Unverified menu extraction",
     })),
   })),

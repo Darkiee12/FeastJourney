@@ -6,15 +6,21 @@ import {
   Info,
   Minus,
   Plus,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { SharedSelect } from "@/components/ui/select";
 import { ObservedPrice } from "@/modules/restaurant-discovery/components/currency-tools";
+import { menuScanResultsCopy } from "@/modules/restaurant-discovery/components/menu-copy";
 import {
   canonicalDishHrefFor,
+  PriceConfidenceNote,
   type MenuRowItem,
 } from "@/modules/restaurant-discovery/components/menu-item-row";
 import type { MenuSelection } from "@/modules/restaurant-discovery/menu-presentation";
+import { conversionRateFor } from "@/modules/restaurant-discovery/menu-presentation";
 import { isAmount, isCurrency, type ExchangeRate } from "@/shared/money";
 
 /**
@@ -52,10 +58,117 @@ export interface MenuDetailLabels {
   readonly waiterInstruction: string;
   readonly instructionHelp: string;
   readonly reviewedInstructions: string;
+  readonly inferredNote?: string | undefined;
+  readonly possibleNote?: string | undefined;
+}
+
+/**
+ * Accessible in-place photo viewer for menu evidence. Same-origin private
+ * URLs keep authorized access (cookies ride the request); no forced new
+ * tab. Native dialog owns Escape + focus return; zoom is explicit
+ * step buttons (100–300%) with a plain text level, honoring reduced
+ * motion (no transitions). One viewer instance per mount.
+ */
+export function MenuPhotoViewer({
+  photos,
+  photoUrl,
+  locale,
+}: {
+  readonly photos: ReadonlyArray<{ readonly assetId: string; readonly page: number }>;
+  readonly photoUrl: (assetId: string) => string;
+  readonly locale: string;
+}): ReactNode {
+  const copy = menuScanResultsCopy(locale);
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
+
+  const open = photos.find((photo) => photo.assetId === openId) ?? null;
+
+  const inspect = (assetId: string): void => {
+    setZoom(1);
+    setOpenId(assetId);
+  };
+
+  useEffect(() => {
+    if (open !== null) {
+      dialogRef.current?.showModal();
+      closeRef.current?.focus();
+    }
+  }, [open]);
+
+  const close = (): void => {
+    dialogRef.current?.close();
+    setOpenId(null);
+  };
+
+  const zoomIn = (): void => setZoom((level) => Math.min(3, Math.round((level + 0.5) * 10) / 10));
+
+  const zoomOut = (): void => setZoom((level) => Math.max(1, Math.round((level - 0.5) * 10) / 10));
+
+  if (photos.length === 0) return null;
+
+  return (
+    <span className="menu-detail-photos">
+      {photos.map((photo) => (
+        <button
+          key={photo.assetId}
+          type="button"
+          className="menu-detail-photo-open"
+          onClick={() => inspect(photo.assetId)}
+          aria-label={copy.photoOpen.replace("{n}", String(photo.page))}
+        >
+          <ImageIcon aria-hidden="true" />
+          {copy.photoOpen.replace("{n}", String(photo.page))}
+        </button>
+      ))}
+      {open === null ? null : (
+        <dialog
+          ref={dialogRef}
+          className="menu-photo-dialog"
+          aria-label={copy.photoOpen.replace("{n}", String(open.page))}
+          onClose={close}
+        >
+          <div className="menu-photo-zoombar">
+            <button type="button" onClick={zoomOut} disabled={zoom <= 1} aria-label={copy.zoomOut}>
+              <ZoomOut aria-hidden="true" />
+            </button>
+            <output>{copy.zoomLevel.replace("{percent}", String(Math.round(zoom * 100)))}</output>
+            <button type="button" onClick={zoomIn} disabled={zoom >= 3} aria-label={copy.zoomIn}>
+              <ZoomIn aria-hidden="true" />
+            </button>
+          </div>
+          <div className="menu-photo-scroll">
+            <img
+              src={photoUrl(open.assetId)}
+              alt={copy.photoOpen.replace("{n}", String(open.page))}
+              style={{ transform: `scale(${zoom})` }}
+            />
+          </div>
+          <button type="button" ref={closeRef} className="menu-detail-back" onClick={close}>
+            {copy.photoClose}
+          </button>
+        </dialog>
+      )}
+    </span>
+  );
 }
 
 /** Portion selector renders only when the traveler has a real choice. */
 export const showsVariantSelectorFor = (item: MenuRowItem): boolean => item.variants.length > 1;
+
+const portionLabelFor = (
+  originalLabel: string,
+  translatedLabel: string | null,
+  asListed: string,
+): string => {
+  if (originalLabel === "") return asListed;
+
+  if (translatedLabel === null) return originalLabel;
+
+  return `${originalLabel} / ${translatedLabel}`;
+};
 
 export function MenuItemDetail({
   item,
@@ -176,29 +289,34 @@ export function MenuItemDetail({
       ) : null}
       {showSelector ? (
         <span className="menu-detail-variant">
-          <label htmlFor={`menu-detail-variant-${item.id}`}>{labels.variant}</label>
-          <select
+          <SharedSelect
             id={`menu-detail-variant-${item.id}`}
+            ariaLabel={labels.variant}
             value={variant.id}
-            onChange={(event) => onVariant(event.target.value)}
-            lang={sourceLanguage}
-          >
-            {item.variants.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.originalLabel === "" ? labels.asListed : entry.originalLabel}
-                {entry.translatedLabel === null ? "" : ` / ${entry.translatedLabel}`}
-              </option>
-            ))}
-          </select>
+            onValueChange={onVariant}
+            size="compact"
+            options={item.variants.map((entry) => ({
+              label: portionLabelFor(entry.originalLabel, entry.translatedLabel, labels.asListed),
+              value: entry.id,
+            }))}
+          />
         </span>
       ) : null}
       {price !== null && price.amount !== null && price.currency !== null && knownPrice ? (
-        <ObservedPrice
-          amount={price.amount}
-          currency={price.currency}
-          locale={locale}
-          rate={rates?.get(price.currency)}
-        />
+        <>
+          <ObservedPrice
+            amount={price.amount}
+            currency={price.currency}
+            locale={locale}
+            rate={conversionRateFor(price, rates)}
+          />
+          <PriceConfidenceNote
+            price={price}
+            inferredNote={labels.inferredNote}
+            possibleNote={labels.possibleNote}
+            associationNote={price.associationNote}
+          />
+        </>
       ) : (
         <p className="menu-order-price">{labels.unknownPrice}</p>
       )}
@@ -228,14 +346,11 @@ export function MenuItemDetail({
           </a>
         ) : null}
         {photoUrl !== undefined && item.assetIds.length > 0 ? (
-          <span className="menu-detail-photos">
-            {item.assetIds.map((assetId, index) => (
-              <a key={assetId} href={photoUrl(assetId)} target="_blank" rel="noreferrer">
-                <ImageIcon aria-hidden="true" />
-                {labels.photo} {index + 1}
-              </a>
-            ))}
-          </span>
+          <MenuPhotoViewer
+            photos={item.assetIds.map((assetId, index) => ({ assetId, page: index + 1 }))}
+            photoUrl={photoUrl}
+            locale={locale}
+          />
         ) : null}
       </div>
       {item.ingredients !== undefined &&
