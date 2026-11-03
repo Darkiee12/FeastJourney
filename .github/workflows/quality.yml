@@ -94,7 +94,8 @@ jobs:
           done
           node infra/scripts/garage-s3-check.mjs
       - name: Restore Reylo analysis cache
-        uses: actions/cache@v4
+        id: reylo-cache
+        uses: actions/cache/restore@v4
         with:
           # Reylo caches each query's analysis in .reylo/, keyed by a
           # fingerprint of the schema (reylo.dev): entries self-invalidate
@@ -107,6 +108,12 @@ jobs:
             reylo-${{ runner.os }}-
       - name: Reylo-aware TypeScript
         run: bun run check-types
+      - name: Save Reylo analysis cache
+        if: steps.reylo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .reylo
+          key: ${{ steps.reylo-cache.outputs.cache-primary-key }}
       - name: Unit and integration tests
         # --isolate runs each test file with a fresh module registry:
         # tests/admin-places-routing.test.ts stubs @tanstack/react-router via

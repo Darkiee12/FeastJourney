@@ -380,6 +380,7 @@ const runService = async <A, E>(
     Effect.provide(
       withActor(actor, effect),
       Layer.mergeAll(deps, Layer.provide(RestaurantPhotoServiceLive, deps)),
+      { local: true },
     ),
   );
 };
@@ -395,6 +396,7 @@ const captureFailure = async <A, E>(
     Effect.provide(
       withActor(actor, effect),
       Layer.mergeAll(deps, Layer.provide(RestaurantPhotoServiceLive, deps)),
+      { local: true },
     ),
   );
 

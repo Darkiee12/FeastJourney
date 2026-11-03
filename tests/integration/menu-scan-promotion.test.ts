@@ -28,6 +28,7 @@ import { Actor } from "@/server/auth/actor";
 import { withActor } from "@/server/auth/current-actor";
 import { DatabaseLive } from "@/server/database/client";
 import type { Database } from "@/server/database/client";
+import { resetServerEnvCache } from "@/server/env";
 import { MenuExtractor } from "@/server/integrations/muse-menu";
 import {
   type PrivateMenuStorage,
@@ -144,7 +145,17 @@ let contributionId = "";
 const sessionKeys: Array<string> = [];
 const extraScans: Array<string> = [];
 
+// extractMenu gates on real scanner config before reaching the injected
+// MenuExtractor, so enable a synthetic scanner like
+// menu-scan-provenance.test.ts does; the fake extractor still performs the
+// actual extraction.
+const originalScannerEnabled = process.env["MENU_SCANNER_ENABLED"];
+const originalApiKey = process.env["MODEL_API_KEY"];
+
 beforeAll(async () => {
+  process.env["MENU_SCANNER_ENABLED"] = "true";
+  process.env["MODEL_API_KEY"] = "synthetic-promotion-key";
+  resetServerEnvCache();
   const session = await auth.signupSignin("scan-curator");
   curatorId = session.userId;
   await auth.grantRole(curatorId, "curator");
@@ -180,8 +191,11 @@ afterAll(async () => {
     ),
   );
   await sql.begin(async (tx) => {
-    await tx`DELETE FROM feastjourney.menu_scan_contribution_menus WHERE contribution_id=${contributionId}`;
-    await tx`DELETE FROM feastjourney.menu_scan_contributions WHERE id=${contributionId}`;
+    if (contributionId !== "") {
+      await tx`DELETE FROM feastjourney.menu_scan_contribution_menus WHERE contribution_id=${contributionId}`;
+      await tx`DELETE FROM feastjourney.menu_scan_contributions WHERE id=${contributionId}`;
+    }
+
     await tx`UPDATE feastjourney.menu_scan_sessions SET current_revision=NULL WHERE id=${scanId}::uuid OR id=ANY(${extraScans}::uuid[])`;
     await tx`DELETE FROM feastjourney.menu_scan_revisions WHERE session_id=${scanId}::uuid OR session_id=ANY(${extraScans}::uuid[])`;
     await tx`DELETE FROM feastjourney.menu_scan_assets WHERE session_id=${scanId}::uuid OR session_id=ANY(${extraScans}::uuid[])`;
@@ -200,6 +214,14 @@ afterAll(async () => {
   await sql.end();
   await runtime.dispose();
   await auth.close();
+
+  if (originalScannerEnabled === undefined) delete process.env["MENU_SCANNER_ENABLED"];
+  else process.env["MENU_SCANNER_ENABLED"] = originalScannerEnabled;
+
+  if (originalApiKey === undefined) delete process.env["MODEL_API_KEY"];
+  else process.env["MODEL_API_KEY"] = originalApiKey;
+
+  resetServerEnvCache();
 });
 
 const noiseJpeg = async (): Promise<Uint8Array> => {
