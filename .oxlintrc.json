@@ -158,6 +158,8 @@
     // types do not resolve inside Oxlint's engine (routes/components calling
     // restaurant.functions, operations reading Reylo rows). tsc with a migrated
     // database remains the authority for SQL typing and client contracts.
+    // Muse Copilot and review-intelligence modules hit the same engine gap
+    // (server-function clients, Reylo-derived rows); tsc checks them fully.
     {
       "files": [
         "src/modules/restaurant-discovery/server/repository/**/*.ts",
@@ -165,6 +167,10 @@
         "src/modules/restaurant-discovery/*.functions.ts",
         "src/modules/restaurant-discovery/*.ts",
         "src/modules/restaurant-discovery/components/**/*.{ts,tsx}",
+        "src/modules/muse-copilot/**/*.{ts,tsx}",
+        "src/server/muse-copilot/**/*.ts",
+        "src/server/review-intelligence/**/*.ts",
+        "src/routes/muse.tsx",
         "src/routes/restaurants.tsx",
         "src/routes/restaurants.index.tsx",
         "src/routes/restaurants.$venueId.tsx",

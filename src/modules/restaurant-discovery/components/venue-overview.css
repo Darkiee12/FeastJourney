@@ -65,6 +65,22 @@
     font-weight: 700;
     color: var(--color-ink);
   }
+  button.venue-rating {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    cursor: pointer;
+  }
+  button.venue-rating:focus-visible {
+    outline: 2px solid var(--color-food-orange-strong);
+    outline-offset: 2px;
+    border-radius: 0.25rem;
+  }
+  .venue-rating-teaser {
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
   .venue-rating svg {
     width: 1rem;
     height: 1rem;

@@ -1,92 +1,104 @@
-/* Menu scan page: mobile-first, scoped to .menu-scan-page. Max width 560px. */
+/* Menu scan page: mobile-first, scoped to .menu-scan-page. Centered 560-680px desktop. */
 
 .menu-scan-page {
-  max-width: 35rem;
+  max-width: 42.5rem;
   margin-inline: auto;
   padding-inline: 1rem;
-  padding-block-end: 6rem;
+  padding-block-end: 4rem;
   color: var(--color-ink);
   overflow-wrap: anywhere;
 }
 
-.scan-intro h1 {
-  margin-block: 0.5rem;
-  line-height: 1.1;
+/* Compact Muse-branded heading: eyebrow + title + one-line subtitle. */
+.scan-hero {
+  margin-block: 1rem 0.75rem;
 }
 
-.scan-intro p,
-.scan-privacy,
-.scan-privacy-details p,
-.scan-sheet > p {
-  line-height: 1.6;
+.scan-eyebrow {
+  margin-block: 0 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-food-orange-strong);
 }
 
-.scan-privacy {
+.scan-hero h1 {
+  margin-block: 0 0.25rem;
+  font-size: 1.75rem;
+  line-height: 1.15;
+}
+
+.scan-subtitle {
+  margin-block: 0;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.scan-return {
+  margin-block: 0 0.5rem;
   font-size: 0.875rem;
 }
 
-.scan-privacy-details {
+.scan-branch-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0 0.75rem;
   font-size: 0.875rem;
-  margin-block-end: 1rem;
-}
-
-.scan-privacy-details summary {
-  min-height: 2.75rem;
-  padding-block: 0.75rem;
-  cursor: pointer;
   font-weight: 650;
 }
 
-.scan-sheet {
+.scan-branch-unknown {
+  margin-block: 0 0.75rem;
+  font-size: 0.875rem;
+  color: var(--color-muted);
+}
+
+/* Cohesive capture surface. */
+.scan-capture {
   border: 1px solid var(--color-border-soft);
   border-radius: 0.75rem;
   background: white;
   padding: 1rem;
 }
 
-.scan-sheet h2 {
-  margin-block: 0 0.25rem;
-  font-size: 1.25rem;
-  font-weight: 750;
-}
-
-.scan-sheet-actions {
+.scan-capture-actions {
   display: grid;
-  gap: 0.75rem;
-  margin-block: 1rem;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-block-end: 0.25rem;
 }
 
-.scan-camera-action,
-.scan-gallery-action {
-  position: relative;
-  min-width: 0;
-}
-
-.scan-camera-action label,
-.scan-gallery-action label {
+.scan-capture-primary,
+.scan-capture-secondary {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
   min-height: 2.75rem;
   border-radius: 0.5rem;
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
   font-weight: 700;
   cursor: pointer;
+  text-align: center;
 }
 
-.scan-camera-action label {
+.scan-capture-primary {
   background: var(--color-ink);
   color: white;
 }
 
-.scan-gallery-action label {
+.scan-capture-secondary {
   border: 1px solid var(--color-ink);
   background: white;
   color: var(--color-ink);
 }
 
-.scan-camera-action input,
-.scan-gallery-action input {
+.scan-file-input {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -95,12 +107,384 @@
   white-space: nowrap;
 }
 
-.scan-camera-action:focus-within label,
-.scan-gallery-action:focus-within label {
+.scan-capture .scan-limits {
+  margin-block: 0.75rem 0.5rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.scan-capture .scan-empty {
+  margin-block: 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+/* Thumbnail strip/grid labeled Page 1/2. */
+.scan-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+  gap: 0.5rem;
+  margin-block: 0 0.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.scan-photo-cell {
+  display: grid;
+  gap: 0.25rem;
+  align-content: start;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.5rem;
+  padding: 0.375rem;
+  background: white;
+}
+
+.scan-photo-thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 0.25rem;
+  padding: 0;
+  background: var(--color-cream);
+  cursor: zoom-in;
+}
+
+.scan-photo-thumb img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 0.25rem;
+}
+
+.scan-photo-badge {
+  position: absolute;
+  inset-inline-start: 0.25rem;
+  inset-block-end: 0.25rem;
+  border-radius: 9999px;
+  background: rgb(23 32 51 / 0.8);
+  color: white;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  padding: 0.125rem 0.5rem;
+}
+
+.scan-photo-cell-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.scan-photo-cell-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.25rem;
+  background: white;
+  color: var(--color-ink);
+}
+
+.scan-photo-dialog {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  max-width: min(42.5rem, 92vw);
+}
+
+.scan-photo-dialog::backdrop {
+  background: rgb(23 32 51 / 0.6);
+}
+
+.scan-photo-dialog-title {
+  margin-block: 0 0.5rem;
+  font-weight: 700;
+}
+
+.scan-photo-full {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  border-radius: 0.25rem;
+  background: var(--color-cream);
+}
+
+.scan-photo-dialog button {
+  margin-block-start: 0.75rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
+}
+
+.scan-add-pages {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  margin-block-end: 0.75rem;
+  border: 1px dashed var(--color-muted);
+  border-radius: 0.5rem;
+  background: white;
+  color: var(--color-ink);
+  font-size: 0.875rem;
+  font-weight: 650;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+
+/* Single inline primary action. */
+.scan-submit {
+  width: 100%;
+  min-height: 2.75rem;
+  margin-block-start: 0.25rem;
+}
+
+.scan-submit-hint {
+  margin-block: 0.5rem 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+/* Tagged processing state. */
+.scan-processing {
+  margin-block: 0.75rem 0;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  background: white;
+}
+
+.scan-processing-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  line-height: 1.5;
+  font-weight: 650;
+}
+
+.scan-spin {
+  animation: scan-rotate 1s linear infinite;
+}
+
+.scan-processing-bar {
+  width: 100%;
+  height: 0.5rem;
+  margin-block-start: 0.5rem;
+}
+
+.scan-processing-note {
+  margin-block: 0.5rem 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+@keyframes scan-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Compact contextual error near the action. */
+.scan-error {
+  margin-block: 0.75rem 0;
+  border-inline-start: 0.25rem solid var(--color-food-orange-strong);
+  border-block: 1px solid var(--color-border-soft);
+  border-inline-end: 1px solid var(--color-border-soft);
+  border-radius: 0.25rem;
+  padding: 0.625rem 0.75rem;
+  background: white;
+}
+
+.scan-error-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-block: 0 0.25rem;
+  line-height: 1.5;
+  font-weight: 650;
+}
+
+.scan-error-hint {
+  margin-block: 0.25rem 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.scan-error-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  margin-block-start: 0.5rem;
+  border: 1px solid var(--color-ink);
+  border-radius: 0.25rem;
+  background: var(--color-ink);
+  color: white;
+  font-weight: 700;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+/* Privacy: one line + disclosure. */
+.scan-privacy-line {
+  margin-block: 0.75rem 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.scan-privacy-details {
+  font-size: 0.8125rem;
+  margin-block-start: 0.25rem;
+}
+
+.scan-privacy-details summary {
+  min-height: 2.75rem;
+  padding-block: 0.5rem;
+  cursor: pointer;
+  font-weight: 650;
+  color: var(--color-ink);
+}
+
+.scan-privacy-details p {
+  margin-block: 0;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.scan-status {
+  display: block;
+  margin-block: 0.75rem 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.scan-return-link {
+  font-size: 0.875rem;
+}
+
+.scan-claim {
+  margin-block: 0 0.75rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  background: white;
+}
+
+.scan-session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block: 0.75rem;
+}
+
+.scan-session-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--color-ink);
+  border-radius: 0.25rem;
+  background: white;
+  color: var(--color-ink);
+}
+
+/* Results enter with a subtle transition at the reading position. */
+.scan-results {
+  margin-block-start: 0.75rem;
+}
+
+.scan-enter {
+  animation: scan-results-enter 240ms ease-out;
+}
+
+.scan-results-title {
+  margin-block: 0 0.5rem;
+  font-size: 1.375rem;
+  line-height: 1.2;
+}
+
+.scan-results-title:focus {
+  outline: none;
+}
+
+.scan-results-title:focus-visible {
   outline: 3px solid var(--color-brand-blue-hover);
   outline-offset: 3px;
 }
 
+@keyframes scan-results-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.scan-menu-ready {
+  font-weight: 650;
+}
+
+.scan-revision-line {
+  font-size: 0.875rem;
+  color: var(--color-muted);
+}
+
+.scan-model-chip {
+  display: inline-block;
+  font-size: 0.875rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 9999px;
+  padding: 0.25rem 0.75rem;
+  background: white;
+}
+
+.scan-corrections {
+  margin-block: 0.75rem;
+}
+
+.scan-corrections summary {
+  min-height: 2.75rem;
+  padding-block: 0.75rem;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.scan-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding-block: 0.5rem;
+  line-height: 1.5;
+}
+
+.scan-consent input {
+  flex: 0 0 auto;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-block-start: 0.125rem;
+}
+
+.scan-contribution {
+  margin-block: 0.75rem;
+}
+
+.scan-contribution > p {
+  line-height: 1.5;
+}
+
+/* Shared form controls. */
 .menu-scan-page label {
   display: block;
   margin-block: 0.75rem 0.25rem;
@@ -108,9 +492,8 @@
   font-weight: 650;
 }
 
-.menu-scan-page input,
-.menu-scan-page select,
-.menu-scan-page textarea {
+.menu-scan-page input[type="text"],
+.menu-scan-page input:not([type]) {
   width: 100%;
   min-width: 0;
   min-height: 2.75rem;
@@ -134,178 +517,65 @@
   opacity: 0.5;
 }
 
-.scan-photo-list {
+.menu-scan-page button:focus-visible,
+.menu-scan-page summary:focus-visible,
+.scan-capture-primary:focus-visible,
+.scan-capture-secondary:focus-visible {
+  outline: 3px solid var(--color-brand-blue-hover);
+  outline-offset: 3px;
+}
+
+/* Compat: previous sticky action bar spacer. The capture state no longer
+   renders a permanent sticky bar; the class stays reserved. */
+.scan-actionbar-spacer {
+  min-height: 5rem;
+}
+
+/* Public price research: separate, explicitly unverified section. */
+.scan-price-research {
   display: grid;
-  gap: 1rem;
-  margin-block: 1rem;
-  padding: 0;
-  list-style: none;
-}
-
-.scan-photo-list > li {
+  gap: 0.5rem;
+  margin-block: 0.75rem;
   border: 1px solid var(--color-border-soft);
-  border-radius: 0.5rem;
+  border-radius: 0.75rem;
+  background: white;
   padding: 0.75rem;
-  background: white;
 }
 
-.scan-photo-list img {
-  width: 100%;
-  height: auto;
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
-  border-radius: 0.25rem;
+.scan-price-research h2 {
+  margin-block: 0;
 }
 
-.scan-photo-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  font-size: 0.875rem;
-  font-weight: 650;
+.scan-price-research h3 {
+  margin-block: 0.5rem 0;
+  font-size: 1.125rem;
 }
 
-.scan-photo-actions {
-  display: flex;
-  flex-wrap: wrap;
+.scan-price-research > p {
+  margin-block: 0;
+  line-height: 1.5;
+}
+
+.scan-research-place {
+  display: grid;
   gap: 0.5rem;
-  margin-block-start: 0.5rem;
 }
 
-.scan-photo-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  border: 1px solid var(--color-ink);
-  border-radius: 0.25rem;
-  background: white;
-  color: var(--color-ink);
-}
-
-.scan-actionbar {
-  position: sticky;
-  bottom: 0;
-  margin-inline: -1rem;
-  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
-  border-block-start: 1px solid var(--color-border-soft);
-  background: white;
-}
-
-.scan-actionbar .menu-order-primary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
+.scan-research-trigger {
   width: 100%;
   min-height: 2.75rem;
 }
 
-.scan-progress {
-  margin-block: 1rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.5rem;
-  padding: 0.75rem;
-  background: white;
-}
-
-.scan-progress output {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  line-height: 1.5;
-}
-
-.scan-progress progress {
-  width: 100%;
-  height: 0.75rem;
-  margin-block-start: 0.5rem;
-}
-
-.scan-failure {
-  margin-block: 1rem;
-  border: 0.125rem solid var(--color-food-orange-strong);
-  border-radius: 0.5rem;
-  padding: 0.75rem;
-  background: white;
-}
-
-.scan-failure p {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  margin-block: 0.5rem;
-  line-height: 1.5;
-}
-
-.scan-failure button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  border: 1px solid var(--color-ink);
-  border-radius: 0.25rem;
-  background: var(--color-ink);
-  color: white;
-  font-weight: 700;
-}
-
-.scan-model-chip {
-  display: inline-block;
-  font-size: 0.875rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 9999px;
-  padding: 0.25rem 0.75rem;
-  background: white;
-}
-
-.scan-claim {
-  margin-block: 1rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.5rem;
-  padding: 0.75rem;
-  background: white;
-}
-
-.scan-session-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-block: 1rem;
-}
-
-.scan-session-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  border: 1px solid var(--color-ink);
-  border-radius: 0.25rem;
-  background: white;
-  color: var(--color-ink);
-}
-
-.scan-corrections {
-  margin-block: 1rem;
-}
-
-.scan-corrections summary {
-  min-height: 2.75rem;
-  padding-block: 0.75rem;
-  cursor: pointer;
+/* Tentative dish→venue matches stay visibly uncertain. */
+.price-compare-tentative {
   font-weight: 650;
+  color: var(--color-food-orange-strong);
 }
 
-.scan-consent {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  padding-block: 0.5rem;
-  line-height: 1.5;
-}
-
-.scan-consent input {
-  flex: 0 0 auto;
-  width: 1.25rem;
-  height: 1.25rem;
-  margin-block-start: 0.125rem;
+@media (min-width: 28rem) {
+  .scan-research-place {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

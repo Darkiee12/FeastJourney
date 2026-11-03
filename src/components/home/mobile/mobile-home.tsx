@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { MapPinned } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -11,6 +12,7 @@ import {
 } from "@/components/home/mobile/mobile-home-state";
 import { MobileSheet } from "@/components/home/mobile/mobile-sheet";
 import { RecommendSection } from "@/components/home/recommend-section";
+import { copilotCopyFor } from "@/modules/muse-copilot/copilot-copy";
 import type { Locale, Messages } from "@/shared/i18n";
 
 function UtensilsIcon() {
@@ -35,8 +37,10 @@ function UtensilsIcon() {
 
 function MobileHomeInner({ copy, lang }: { copy: Messages; lang: Locale }) {
   const mobile = useMobileHome();
+  const museCopy = copilotCopyFor(lang === "vi" ? "vi" : "en");
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [stageSize, setStageSize] = useState({ width: 390, height: 844 });
+  const [entered, setEntered] = useState(false);
   const mode = mobile.state.mode;
 
   // Centralized scroll ownership: the fixed stage owns layout, the sheet
@@ -64,6 +68,12 @@ function MobileHomeInner({ copy, lang }: { copy: Messages; lang: Locale }) {
     observer.observe(stage);
 
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setEntered(true));
+
+    return () => cancelAnimationFrame(frame);
   }, []);
 
   useEffect(() => {
@@ -133,6 +143,30 @@ function MobileHomeInner({ copy, lang }: { copy: Messages; lang: Locale }) {
             <MapPinned aria-hidden="true" className="h-5 w-5 flex-none" />
             {copy.ctaExplore}
           </button>
+          {/* Ask Muse: compact chip, not a fourth giant button — small
+              enough to stay above the fold with the sheet peek, linking
+              straight to /muse. Quiz/discovery sheets are untouched. */}
+          <div className="flex justify-center">
+            <Link
+              to="/muse"
+              search={{ lang }}
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/30 bg-white/10 px-4 text-sm font-bold text-white backdrop-blur transition hover:border-white/55 hover:bg-white/15 active:scale-[0.97] motion-safe:duration-300 motion-reduce:transition-none motion-reduce:opacity-100 motion-reduce:translate-y-0 ${
+                entered ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1"
+              }`}
+            >
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className="h-4 w-4 flex-none">
+                <path
+                  d="M12 3l1.9 5.4L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.6z"
+                  fill="currentColor"
+                />
+                <path
+                  d="M19 15.5l.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9z"
+                  fill="currentColor"
+                />
+              </svg>
+              {museCopy.askMuseAction}
+            </Link>
+          </div>
         </div>
       </div>
 

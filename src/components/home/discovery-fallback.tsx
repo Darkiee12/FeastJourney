@@ -1,7 +1,20 @@
-import { Globe2Icon, TriangleAlertIcon, UtensilsCrossedIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { Predicate } from "effect";
+import { Globe2Icon, SparklesIcon, TriangleAlertIcon, UtensilsCrossedIcon } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { z } from "zod";
 
 import { DishCarouselSkeleton } from "@/components/dish/dish-carousel";
+import {
+  MuseResearchStatus,
+  type ResearchStatusState,
+} from "@/components/research/muse-research-status";
+import { researchCopyFor, type ResearchLanguage } from "@/components/research/research-copy";
+import {
+  ResearchFindingsList,
+  type ResearchFinding,
+  type ResearchSource,
+} from "@/components/research/research-findings";
+import { researchDishesFn } from "@/server/web-research/research-functions";
 import type { Messages } from "@/shared/i18n";
 
 /**
@@ -161,9 +174,12 @@ export function DiscoveryUnknownPanel({ copy }: { readonly copy: Messages }): Re
 export function DiscoveryRegionEmptyPanel({
   copy,
   onExploreWorldwide,
+  researchSlot,
 }: {
   readonly copy: Messages;
   readonly onExploreWorldwide: () => void;
+  /** User-triggered web-research flow; shown only after the catalog gate stays empty. */
+  readonly researchSlot?: ReactNode | undefined;
 }): ReactNode {
   return (
     <div className={PANEL_FRAME}>
@@ -181,6 +197,7 @@ export function DiscoveryRegionEmptyPanel({
           <Globe2Icon aria-hidden="true" className="size-4 flex-none" />
           {copy.carouselExploreWorld}
         </button>
+        {researchSlot}
       </div>
     </div>
   );
@@ -188,9 +205,12 @@ export function DiscoveryRegionEmptyPanel({
 
 export function DiscoveryCatalogEmptyPanel({
   copy,
+  researchSlot,
   tagline,
 }: {
   readonly copy: Messages;
+  /** User-triggered web-research flow; shown only after the catalog gate stays empty. */
+  readonly researchSlot?: ReactNode | undefined;
   readonly tagline?: string | undefined;
 }): ReactNode {
   return (
@@ -203,7 +223,280 @@ export function DiscoveryCatalogEmptyPanel({
         <p className="mt-2 text-sm font-semibold text-muted">
           {tagline ?? DISCOVERY_CATALOG_TAGLINE_FALLBACK}
         </p>
+        {researchSlot}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Boundary schemas for the peer-owned `researchDishesFn` TanStack server
+ * function (src/server/web-research/research-functions.ts). Input carries the
+ * city/country the catalog already proved empty plus the research language;
+ * the JSON outcome always carries a `_tag` discriminator. Zod parses the
+ * outcome at this boundary because web-derived claims cross a trust boundary;
+ * malformed payloads fail closed to the `failed` state, never to invented
+ * findings.
+ */
+const researchSourceSchema = z.object({
+  title: z.string(),
+  url: z.string(),
+  snippet: z.string(),
+});
+
+const researchFindingSchema = z.object({
+  title: z.string(),
+  summary: z.string(),
+  venueName: z.string().optional(),
+  dishName: z.string().optional(),
+  originalName: z.string().optional(),
+  sources: z.array(researchSourceSchema),
+});
+
+const researchOutcomeSchema = z.discriminatedUnion("_tag", [
+  z.object({ _tag: z.literal("ResearchFound"), findings: z.array(researchFindingSchema) }),
+  z.object({ _tag: z.literal("ResearchEmpty") }),
+  z.object({ _tag: z.literal("ResearchSkipped") }),
+  z.object({ _tag: z.literal("ResearchUnavailable") }),
+]);
+
+type ResearchOutcome = z.infer<typeof researchOutcomeSchema>;
+
+/**
+ * Peer-owned server function. The server validator owns the request shape
+ * and `researchOutcomeSchema` re-validates every payload at the call site,
+ * so a drifted peer shape fails closed instead of rendering untrusted data.
+ */
+const runResearch = async (
+  args: Parameters<typeof researchDishesFn>[0],
+): Promise<ResearchOutcome | null> => {
+  const parsed = researchOutcomeSchema.safeParse(await researchDishesFn(args));
+
+  return parsed.success ? parsed.data : null;
+};
+
+/** Renderable only over http(s); rejects javascript:, data:, and malformed URLs. */
+const isHttpUrl = (raw: string): boolean => {
+  let parsed: URL;
+
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+
+  return parsed.protocol === "http:" || parsed.protocol === "https:";
+};
+
+/**
+ * Findings worth rendering: `ResearchFound` with at least one finding that
+ * carries usable text and linkable sources. Every other outcome —
+ * `ResearchEmpty`, `ResearchSkipped`, `ResearchUnavailable` — yields no
+ * renderable findings so the caller lands on its no-evidence state.
+ */
+const toUsableFindings = (outcome: ResearchOutcome): ReadonlyArray<ResearchFinding> => {
+  if (!Predicate.isTagged(outcome, "ResearchFound")) {
+    return [];
+  }
+
+  const usable: Array<ResearchFinding> = [];
+
+  for (const finding of outcome.findings) {
+    const title = finding.title.trim();
+    const summary = finding.summary.trim();
+
+    if (title === "" || summary === "") {
+      continue;
+    }
+
+    const sources: Array<ResearchSource> = [];
+
+    for (const source of finding.sources) {
+      const sourceTitle = source.title.trim();
+
+      if (sourceTitle === "" || !isHttpUrl(source.url)) {
+        continue;
+      }
+
+      sources.push({ title: sourceTitle, url: source.url, snippet: source.snippet });
+    }
+
+    if (sources.length === 0) {
+      continue;
+    }
+
+    const venueName = finding.venueName?.trim() ?? "";
+    const dishName = finding.dishName?.trim() ?? "";
+    const originalName = finding.originalName?.trim() ?? "";
+
+    usable.push({
+      title,
+      summary,
+      sources,
+      venueName: venueName === "" ? undefined : venueName,
+      dishName: dishName === "" ? undefined : dishName,
+      originalName: originalName === "" ? undefined : originalName,
+    });
+  }
+
+  return usable;
+};
+
+export interface DiscoveryResearchSlotProps {
+  /** City or region display label the catalog already proved empty. */
+  readonly city: string;
+  /** Country display name the catalog already proved empty. */
+  readonly country: string;
+  readonly language: ResearchLanguage;
+  /** Returns to the worldwide catalog; wired to the existing explore-worldwide action. */
+  readonly onContinueWorldwide?: (() => void) | undefined;
+}
+
+/**
+ * User-triggered web-research flow for empty discovery results. Never
+ * auto-fires: the slot renders a single opt-in button while `idle`, and only
+ * the click starts the preparing → searching → reviewing → terminal
+ * sequence against `researchDishesFn`. Findings render through
+ * `ResearchFindingsList`, kept strictly separate from the canonical
+ * `DishCarousel` (web rows never become catalog dish IDs). An in-flight run
+ * is abandoned on unmount via a request generation counter.
+ */
+export function DiscoveryResearchSlot({
+  city,
+  country,
+  language,
+  onContinueWorldwide,
+}: DiscoveryResearchSlotProps): ReactNode {
+  const copy = researchCopyFor(language);
+  const [phase, setPhase] = useState<ResearchStatusState>("idle");
+  const [findings, setFindings] = useState<ReadonlyArray<ResearchFinding>>([]);
+  const requestRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      requestRef.current += 1;
+    };
+  }, []);
+
+  const run = (): void => {
+    const request = requestRef.current + 1;
+    requestRef.current = request;
+    setPhase("preparing");
+    setFindings([]);
+
+    const trimmedCity = city.trim();
+    const trimmedCountry = country.trim();
+
+    if (trimmedCity === "" || trimmedCountry === "") {
+      setPhase("failed");
+
+      return;
+    }
+
+    // Searching starts only once the fetch below is actually issued — the
+    // database-first gate (this slot mounts only on catalog-empty states)
+    // already ran before any network research begins.
+    setPhase("searching");
+
+    void (async () => {
+      let outcome: ResearchOutcome | null = null;
+
+      try {
+        outcome = await runResearch({
+          data: { city: trimmedCity, country: trimmedCountry, language },
+        });
+      } catch {
+        outcome = null;
+      }
+
+      if (requestRef.current !== request) {
+        return;
+      }
+
+      if (outcome === null) {
+        setPhase("failed");
+
+        return;
+      }
+
+      setPhase("reviewing");
+      const usable = toUsableFindings(outcome);
+
+      if (requestRef.current !== request) {
+        return;
+      }
+
+      if (usable.length === 0) {
+        setPhase("no-evidence");
+
+        return;
+      }
+
+      setFindings(usable);
+      setPhase("completed");
+    })();
+  };
+
+  if (phase === "idle") {
+    return (
+      <div className="mt-6 flex w-full flex-col items-center gap-3 border-t border-border-soft pt-6">
+        <button
+          type="button"
+          onClick={run}
+          className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark"
+        >
+          <SparklesIcon aria-hidden="true" className="size-4 flex-none" />
+          {copy.researchAction}
+        </button>
+        <p className="max-w-[32rem] text-xs font-semibold text-muted">{copy.beyondCatalogNote}</p>
+        <p className="text-xs font-bold tracking-[0.14em] text-muted uppercase">
+          {copy.researchingDishes}
+          {" · "}
+          {copy.researchingRestaurants}
+          {" · "}
+          {copy.researchingPrices}
+        </p>
+      </div>
+    );
+  }
+
+  let contextLine = copy.statusTitle;
+
+  if (phase === "preparing" || phase === "searching") {
+    contextLine = copy.statusSearching;
+  } else if (phase === "reviewing") {
+    contextLine = copy.statusReviewing;
+  } else if (phase === "completed") {
+    contextLine = copy.statusCompleted;
+  } else if (phase === "no-evidence") {
+    contextLine = copy.statusNoEvidence;
+  } else {
+    contextLine = copy.statusFailed;
+  }
+
+  let continueHandler: (() => void) | undefined;
+
+  if (phase === "failed" || phase === "no-evidence") {
+    continueHandler = onContinueWorldwide;
+  }
+
+  return (
+    <div className="mt-6 w-full border-t border-border-soft pt-6">
+      <MuseResearchStatus
+        state={phase}
+        contextLine={contextLine}
+        onRetry={phase === "failed" ? run : undefined}
+        onContinue={continueHandler}
+        retryLabel={copy.retryAction}
+        continueLabel={copy.continueCatalogAction}
+      />
+      {phase === "completed" ? (
+        <ResearchFindingsList
+          findings={findings}
+          badgeLabel={copy.webResultBadge}
+          notVerifiedNote={copy.notVerifiedNote}
+        />
+      ) : null}
     </div>
   );
 }
@@ -219,6 +512,8 @@ export interface DiscoveryFallbackProps {
   readonly worldwideNote?: string | undefined;
   /** Overrides the default catalog-empty tagline. */
   readonly emptyTagline?: string | undefined;
+  /** User-triggered web-research flow for empty states; the panels render it below their actions. */
+  readonly researchSlot?: ReactNode | undefined;
 }
 
 /**
@@ -233,6 +528,7 @@ export function DiscoveryFallback({
   emptyTagline,
   onExploreWorldwide,
   onRetry,
+  researchSlot,
   state,
 }: DiscoveryFallbackProps): ReactNode {
   if (state === "loading" || state === "ready") {
@@ -256,8 +552,16 @@ export function DiscoveryFallback({
       return null;
     }
 
-    return <DiscoveryRegionEmptyPanel copy={copy} onExploreWorldwide={onExploreWorldwide} />;
+    return (
+      <DiscoveryRegionEmptyPanel
+        copy={copy}
+        onExploreWorldwide={onExploreWorldwide}
+        researchSlot={researchSlot}
+      />
+    );
   }
 
-  return <DiscoveryCatalogEmptyPanel copy={copy} tagline={emptyTagline} />;
+  return (
+    <DiscoveryCatalogEmptyPanel copy={copy} tagline={emptyTagline} researchSlot={researchSlot} />
+  );
 }

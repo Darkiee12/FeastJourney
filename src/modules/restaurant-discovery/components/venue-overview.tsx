@@ -75,6 +75,7 @@ export function VenueOverview({
   photos,
   rates,
   reviewSummary,
+  cachedReviewSummary = null,
   venue,
 }: {
   readonly copy: RestaurantCopy;
@@ -89,11 +90,24 @@ export function VenueOverview({
   readonly photos: ReadonlyArray<PhotoRef>;
   readonly rates?: ReadonlyMap<string, ExchangeRate> | undefined;
   readonly reviewSummary: VenueRatingSummary | null;
+  /**
+   * Compact cached teaser: a stale-but-valid aggregate shown ONLY when the
+   * live `reviewSummary` is null. Never blocks the map or the overview —
+   * when both are null, no rating row renders at all.
+   */
+  readonly cachedReviewSummary?: VenueRatingSummary | null | undefined;
   readonly venue: VenueOverviewIdentity;
 }) {
   const ordered = photos.toSorted((left, right) => Number(right.primary) - Number(left.primary));
+
   const directionsHref = `https://www.google.com/maps/dir/?api=1&destination=${venue.latitude},${venue.longitude}`;
+
   const genuine = reviewSummary !== null && reviewSummary.total > 0 ? reviewSummary : null;
+
+  const cached =
+    genuine === null && cachedReviewSummary !== null && cachedReviewSummary.total > 0
+      ? cachedReviewSummary
+      : null;
 
   return (
     <article className="venue-overview gap-3" aria-label={venue.name}>
@@ -115,13 +129,26 @@ export function VenueOverview({
         )}
         <p className="venue-addr">{venue.address}</p>
         {genuine !== null && (
-          <p className="venue-rating">
+          <button
+            type="button"
+            className="venue-rating"
+            onClick={onShowReviews}
+            aria-label={copy.reviewsRatingAction}
+          >
             <Star aria-hidden="true" />
-            <span
-              aria-label={`${genuine.average.toFixed(1)} out of 5 from ${genuine.total} reviews`}
-            >
+            <span aria-hidden="true">
               {genuine.average.toFixed(1)} ({genuine.total})
             </span>
+            <span className="sr-only">
+              {genuine.average.toFixed(1)} out of 5 from {genuine.total} reviews
+            </span>
+          </button>
+        )}
+        {genuine === null && cached !== null && (
+          <p className="venue-rating-teaser">
+            {copy.reviewsCachedTeaser
+              .replace("{average}", cached.average.toFixed(1))
+              .replace("{total}", String(cached.total))}
           </p>
         )}
       </header>

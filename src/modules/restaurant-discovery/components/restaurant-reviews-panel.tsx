@@ -1,8 +1,14 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, PenLine } from "lucide-react";
+import { MessageSquare, PenLine } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { SharedSelectField } from "@/components/ui/select";
+import { MuseReviewHighlights } from "@/modules/restaurant-discovery/components/MuseReviewHighlights";
+import {
+  restaurantCopy,
+  type RestaurantCopy,
+} from "@/modules/restaurant-discovery/components/restaurant-copy";
 import { RestaurantReviewCard } from "@/modules/restaurant-discovery/components/restaurant-review-card";
 import type { RestaurantCustomerReview } from "@/modules/restaurant-discovery/components/restaurant-review-card";
 import {
@@ -51,32 +57,40 @@ export const nextCustomerReviewPageParam = (
   return lastPage.offset + lastPage.limit;
 };
 
-const sortOptions: ReadonlyArray<{
-  readonly value: CustomerReviewSortMode;
-  readonly label: string;
-}> = [
-  { value: "recent", label: "Most recent" },
-  { value: "highest", label: "Highest rated" },
-  { value: "lowest", label: "Lowest rated" },
-];
+const SORT_MODES: ReadonlyArray<CustomerReviewSortMode> = ["recent", "highest", "lowest"];
+
+function sortLabelFor(mode: CustomerReviewSortMode, copy: RestaurantCopy): string {
+  if (mode === "highest") {
+    return copy.reviewsSortHighest;
+  }
+
+  if (mode === "lowest") {
+    return copy.reviewsSortLowest;
+  }
+
+  return copy.reviewsSortRecent;
+}
 
 /** Thrown server failures are untrusted transport input; parse the message at the boundary. */
-const failureText = (error: Error): string => {
+const failureText = (error: Error, copy: RestaurantCopy): string => {
   const parsed = clientFailureSchema.safeParse(error);
 
   if (parsed.success && parsed.data.message !== "") {
     return parsed.data.message;
   }
 
-  return "Reviews are temporarily unavailable. Please retry.";
+  return copy.reviewsUnavailable;
 };
 
 /**
- * Self-fetching traveler reviews panel for one venue. The public list is
- * server-sorted (the sort rides in the query key) and never shows pending
- * rows — pending visibility is a server guarantee, not a client filter.
- * A signed-in traveler's own review renders in a private "Your review"
- * section with Edit instead of a duplicate Write call-to-action.
+ * Self-fetching traveler reviews panel for one venue, in workspace order:
+ * header → summary → highlights → toolbar → list → single write action.
+ * The public list is server-sorted (the sort rides in the query key) and
+ * never shows pending rows — pending visibility is a server guarantee, not
+ * a client filter. The optional rating filter narrows the loaded published
+ * pages only; the server list schema carries no rating param, so the filter
+ * state stays visible and clearable while load-more follows the server
+ * pages. The toolbar owns the single Back; this panel renders none.
  */
 export function RestaurantReviewsPanel({
   venueId,
@@ -89,8 +103,10 @@ export function RestaurantReviewsPanel({
   readonly locale: Locale;
   readonly onBackToOverview: () => void;
 }) {
+  const copy: RestaurantCopy = restaurantCopy(locale);
   const queryClient = useQueryClient();
   const [sort, setSort] = useState<CustomerReviewSortMode>("recent");
+  const [ratingFilter, setRatingFilter] = useState<number | null>(null);
   const [formOpen, setFormOpen] = useState(false);
 
   const [editTarget, setEditTarget] = useState<
@@ -159,12 +175,12 @@ export function RestaurantReviewsPanel({
     },
     onSuccess: () => {
       setDeletingId(null);
-      setNotice("Your review was removed.");
+      setNotice(copy.reviewsRemoved);
       void queryClient.invalidateQueries({ queryKey: ["customer-reviews", venueId] });
     },
     onError: (error) => {
       setDeletingId(null);
-      setFailure(failureText(error));
+      setFailure(failureText(error, copy));
     },
   });
 
@@ -177,6 +193,15 @@ export function RestaurantReviewsPanel({
   );
 
   const total = list.data?.pages[0]?.total ?? 0;
+
+  // The published own review appears exactly once: inside the public list
+  // when its page is loaded, otherwise as a single "Your review" strip.
+  // Pending never reaches the list (server excludes it), so pending renders
+  // as a compact awaiting-approval strip with no card and no average impact.
+  const ownInList = ownId !== null && fetched.some((review) => review.id === ownId);
+
+  const visible =
+    ratingFilter === null ? fetched : fetched.filter((review) => review.rating === ratingFilter);
 
   // Relative venue path only: the sign-in route's safeReturnTo allowlist
   // rejects absolute and protocol-relative destinations, so this can only
@@ -214,29 +239,37 @@ export function RestaurantReviewsPanel({
     setFormOpen(true);
   };
 
-  let ownBody: ReactNode = null;
+  const sortOptions = SORT_MODES.map((mode) => ({
+    value: mode,
+    label: sortLabelFor(mode, copy),
+  }));
+
+  let ownStrip: ReactNode = null;
 
   if (signedIn && own.isPending) {
-    ownBody = (
-      <div aria-busy="true" aria-label="Loading your review" className="rv-section">
-        <div aria-hidden="true" className="rv-skeleton rv-skeleton-card" />
+    ownStrip = (
+      <div aria-busy="true" aria-label={copy.reviewsLoading} className="reviews-section">
+        <div aria-hidden="true" className="reviews-skeleton reviews-skeleton-card" />
       </div>
     );
   } else if (signedIn && own.isError) {
-    ownBody = (
-      <p role="alert" className="rv-error">
-        {failureText(own.error)}
+    ownStrip = (
+      <p role="alert" className="reviews-error">
+        {failureText(own.error, copy)}
       </p>
     );
-  } else if (ownReview !== null) {
-    ownBody = (
-      <>
-        <output className="rv-notice">
-          {ownReview.status === "pending"
-            ? "Your review was received and is awaiting moderation. It appears here once published; the shown average only counts published reviews."
-            : "Your published review. The shown average counts published reviews only."}
-        </output>
-        <ol className="rv-list">
+  } else if (ownReview !== null && ownReview.status === "pending") {
+    ownStrip = (
+      <output className="reviews-status">
+        <span className="reviews-status-dot" aria-hidden="true" />
+        {copy.reviewsAwaiting}
+      </output>
+    );
+  } else if (ownReview !== null && ownReview.status === "published" && !ownInList) {
+    ownStrip = (
+      <section aria-label={copy.reviewsYourReview} className="reviews-section">
+        <output className="reviews-notice">{copy.reviewsPublishedNote}</output>
+        <ol className="reviews-list">
           <li key={ownReview.id}>
             <RestaurantReviewCard
               review={{
@@ -254,7 +287,7 @@ export function RestaurantReviewsPanel({
             />
           </li>
         </ol>
-      </>
+      </section>
     );
   }
 
@@ -262,25 +295,39 @@ export function RestaurantReviewsPanel({
 
   if (list.isPending) {
     listBody = (
-      <div aria-busy="true" aria-label="Loading reviews" className="rv-section">
-        <div aria-hidden="true" className="rv-skeleton rv-skeleton-card" />
-        <div aria-hidden="true" className="rv-skeleton rv-skeleton-card" />
+      <div aria-busy="true" aria-label={copy.reviewsLoading} className="reviews-section">
+        <div aria-hidden="true" className="reviews-skeleton reviews-skeleton-card" />
+        <div aria-hidden="true" className="reviews-skeleton reviews-skeleton-card" />
       </div>
     );
   } else if (list.isError) {
     listBody = (
-      <p role="alert" className="rv-error">
-        {failureText(list.error)}
-      </p>
+      <div className="reviews-section">
+        <p role="alert" className="reviews-error">
+          {failureText(list.error, copy)}
+        </p>
+        <button type="button" className="reviews-ghost" onClick={onBackToOverview}>
+          {copy.menuBackToOverview}
+        </button>
+      </div>
     );
-  } else if (fetched.length === 0) {
+  } else if (visible.length === 0) {
     listBody = (
-      <output className="rv-empty">
-        <p>No reviews match yet. Be the first to share your experience.</p>
-        {ownReview === null ? (
-          <button type="button" className="rv-primary" onClick={openWrite}>
-            <PenLine aria-hidden="true" />
-            Write a review
+      <output className="reviews-empty">
+        <p>
+          {ratingFilter === null
+            ? copy.reviewsEmpty
+            : copy.reviewsFilterShowing.replace("{stars}", String(ratingFilter))}
+        </p>
+        {ratingFilter !== null ? (
+          <button
+            type="button"
+            className="reviews-ghost"
+            onClick={() => {
+              setRatingFilter(null);
+            }}
+          >
+            {copy.reviewsFilterClear}
           </button>
         ) : null}
       </output>
@@ -290,15 +337,21 @@ export function RestaurantReviewsPanel({
 
     listBody = (
       <>
-        <ol className="rv-list">
-          {fetched.map((review) => (
+        <ol className="reviews-list">
+          {visible.map((review) => (
             <li key={review.id}>
               <RestaurantReviewCard
                 review={review}
                 locale={locale}
                 isAuthor={ownId !== null && review.id === ownId}
                 actionPending={deletingId === review.id || deletion.isPending}
-                onEdit={() => openEdit(review)}
+                onEdit={() => {
+                  if (ownId !== null && review.id === ownId) {
+                    openOwnEdit();
+                  } else {
+                    openEdit(review);
+                  }
+                }}
                 onDelete={() => deletion.mutate(review.id)}
               />
             </li>
@@ -307,49 +360,52 @@ export function RestaurantReviewsPanel({
         {list.hasNextPage ? (
           <button
             type="button"
-            className="rv-ghost rv-load-more"
+            className="reviews-ghost reviews-load-more"
             disabled={list.isFetchingNextPage}
             aria-busy={list.isFetchingNextPage}
             onClick={() => {
               void list.fetchNextPage();
             }}
           >
-            {list.isFetchingNextPage ? "Loading…" : `Load more (${remaining} left)`}
+            {list.isFetchingNextPage
+              ? copy.reviewsLoading
+              : copy.reviewsLoadMoreLeft.replace("{remaining}", String(Math.max(remaining, 0)))}
           </button>
         ) : null}
       </>
     );
   }
 
+  // Single write-review action at the foot of the workspace. The empty list
+  // above carries no second button; travelers who already published edit
+  // from their card instead.
   let writeBody: ReactNode = null;
 
   if (ownReview === null) {
     if (session.status === "signed-in") {
       writeBody = (
-        <button type="button" className="rv-primary" onClick={openWrite}>
+        <button type="button" className="reviews-primary" onClick={openWrite}>
           <PenLine aria-hidden="true" />
-          Write a review
+          {copy.reviewsWriteAction}
         </button>
       );
     } else {
       const paused =
-        session.status === "unavailable"
-          ? "Sign-in status is unavailable right now, so reviews are paused. Discovery still works — try again shortly."
-          : "Sign in to share your experience at this restaurant.";
+        session.status === "unavailable" ? copy.reviewsSignInPaused : copy.reviewsSignInPrompt;
 
       writeBody = (
-        <div className="rv-signin">
+        <div className="reviews-signin">
           <p>{paused}</p>
           {session.status === "signed-out" ? (
             <Link
               to="/sign-in"
               search={{ lang: locale, returnTo }}
-              className="rv-primary"
+              className="reviews-primary"
               onClick={() => {
                 writeReviewWriteIntent(venueId, { rating: null, body: "" });
               }}
             >
-              Sign in to continue
+              {copy.reviewsSignInContinue}
             </Link>
           ) : null}
         </div>
@@ -358,16 +414,12 @@ export function RestaurantReviewsPanel({
   }
 
   return (
-    <div className="rv-panel">
-      <div className="rv-head">
-        <button type="button" className="rv-back" onClick={onBackToOverview}>
-          <ArrowLeft aria-hidden="true" />
-          Back to overview
-        </button>
-        <h2>Reviews</h2>
+    <div className="reviews-panel">
+      <div className="reviews-head">
+        <h2>{copy.reviewsTitle}</h2>
       </div>
 
-      <section aria-label="Review summary">
+      <section aria-label={copy.reviewsSummaryTitle}>
         <RestaurantReviewSummary
           summary={
             summary.data === undefined
@@ -381,56 +433,65 @@ export function RestaurantReviewsPanel({
           }
           isPending={summary.isPending}
           locale={locale}
+          activeRating={ratingFilter}
+          onSelectRating={setRatingFilter}
         />
         {summary.isError ? (
-          <p role="alert" className="rv-error">
-            {failureText(summary.error)}
+          <p role="alert" className="reviews-error">
+            {failureText(summary.error, copy)}
           </p>
         ) : null}
       </section>
 
-      {ownBody !== null ? (
-        <section aria-label="Your review" className="rv-section">
-          <h3>Your review</h3>
-          {ownBody}
-        </section>
-      ) : null}
+      <MuseReviewHighlights venueId={venueId} language={locale === "vi" ? "vi" : "en"} />
 
-      <section aria-label="Customer reviews" className="rv-section">
-        <div className="rv-toolbar">
-          <h3>What travelers say</h3>
-          <label htmlFor="customer-review-sort">Sort</label>
-          <select
-            id="customer-review-sort"
+      {ownStrip}
+
+      <section aria-label={copy.reviewsListHeading} className="reviews-section">
+        <div className="reviews-toolbar">
+          <h3>
+            <MessageSquare aria-hidden="true" />
+            {copy.reviewsListHeading}
+          </h3>
+          <SharedSelectField
+            label={copy.reviewsSortLabel}
             value={sort}
-            onChange={(event) => {
-              const next = event.target.value;
-
-              if (next === "highest" || next === "lowest" || next === "recent") {
-                setSort(next);
+            options={sortOptions}
+            size="compact"
+            onValueChange={(value) => {
+              if (value === "highest" || value === "lowest" || value === "recent") {
+                setSort(value);
               }
             }}
-          >
-            {sortOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          />
         </div>
+        {ratingFilter !== null ? (
+          <p className="reviews-filter-chip">
+            <span>{copy.reviewsFilterShowing.replace("{stars}", String(ratingFilter))}</span>
+            <button
+              type="button"
+              className="reviews-link"
+              onClick={() => {
+                setRatingFilter(null);
+              }}
+            >
+              {copy.reviewsFilterClear}
+            </button>
+          </p>
+        ) : null}
 
         {listBody}
       </section>
 
       {writeBody !== null ? (
-        <section aria-label="Write a review" className="rv-section">
+        <section aria-label={copy.reviewsWriteAction} className="reviews-section">
           {writeBody}
         </section>
       ) : null}
 
-      {notice !== null ? <output className="rv-notice">{notice}</output> : null}
+      {notice !== null ? <output className="reviews-notice">{notice}</output> : null}
       {failure !== null ? (
-        <p role="alert" className="rv-error">
+        <p role="alert" className="reviews-error">
           {failure}
         </p>
       ) : null}
@@ -443,11 +504,7 @@ export function RestaurantReviewsPanel({
         initial={editTarget !== null && editTarget.venueId === venueId ? editTarget : null}
         locale={locale}
         onSubmitted={() => {
-          setNotice(
-            editTarget !== null
-              ? "Your changes were received and are awaiting moderation."
-              : "Thanks — your review was received and is awaiting moderation.",
-          );
+          setNotice(editTarget !== null ? copy.reviewsEdited : copy.reviewsSubmitted);
           setEditTarget(null);
         }}
       />

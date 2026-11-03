@@ -10,10 +10,12 @@ export const Route = createFileRoute("/scan")({
   // ?venueId degrades instead of tripping the route error boundary.
   // returnVenue/returnView carry the originating restaurant context so the
   // scanner can offer a contextual return without exposing raw history.
+  // returnView "copilot" carries a Muse Dining Copilot origin instead: the
+  // page offers a return to /muse rather than a restaurant view.
   validateSearch: localeSearchSchema.extend({
     venueId: z.string().max(36).optional(),
     returnVenue: z.uuid().optional(),
-    returnView: z.enum(["overview", "menu", "reviews"]).optional(),
+    returnView: z.enum(["overview", "menu", "reviews", "copilot"]).optional(),
   }),
   component: ScanRoute,
 });

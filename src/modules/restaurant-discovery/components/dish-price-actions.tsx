@@ -70,6 +70,12 @@ export function dishPriceTargets({
  * Compact dish→restaurant entry actions. Render ONLY when a canonical dish
  * is selected (dishId is required) — never globally.
  *
+ * Single-trigger rule: this file owns navigation triggers only. Price
+ * research has exactly one user-triggered entry point per screen — the
+ * research section inside PriceComparePanel (compare view) or the per-dish
+ * research action on scan results. Never add a research button here; that
+ * would create competing triggers on the same screen.
+ *
  * Mount point is owned by the dish page / results sheet owner; this file
  * only exposes the actions.
  */
