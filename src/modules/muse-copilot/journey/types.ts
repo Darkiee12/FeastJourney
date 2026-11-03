@@ -1,5 +1,7 @@
 import { Data } from "effect";
 
+import type { CopilotCard } from "@/server/muse-copilot/copilot-schemas";
+
 /**
  * The five Muse tasks. The names double as flow-module slugs:
  * `../flows/<task>-flow` (scan-flow, plate-flow, find-flow, ask-flow,
@@ -274,3 +276,70 @@ export const transition = (state: JourneyState, event: JourneyEvent): JourneySta
         ShowWaiterCard: () => state,
       }),
   });
+
+/**
+ * Frozen turn-history contract (see plan §10): bounded recent conversation
+ * context sent alongside the latest message. Chronological, capped turns
+ * and per-turn length; never trusted server-side as evidence of database
+ * facts or prior authorization — canonical ids re-resolve every request.
+ */
+export interface TurnHistoryItem {
+  readonly role: "user" | "assistant";
+  readonly content: string;
+}
+
+/** Maximum history turns per chat request (plan §10 bound). */
+export const MAX_HISTORY_TURNS = 6;
+
+/** Maximum characters per history turn (plan §10 bound). */
+export const MAX_HISTORY_CHARS = 2000;
+
+/** Removable scope chips rendered above the thread (plan §17). */
+export type MuseContextChipKind = "dish" | "venue" | "city" | "scan";
+
+export interface MuseContextChip {
+  readonly kind: MuseContextChipKind;
+  readonly label: string;
+}
+
+/**
+ * Typed request failure for one assistant turn. Rendered exhaustively in
+ * the thread — never a generic "something went wrong", never raw JSON,
+ * stack traces, or Zod internals (plan §18, addendum §7).
+ */
+export type MuseFailure = Data.TaggedEnum<{
+  /** Connection failure (offline/network), distinct from model failure. */
+  Transport: {};
+  /** HTTP 429 with structured code; retry is manual, never immediate. */
+  RateLimited: { readonly retryAfterSeconds: number | null };
+  /** Provider temporarily unavailable; previous content preserved. */
+  Unavailable: {};
+  /** Response failed peer-shape validation; safe message only. */
+  InvalidOutput: {};
+  /** Feature requires sign-in; intended destination preserved. */
+  AuthRequired: {};
+  /** Vision/research disabled server-side; offer alternatives. */
+  Disabled: {};
+}>;
+
+export const MuseFailure = Data.taggedEnum<MuseFailure>();
+
+/**
+ * One conversation turn owning its enrichment: main text, structured
+ * cards, follow-ups, notice, and its own failure metadata (plan §10).
+ * Photo bytes, ownership tokens, and secrets never live here — text only,
+ * so session-scoped persistence stays privacy-safe. The `synthesized`
+ * flag mirrors the peer contract: true only after a validated bounded
+ * synthesis call, false for deterministic catalog assembly — the UI
+ * captions it instead of claiming generation either way.
+ */
+export interface MuseTurn {
+  readonly id: string;
+  readonly role: "user" | "assistant";
+  readonly text: string;
+  readonly cards: ReadonlyArray<CopilotCard>;
+  readonly followUps: ReadonlyArray<string>;
+  readonly notice: string | null;
+  readonly failure: MuseFailure | null;
+  readonly synthesized: boolean;
+}

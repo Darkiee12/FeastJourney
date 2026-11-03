@@ -34,9 +34,26 @@ export const copilotChatInputSchema = z.strictObject({
   message: z.string().trim().min(1, "message is required").max(2000),
   task: copilotTaskSchema.optional(),
   context: copilotContextSchema.optional(),
+  /**
+   * Bounded recent conversation context for follow-up interpretation only.
+   * Chronological, at most 6 turns, each at most 2000 characters. History
+   * is never trusted as fact: canonical dish/venue/scan ids re-resolve
+   * server-side with current authorization on every call.
+   */
+  history: z
+    .array(
+      z.strictObject({
+        role: z.enum(["user", "assistant"]),
+        content: z.string().trim().min(1).max(2000),
+      }),
+    )
+    .max(6)
+    .optional(),
 });
 
 export type CopilotChatInput = z.infer<typeof copilotChatInputSchema>;
+
+export type CopilotHistoryTurn = NonNullable<CopilotChatInput["history"]>[number];
 
 const cardRefSchema = z.union([z.string().regex(DB_ID_PATTERN), z.uuid()]);
 
@@ -58,6 +75,12 @@ export const copilotChatOutputSchema = z.strictObject({
   reply: z.string().trim().min(1).max(4000),
   cards: z.array(copilotCardSchema).max(12).default([]),
   followUps: z.array(z.string().trim().min(1).max(200)).max(5).default([]),
+  /**
+   * Honest provenance for the reply prose. False means deterministic
+   * catalog assembly (never model-generated); true only after a validated
+   * bounded synthesis call. Guests always receive false.
+   */
+  synthesized: z.boolean().default(false),
 });
 
 export type CopilotChatOutput = z.infer<typeof copilotChatOutputSchema>;
@@ -74,6 +97,20 @@ export const copilotIdentifyPhotoInputSchema = z.strictObject({
   language: z.string().regex(LANGUAGE_PATTERN, "language must be a BCP-47 tag").optional(),
 });
 
+/**
+ * Validated Muse↔scanner handoff. The scanner return link carries only this
+ * opaque owned scan id plus public scope (task/language) — never ownership
+ * secrets. The scan id re-authorizes server-side through the owned scan
+ * operations on every copilot call, preserving privacy and expiry semantics.
+ */
+export const copilotScanReturnSchema = z.strictObject({
+  scanId: z.uuid(),
+  task: copilotTaskSchema.optional(),
+  language: z.string().regex(LANGUAGE_PATTERN, "language must be a BCP-47 tag").optional(),
+});
+
+export type CopilotScanReturn = z.infer<typeof copilotScanReturnSchema>;
+
 export type CopilotIdentifyPhotoInput = z.infer<typeof copilotIdentifyPhotoInputSchema>;
 
 export const copilotCandidateSchema = z.strictObject({
@@ -88,6 +125,13 @@ export type CopilotCandidate = z.infer<typeof copilotCandidateSchema>;
 export const copilotIdentifyPhotoOutputSchema = z.strictObject({
   candidates: z.array(copilotCandidateSchema).max(6).default([]),
   unmatchedNote: z.string().trim().min(1).max(1000).optional(),
+  /**
+   * Machine-readable outcome so clients never regex-sniff note text.
+   * Optional for forward compatibility; absent means derive from notes.
+   */
+  status: z
+    .enum(["identified", "no-candidate", "unreadable", "auth-required", "disabled", "unavailable"])
+    .optional(),
 });
 
 export type CopilotIdentifyPhotoOutput = z.infer<typeof copilotIdentifyPhotoOutputSchema>;

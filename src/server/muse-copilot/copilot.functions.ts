@@ -1,5 +1,8 @@
+import type { Hash } from "node:crypto";
+
 import { createServerFn } from "@tanstack/react-start";
 
+import type { ScanPrincipal } from "@/modules/restaurant-discovery/server/operations/menu-scans";
 import {
   copilotChatInputSchema,
   copilotChatOutputSchema,
@@ -23,6 +26,8 @@ const loadChatServer = () =>
     import("@/server/config"),
     import("@/server/web-research/research-service"),
     import("@/server/integrations/meta-responses"),
+    import("@/server/env"),
+    import("node:crypto"),
   ]);
 
 const loadPhotoServer = () =>
@@ -36,6 +41,8 @@ const loadPhotoServer = () =>
     import("@tanstack/react-start/server"),
     import("@/server/http/request"),
     import("@/server/config"),
+    import("@/server/env"),
+    import("node:crypto"),
   ]);
 
 const loadDraftServer = () =>
@@ -49,6 +56,8 @@ const loadDraftServer = () =>
     import("@tanstack/react-start/server"),
     import("@/server/http/request"),
     import("@/server/config"),
+    import("@/server/env"),
+    import("node:crypto"),
   ]);
 
 interface InflightEntry {
@@ -66,6 +75,48 @@ const sweepChatInflight = (now: number): void => {
       chatInflight.delete(key);
     }
   }
+};
+
+/** Guest scan capability: same HttpOnly cookie + sha256 hash the scanner mints. */
+const GUEST_COOKIE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+/**
+ * Ownership principal for private scans. Members resolve from the verified
+ * session; guests resolve from the existing scanner guest cookie (no new
+ * mechanism). Null denies private access — callers fail closed.
+ */
+const resolveScanPrincipal = (
+  headers: Headers,
+  memberUserId: string | null,
+  betterAuthUrl: string,
+  createHash: (algorithm: string) => Hash,
+): ScanPrincipal | null => {
+  if (memberUserId !== null) {
+    return { userId: memberUserId, guestHash: "" };
+  }
+
+  let origin: string;
+
+  try {
+    origin = new URL(betterAuthUrl).origin;
+  } catch {
+    return null;
+  }
+
+  const cookieName = origin.startsWith("https:") ? "__Host-fj-menu-guest" : "fj-menu-guest";
+  const cookies = headers.get("cookie") ?? "";
+
+  const stored = cookies
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${cookieName}=`))
+    ?.slice(cookieName.length + 1);
+
+  if (stored === undefined || !GUEST_COOKIE_PATTERN.test(stored)) {
+    return null;
+  }
+
+  return { userId: null, guestHash: createHash("sha256").update(stored).digest("hex") };
 };
 
 /**
@@ -89,6 +140,8 @@ export const copilotChatFn = createServerFn({ method: "POST" })
       { appConfig },
       { WebResearchLive },
       { MetaResponsesLive },
+      { serverEnv },
+      { createHash },
     ] = await loadChatServer();
 
     const headers = server.getRequestHeaders();
@@ -141,8 +194,23 @@ export const copilotChatFn = createServerFn({ method: "POST" })
       requestId,
     );
 
+    const memberUserId = Actor.$match(actor, {
+      Guest: () => null,
+      Member: ({ userId }) => userId,
+    });
+
+    let betterAuthUrl = "";
+
+    try {
+      betterAuthUrl = serverEnv().BETTER_AUTH_URL;
+    } catch {
+      betterAuthUrl = "";
+    }
+
+    const scanPrincipal = resolveScanPrincipal(headers, memberUserId, betterAuthUrl, createHash);
+
     const actorKey = Actor.$match(actor, {
-      Guest: () => "guest",
+      Guest: () => `guest:${scanPrincipal?.guestHash.slice(0, 16) ?? "none"}`,
       Member: ({ userId }) => `member:${userId}`,
     });
 
@@ -150,6 +218,7 @@ export const copilotChatFn = createServerFn({ method: "POST" })
       message: data.message,
       task: data.task ?? "ask",
       context: data.context ?? {},
+      history: data.history ?? [],
       actor: actorKey,
     });
 
@@ -167,7 +236,9 @@ export const copilotChatFn = createServerFn({ method: "POST" })
           message: data.message,
           task: data.task ?? "ask",
           context: data.context ?? {},
+          history: data.history ?? [],
           actor,
+          scanPrincipal,
         }),
         effects.Layer.provide(WebResearchLive, MetaResponsesLive),
       ),
@@ -185,6 +256,7 @@ export const copilotChatFn = createServerFn({ method: "POST" })
         reply: "This answer could not be completed. Please try again.",
         cards: [],
         followUps: ["Browse popular dishes"],
+        synthesized: false,
       };
     });
 
@@ -210,6 +282,8 @@ export const copilotIdentifyPhotoFn = createServerFn({ method: "POST" })
       server,
       { resolveIdentityFromHeaders },
       { appConfig },
+      { serverEnv },
+      { createHash },
     ] = await loadPhotoServer();
 
     const headers = server.getRequestHeaders();
@@ -262,10 +336,25 @@ export const copilotIdentifyPhotoFn = createServerFn({ method: "POST" })
       requestId,
     );
 
+    const memberUserId = Actor.$match(actor, {
+      Guest: () => null,
+      Member: ({ userId }) => userId,
+    });
+
+    let betterAuthUrl = "";
+
+    try {
+      betterAuthUrl = serverEnv().BETTER_AUTH_URL;
+    } catch {
+      betterAuthUrl = "";
+    }
+
+    const scanPrincipal = resolveScanPrincipal(headers, memberUserId, betterAuthUrl, createHash);
+
     const output = await runApp(
       identifyFoodPhoto(
         { scanId: data.scanId, assetId: data.assetId, language: data.language },
-        actor,
+        scanPrincipal,
       ),
       "fn/copilot-photo/identify",
       30000,
@@ -297,6 +386,8 @@ export const copilotDraftOrderFn = createServerFn({ method: "POST" })
       server,
       { resolveIdentityFromHeaders },
       { appConfig },
+      { serverEnv },
+      { createHash },
     ] = await loadDraftServer();
 
     const headers = server.getRequestHeaders();
@@ -349,6 +440,19 @@ export const copilotDraftOrderFn = createServerFn({ method: "POST" })
       requestId,
     );
 
+    const memberUserId = Actor.$match(actor, {
+      Guest: () => null,
+      Member: ({ userId }) => userId,
+    });
+
+    let betterAuthUrl = "";
+
+    try {
+      betterAuthUrl = serverEnv().BETTER_AUTH_URL;
+    } catch {
+      betterAuthUrl = "";
+    }
+
     const output = await runApp(
       draftOrder({
         venueId: data.venueId,
@@ -356,6 +460,7 @@ export const copilotDraftOrderFn = createServerFn({ method: "POST" })
         items: data.items,
         instructions: data.instructions,
         actor,
+        scanPrincipal: resolveScanPrincipal(headers, memberUserId, betterAuthUrl, createHash),
       }),
       "fn/copilot-draft/order",
       30000,

@@ -1,73 +1,115 @@
-import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { useState, type ReactNode } from "react";
+import { z } from "zod";
 
-import { FlowShell, type FlowProps } from "@/modules/muse-copilot/flows/conversation";
+import type { WorkspacePanelApi } from "@/modules/muse-copilot/flows/task-panel";
 
-const copy = {
-  en: {
-    title: "Scan a menu",
-    intro:
-      "Menu scanning lives in the full scanner — photo checks, text extraction, and review all happen there, so nothing is scanned twice.",
-    openScanner: "Open the scanner",
-    backHint: "When the scan is saved, return here and continue with what it found.",
-    forgetScan: "Forget this scan",
-    scopedTo: "Scanner will open scoped to this venue.",
-    unscoped: "Pick a venue first if you want the scan attached to a place; otherwise scan freely.",
-  },
-  vi: {
-    title: "Quét thực đơn",
-    intro:
-      "Quét thực đơn nằm ở trình quét đầy đủ — kiểm tra ảnh, trích xuất chữ và duyệt đều ở đó, để không quét trùng.",
-    openScanner: "Mở trình quét",
-    backHint: "Khi lưu xong, quay lại đây để tiếp tục với kết quả quét.",
-    forgetScan: "Bỏ lần quét này",
-    scopedTo: "Trình quét sẽ mở theo quán này.",
-    unscoped: "Chọn quán trước nếu muốn gắn lần quét vào một địa điểm; không thì cứ quét tự do.",
-  },
-} as const;
+const uuidSchema = z.uuid();
 
 /**
- * Scan flow. This flow intentionally contains no scanner: photo capture,
- * client validation, server-side extraction, and review stay in the
- * canonical `/scan` route (`MenuScanPage` + `menu-scan-client`). Copying
- * that pipeline here would fork upload bounds, consent, and revision
- * handling. Instead this flow navigates to `/scan` with the current
- * language and venue scope, so the traveler returns to copilot with a
- * `scanId` in context.
+ * Scan handoff (plan §15). The canonical `/scan` route owns capture,
+ * validation, persistence, extraction, and review — nothing is duplicated
+ * here. Entry navigates directly to `/scan` with locale, verified venue
+ * scope, and the Muse return context; no intermediate scanner form lives
+ * in the workspace. Returning with an owned scan id renders the
+ * continue-with-scan actions (ask, explain, order, find similar); ownership
+ * re-verifies server-side on every use and no secrets ride the URL.
+ *
+ * Known gap: the scanner's "Continue with Muse" link does not yet carry
+ * the owned scan id back (menu-scan-page is outside this lane), so returns
+ * land without scan context until that link appends `scan=<id>`.
  */
-export default function ScanFlow({ context, onUpdateContext }: FlowProps): ReactNode {
-  const strings = context.language === "vi" ? copy.vi : copy.en;
+export function ScanPanel({ context, copy, selectTask, setDraft }: WorkspacePanelApi): ReactNode {
+  const navigate = useNavigate();
+  const [opening, setOpening] = useState(false);
 
-  return (
-    <FlowShell title={strings.title} intro={strings.intro}>
-      <p className="text-sm leading-relaxed text-ink">
-        {context.venueId === undefined ? strings.unscoped : strings.scopedTo}
-      </p>
-      <div className="flex flex-col gap-2">
-        <Link
-          to="/scan"
-          search={
-            context.venueId === undefined
-              ? { lang: context.language }
-              : { lang: context.language, venueId: context.venueId }
+  const openScanner = (): void => {
+    setOpening(true);
+
+    const parsedVenue = uuidSchema.safeParse(context.venueId);
+
+    void navigate({
+      to: "/scan",
+      search: parsedVenue.success
+        ? {
+            lang: context.language,
+            venueId: parsedVenue.data,
+            returnVenue: parsedVenue.data,
+            returnView: "copilot" as const,
           }
-          className="inline-flex min-h-11 items-center justify-center rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark"
-        >
-          {strings.openScanner}
-        </Link>
-        <p className="text-xs leading-relaxed text-muted">{strings.backHint}</p>
-        {context.scanId === undefined ? null : (
+        : { lang: context.language, returnView: "copilot" as const },
+    });
+  };
+
+  if (context.scanId !== undefined) {
+    return (
+      <div className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-white px-4 py-3 shadow-[0_8px_20px_rgba(3,10,30,0.08)]">
+        <p className="text-sm font-bold text-ink">{copy.scanContextTitle}</p>
+
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => {
-              onUpdateContext({ scanId: undefined });
+              setDraft(copy.scanAskMenu);
+              selectTask("ask");
             }}
-            className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
+            className="inline-flex min-h-9 cursor-pointer items-center rounded-full bg-food-orange-strong px-4 text-xs font-bold text-white transition hover:bg-food-orange-dark"
           >
-            {strings.forgetScan}
+            {copy.scanAskMenu}
           </button>
-        )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(copy.scanExplainItem);
+              selectTask("ask");
+            }}
+            className="inline-flex min-h-9 cursor-pointer items-center rounded-full border border-border-soft bg-white px-4 text-xs font-bold text-ink transition hover:border-food-orange-strong"
+          >
+            {copy.scanExplainItem}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              selectTask("order");
+            }}
+            className="inline-flex min-h-9 cursor-pointer items-center rounded-full border border-border-soft bg-white px-4 text-xs font-bold text-ink transition hover:border-food-orange-strong"
+          >
+            {copy.scanBuildOrder}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(copy.scanFindSimilar);
+              selectTask("find");
+            }}
+            className="inline-flex min-h-9 cursor-pointer items-center rounded-full border border-border-soft bg-white px-4 text-xs font-bold text-ink transition hover:border-food-orange-strong"
+          >
+            {copy.scanFindSimilar}
+          </button>
+        </div>
       </div>
-    </FlowShell>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-white px-4 py-3 shadow-[0_8px_20px_rgba(3,10,30,0.08)]">
+      <p className="text-sm leading-relaxed text-ink">
+        {context.venueId === undefined ? copy.taskScanBlurb : copy.taskScanTitle}
+      </p>
+
+      <button
+        type="button"
+        onClick={openScanner}
+        disabled={opening}
+        className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {opening ? copy.openingScanner : copy.openScanner}
+      </button>
+    </div>
   );
 }
+
+export default ScanPanel;

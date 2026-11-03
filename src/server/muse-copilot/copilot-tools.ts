@@ -14,7 +14,7 @@ import {
   getMenuScan,
   type ScanPrincipal,
 } from "@/modules/restaurant-discovery/server/operations/menu-scans";
-import { Actor } from "@/server/auth/actor";
+import type { Actor } from "@/server/auth/actor";
 import type { Database } from "@/server/database/client";
 import {
   dishDetailToolSchema,
@@ -360,7 +360,7 @@ const GUEST_SCAN_DENIED_REASON =
 
 export const getScanMenuTool = Effect.fn("copilot.tool.getScanMenu")(function* (
   input: ScanMenuToolInput,
-  actor: Actor,
+  principal: ScanPrincipal | null,
 ) {
   const parsed = scanMenuToolSchema.safeParse(input);
 
@@ -371,11 +371,6 @@ export const getScanMenuTool = Effect.fn("copilot.tool.getScanMenu")(function* (
 
     return ScanLookup.ScanEmpty();
   }
-
-  const principal: ScanPrincipal | null = Actor.$match(actor, {
-    Guest: () => null,
-    Member: ({ userId }) => ({ userId, guestHash: "" }),
-  });
 
   if (principal === null) {
     return ScanLookup.ScanDenied({ reason: GUEST_SCAN_DENIED_REASON });

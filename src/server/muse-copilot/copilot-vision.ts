@@ -9,7 +9,6 @@ import {
   readMenuPhoto,
   type ScanPrincipal,
 } from "@/modules/restaurant-discovery/server/operations/menu-scans";
-import { Actor } from "@/server/auth/actor";
 import type { Database } from "@/server/database/client";
 import { DEFAULT_MODEL_BASE_URL, isSupportedModelId } from "@/server/env";
 
@@ -284,7 +283,7 @@ export interface CopilotIdentifyPhotoRequest {
 
 export const identifyFoodPhoto = Effect.fn("copilot.identifyPhoto")(function* (
   request: CopilotIdentifyPhotoRequest,
-  actor: Actor,
+  principal: ScanPrincipal | null,
 ) {
   const startedAt = Date.now();
   const config = resolveCopilotVisionConfig(process.env);
@@ -294,19 +293,19 @@ export const identifyFoodPhoto = Effect.fn("copilot.identifyPhoto")(function* (
       Effect.annotateLogs({ reason: "disabled" }),
     );
 
-    return { candidates: [], unmatchedNote: "Food photo analysis is currently disabled." };
+    return {
+      candidates: [],
+      unmatchedNote: "Food photo analysis is currently disabled.",
+      status: "disabled",
+    };
   }
-
-  const principal: ScanPrincipal | null = Actor.$match(actor, {
-    Guest: () => null,
-    Member: ({ userId }) => ({ userId, guestHash: "" }),
-  });
 
   if (principal === null) {
     return {
       candidates: [],
       unmatchedNote:
         "Private scan photos cannot be identified without the signed-in owner. Open this scan in the menu scanner instead.",
+      status: "auth-required",
     };
   }
 
@@ -340,7 +339,11 @@ export const identifyFoodPhoto = Effect.fn("copilot.identifyPhoto")(function* (
       Effect.annotateLogs({ readable: bytes !== null }),
     );
 
-    return { candidates: [], unmatchedNote: "This photo could not be read. Try another image." };
+    return {
+      candidates: [],
+      unmatchedNote: "This photo could not be read. Try another image.",
+      status: "unreadable",
+    };
   }
 
   const payload = yield* runVisionCall(config, bytes, request.language).pipe(
@@ -352,11 +355,15 @@ export const identifyFoodPhoto = Effect.fn("copilot.identifyPhoto")(function* (
   );
 
   if ("failed" in payload && payload.failed !== null) {
-    return { candidates: [], unmatchedNote: payload.failed };
+    return { candidates: [], unmatchedNote: payload.failed, status: "unavailable" };
   }
 
   if ("failed" in payload || payload.candidates.length === 0) {
-    return { candidates: [], unmatchedNote: "No recognizable dish was found in this photo." };
+    return {
+      candidates: [],
+      unmatchedNote: "No recognizable dish was found in this photo.",
+      status: "no-candidate",
+    };
   }
 
   const grounded = yield* Effect.forEach(
@@ -398,8 +405,9 @@ export const identifyFoodPhoto = Effect.fn("copilot.identifyPhoto")(function* (
     return {
       candidates: [],
       unmatchedNote: "No recognizable dish was found in this photo.",
+      status: "no-candidate",
     };
   }
 
-  return { candidates };
+  return { candidates, status: "identified" };
 });

@@ -1,22 +1,28 @@
-import { MapPinned, MessagesSquare, ReceiptText, ScanLine, UtensilsCrossed } from "lucide-react";
+import {
+  ClipboardList,
+  Leaf,
+  MapPin,
+  MessagesSquare,
+  ScanLine,
+  UtensilsCrossed,
+} from "lucide-react";
 import type { ComponentType } from "react";
 
 import type { CopilotCopy } from "@/modules/muse-copilot/copilot-copy";
-import type { JourneyTask } from "@/modules/muse-copilot/journey/types";
-import { journeyTasks } from "@/modules/muse-copilot/journey/types";
+import { journeyTasks, type JourneyTask } from "@/modules/muse-copilot/journey/types";
 
 const taskIcons: ReadonlyMap<
   JourneyTask,
   ComponentType<{ className?: string | undefined }>
 > = new Map<JourneyTask, ComponentType<{ className?: string | undefined }>>([
   ["scan", ScanLine],
-  ["plate", UtensilsCrossed],
-  ["find", MapPinned],
-  ["ask", MessagesSquare],
-  ["order", ReceiptText],
+  ["plate", Leaf],
+  ["find", MapPin],
+  ["ask", UtensilsCrossed],
+  ["order", ClipboardList],
 ]);
 
-const taskTitle = (copy: CopilotCopy, task: JourneyTask): string => {
+const taskLabel = (copy: CopilotCopy, task: JourneyTask): string => {
   if (task === "scan") {
     return copy.taskScanTitle;
   }
@@ -36,91 +42,49 @@ const taskTitle = (copy: CopilotCopy, task: JourneyTask): string => {
   return copy.taskOrderTitle;
 };
 
-const taskBlurb = (copy: CopilotCopy, task: JourneyTask): string => {
-  if (task === "scan") {
-    return copy.taskScanBlurb;
-  }
-
-  if (task === "plate") {
-    return copy.taskPlateBlurb;
-  }
-
-  if (task === "find") {
-    return copy.taskFindBlurb;
-  }
-
-  if (task === "ask") {
-    return copy.taskAskBlurb;
-  }
-
-  return copy.taskOrderBlurb;
-};
-
-export interface TaskSelectorProps {
+export interface TaskShortcutChipsProps {
+  readonly active: JourneyTask | null;
   readonly copy: CopilotCopy;
-  /** True once that task's flow module loaded; false renders it disabled. */
-  readonly availability: ReadonlyMap<JourneyTask, boolean>;
   readonly onSelect: (task: JourneyTask) => void;
 }
 
 /**
- * The five task cards. A task whose flow module failed to load renders
- * disabled with coming-soon copy — never a crash, never a dead button that
- * pretends to work.
+ * Compact horizontal task shortcuts for the workspace toolbar (plan §5:
+ * optional contextual shortcut controls). One row, scrollable on narrow
+ * screens, never a two-column card grid inside the chat.
  */
-export function TaskSelector({ availability, copy, onSelect }: TaskSelectorProps) {
+export function TaskShortcutChips({ active, copy, onSelect }: TaskShortcutChipsProps) {
   return (
-    <ul className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
-      {journeyTasks.map((task) => {
-        const Icon = taskIcons.get(task) ?? MessagesSquare;
-        const ready = availability.get(task) ?? false;
+    <div className="flex-none overflow-x-auto overscroll-x-contain">
+      <ul
+        className="flex gap-1.5 px-4 py-1 sm:justify-center sm:px-5"
+        aria-label={copy.workspaceTitle}
+      >
+        {journeyTasks.map((task) => {
+          const Icon = taskIcons.get(task) ?? MessagesSquare;
+          const selected = active === task;
 
-        if (!ready) {
           return (
-            <li key={task}>
-              <div
-                aria-disabled="true"
-                className="flex h-full items-start gap-3 rounded-2xl border border-border-soft bg-white/60 px-5 py-4 text-left opacity-70"
+            <li key={task} className="flex-none">
+              <button
+                type="button"
+                onClick={() => {
+                  onSelect(task);
+                }}
+                aria-pressed={selected}
+                className={`inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border px-3.5 text-xs font-bold whitespace-nowrap transition ${
+                  selected
+                    ? "border-mango/70 bg-mango/15 text-mango"
+                    : "border-white/15 bg-transparent text-white/75 hover:border-white/40 hover:text-white"
+                }`}
               >
-                <span className="flex size-11 flex-none items-center justify-center rounded-full bg-space-deep/10 text-muted">
-                  <Icon className="size-5" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="text-base font-bold text-ink">{taskTitle(copy, task)}</span>
-                    <span className="inline-flex items-center rounded-full bg-space-deep/10 px-2.5 py-0.5 text-xs font-bold tracking-wide text-muted uppercase">
-                      {copy.comingSoon}
-                    </span>
-                  </span>
-                  <span className="mt-1 block text-sm leading-relaxed text-muted">
-                    {taskBlurb(copy, task)}
-                  </span>
-                </span>
-              </div>
+                <Icon aria-hidden="true" className="size-3.5" />
+                {taskLabel(copy, task)}
+              </button>
             </li>
           );
-        }
-
-        return (
-          <li key={task}>
-            <button
-              type="button"
-              onClick={() => onSelect(task)}
-              className="flex h-full w-full cursor-pointer items-start gap-3 rounded-2xl border border-border-soft bg-white px-5 py-4 text-left shadow-[0_12px_28px_rgba(194,65,12,0.08)] transition hover:-translate-y-px hover:border-food-orange-strong/50 hover:shadow-[0_16px_32px_rgba(194,65,12,0.16)] active:translate-y-0 active:scale-[0.99]"
-            >
-              <span className="flex size-11 flex-none items-center justify-center rounded-full bg-space-deep text-cream">
-                <Icon className="size-5" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="text-base font-bold text-ink">{taskTitle(copy, task)}</span>
-                <span className="mt-1 block text-sm leading-relaxed text-muted">
-                  {taskBlurb(copy, task)}
-                </span>
-              </span>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
+        })}
+      </ul>
+    </div>
   );
 }

@@ -856,6 +856,7 @@ export function MenuScanPage({
             search={{
               lang: validatedLang,
               task: scanId !== null ? "order" : "scan",
+              scan: scanId ?? undefined,
             }}
           >
             ← {copy.returnToMuse}

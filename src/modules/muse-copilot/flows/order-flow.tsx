@@ -1,14 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useRef, useState, type ReactNode } from "react";
 import { z } from "zod";
 
-import { SharedSelect } from "@/components/ui/select";
-import {
-  BusyStage,
-  FlowAlert,
-  FlowShell,
-  type FlowProps,
-} from "@/modules/muse-copilot/flows/conversation";
+import type { WorkspacePanelApi } from "@/modules/muse-copilot/flows/task-panel";
 import { PriceUnavailable } from "@/modules/restaurant-discovery/components/currency-tools";
 import { RestaurantMenuPanel } from "@/modules/restaurant-discovery/components/restaurant-menu-panel";
 import { HINGLISH_STYLE, useMenuLanguage } from "@/modules/restaurant-discovery/menu-language";
@@ -25,15 +20,10 @@ import { currencyDigits, formatMoney, isCurrency } from "@/shared/money";
 
 type MenuChannel = RestaurantSearch["channel"];
 
-const CHANNELS: ReadonlyArray<MenuChannel> = ["dine_in", "takeaway", "delivery"];
 const uuidSchema = z.uuid();
 
 const copy = {
   en: {
-    title: "Order with confidence",
-    intro:
-      "Pick from the venue's reviewed menu below, then let Muse price-check the draft. Nothing is added or removed until you tap it — every line needs your decision.",
-    needsVenue: "Pick a place first (for example from Find) so there is a real menu to draft from.",
     channelLabel: "Sales channel",
     channelDineIn: "Dine-in",
     channelTakeaway: "Takeaway",
@@ -44,7 +34,6 @@ const copy = {
     regenerate: "Review again",
     preparing: "Preparing your order draft…",
     draftFailed: "The draft did not finish. Try again when ready.",
-    retry: "Try again",
     emptySelection: "Select items from the menu below first, then review them with Muse.",
     skippedLines: "lines cannot be drafted because they are not on the current menu.",
     draftNote: "Muse checked the lines below against the current menu.",
@@ -57,10 +46,6 @@ const copy = {
     lineUnavailable: "Price unavailable — confirm with the venue",
   },
   vi: {
-    title: "Tự tin gọi món",
-    intro:
-      "Chọn món từ thực đơn đã duyệt của quán bên dưới, rồi để Muse kiểm giá bản soạn. Chưa có gì được thêm hay bớt cho đến khi bạn chạm — mỗi dòng đều cần bạn quyết.",
-    needsVenue: "Hãy chọn quán trước (ví dụ từ Tìm món) để có thực đơn thật mà soạn.",
     channelLabel: "Kênh bán",
     channelDineIn: "Ăn tại chỗ",
     channelTakeaway: "Mang đi",
@@ -71,7 +56,6 @@ const copy = {
     regenerate: "Duyệt lại",
     preparing: "Đang soạn món gọi…",
     draftFailed: "Bản duyệt chưa xong. Thử lại khi bạn sẵn sàng.",
-    retry: "Thử lại",
     emptySelection: "Hãy chọn món từ thực đơn bên dưới trước, rồi nhờ Muse duyệt.",
     skippedLines: "món không duyệt được vì không còn trong thực đơn hiện tại.",
     draftNote: "Muse đã kiểm các dòng bên dưới với thực đơn hiện tại.",
@@ -99,55 +83,109 @@ const formatMinor = (minor: string, currency: string, locale: string): string | 
   return `${formatMoney(major, currency, locale)} ${currency}`;
 };
 
-const channelLabelFor = (
-  channel: MenuChannel,
-  strings: {
-    readonly channelTakeaway: string;
-    readonly channelDelivery: string;
-    readonly channelDineIn: string;
-  },
-): string => {
-  if (channel === "takeaway") {
-    return strings.channelTakeaway;
-  }
-
-  if (channel === "delivery") {
-    return strings.channelDelivery;
-  }
-
-  return strings.channelDineIn;
-};
-
 /**
- * Order flow. The venue's reviewed menu, selection state, subtotals, and
- * waiter card all stay inside the canonical `RestaurantMenuPanel` (same
- * `useMenuSelection` controller key, same `presentReviewed` projection —
- * the panel's TanStack query cache is shared, so no menu loads twice).
- * This flow only adds the Muse draft review: current selections travel as
- * the draft input items, and the backend's priced lines, warnings, and
- * completeness flag render for explicit per-line accept/remove. No price
- * math lives here — `formatMinor` only displays backend-computed totals.
+ * Order workspace (plan §16). Without a venue or scan, a guided choice —
+ * never a dead "pick a place first" panel. With a restaurant, the
+ * canonical `RestaurantMenuPanel` (shared selection controller, shared
+ * query cache) plus the item-by-item draft review: nothing is added or
+ * removed until the visitor taps it. With a private scan only, scan-scoped
+ * actions and the printed-vs-reviewed distinction; unverified extracted
+ * prices are never presented as reviewed.
  */
-export default function OrderFlow({ context }: FlowProps): ReactNode {
-  const strings = context.language === "vi" ? copy.vi : copy.en;
+export function OrderPanel(api: WorkspacePanelApi): ReactNode {
+  const { context, copy: workspaceCopy, onUpdateContext, selectTask, setDraft } = api;
+  const navigate = useNavigate();
 
-  if (context.venueId === undefined) {
+  if (context.venueId === undefined && context.scanId === undefined) {
     return (
-      <FlowShell title={strings.title} intro={strings.intro}>
-        <p className="text-sm leading-relaxed text-ink">{strings.needsVenue}</p>
-      </FlowShell>
+      <div className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-white px-4 py-3 shadow-[0_8px_20px_rgba(3,10,30,0.08)]">
+        <p className="text-sm font-bold text-ink">{workspaceCopy.orderGuideTitle}</p>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              selectTask("find");
+            }}
+            className="inline-flex min-h-11 cursor-pointer items-center rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark"
+          >
+            {workspaceCopy.orderFindPlace}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              void navigate({
+                to: "/scan",
+                search: { lang: context.language, returnView: "copilot" as const },
+              });
+            }}
+            className="inline-flex min-h-11 cursor-pointer items-center rounded-full border border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-food-orange-strong"
+          >
+            {workspaceCopy.orderUseScan}
+          </button>
+        </div>
+      </div>
     );
   }
 
-  return <OrderFlowBody contextVenueId={context.venueId} language={context.language} />;
+  if (context.venueId === undefined) {
+    return (
+      <div className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-white px-4 py-3 shadow-[0_8px_20px_rgba(3,10,30,0.08)]">
+        <p className="text-sm leading-relaxed text-ink">{workspaceCopy.orderScanNote}</p>
+
+        <div className="flex flex-wrap gap-2">
+          <Link
+            to="/scan"
+            search={{ lang: context.language, returnView: "copilot" }}
+            className="inline-flex min-h-11 items-center rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark"
+          >
+            {workspaceCopy.orderOpenScan}
+          </Link>
+
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(workspaceCopy.scanAskMenu);
+              selectTask("ask");
+            }}
+            className="inline-flex min-h-11 cursor-pointer items-center rounded-full border border-border-soft bg-white px-5 text-sm font-bold text-ink transition hover:border-food-orange-strong"
+          >
+            {workspaceCopy.scanAskMenu}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              onUpdateContext({ scanId: undefined });
+            }}
+            className="inline-flex min-h-11 cursor-pointer items-center rounded-full border border-border-soft bg-white px-5 text-sm font-bold text-muted transition hover:text-ink"
+            aria-label={`${workspaceCopy.removeChip}: ${workspaceCopy.chipScan}`}
+          >
+            {workspaceCopy.chipScan} ×
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <OrderFlowBody
+      contextVenueId={context.venueId}
+      language={context.language}
+      retryLabel={workspaceCopy.retryAction}
+    />
+  );
 }
 
 function OrderFlowBody({
   contextVenueId,
   language,
+  retryLabel,
 }: {
   readonly contextVenueId: string;
   readonly language: "en" | "vi";
+  readonly retryLabel: string;
 }): ReactNode {
   const strings = language === "vi" ? copy.vi : copy.en;
   const [channel, setChannel] = useState<MenuChannel>("dine_in");
@@ -288,22 +326,7 @@ function OrderFlowBody({
   };
 
   return (
-    <FlowShell title={strings.title} intro={strings.intro}>
-      <SharedSelect
-        ariaLabel={strings.channelLabel}
-        value={channel}
-        onValueChange={(value) => {
-          if (value === "dine_in" || value === "takeaway" || value === "delivery") {
-            changeChannel(value);
-          }
-        }}
-        options={CHANNELS.map((entry) => ({
-          value: entry,
-          label: channelLabelFor(entry, strings),
-        }))}
-        size="regular"
-      />
-
+    <div className="flex flex-col gap-3">
       <RestaurantMenuPanel
         channel={channel}
         lang={language}
@@ -346,10 +369,27 @@ function OrderFlowBody({
         ) : null}
       </div>
 
-      <BusyStage stage={preparing ? strings.preparing : null} />
+      {preparing ? (
+        <p className="text-sm font-semibold text-ink" aria-live="polite">
+          {strings.preparing}
+        </p>
+      ) : null}
 
       {draftFailed ? (
-        <FlowAlert message={strings.draftFailed} onRetry={review} retryLabel={strings.retry} />
+        <div
+          role="alert"
+          className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-white px-4 py-3"
+        >
+          <p className="text-sm font-semibold text-ink">{strings.draftFailed}</p>
+
+          <button
+            type="button"
+            onClick={review}
+            className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark"
+          >
+            {retryLabel}
+          </button>
+        </div>
       ) : null}
 
       {undraftable > 0 ? (
@@ -445,6 +485,8 @@ function OrderFlowBody({
           ) : null}
         </div>
       )}
-    </FlowShell>
+    </div>
   );
 }
+
+export default OrderPanel;
