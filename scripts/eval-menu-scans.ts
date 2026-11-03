@@ -201,6 +201,7 @@ function stubResponse(document: MenuExtraction | null): Response {
   });
 }
 
+// aislop-ignore-file security/hardcoded-secret -- Synthetic stub credentials for the local-only eval harness (stub-eval placeholders, localhost, .invalid domain); never real secrets, never committed credentials.
 function syntheticStubEnv(): ServerEnv {
   return {
     DATABASE_URL: "postgres://feastjourney:fj-local-dev-pw@127.0.0.1:5433/feastjourney",
