@@ -13,6 +13,7 @@ import {
   type DishCarouselItem,
 } from "@/components/dish/dish-carousel";
 import { DishMedia } from "@/components/dish/dish-media";
+import { previewDescription } from "@/components/home/dish-recommendation-card";
 import { usePrefersReducedMotion } from "@/components/home/globe/use-prefers-reduced-motion";
 import type { Locale, Messages } from "@/shared/i18n";
 
@@ -22,26 +23,6 @@ import type { Locale, Messages } from "@/shared/i18n";
  * pick) and every thumbnail loads lazily.
  */
 export const RECOMMENDATION_RAIL_THUMB_SIZES = "(max-width: 640px) 40vw, 160px";
-
-/** Presentation-only preview cap: user-perceived characters, never bytes. */
-const DESCRIPTION_PREVIEW_LIMIT = 100;
-
-/**
- * Unicode-safe description preview. Code-point aware (`Array.from` never
- * splits a surrogate pair), so CJK and Vietnamese diacritics survive intact.
- * Ellipsis only when truncation actually happened. The full description
- * stays untouched in the featured card and detail page.
- */
-const toDescriptionPreview = (value: string): string => {
-  const trimmed = value.trim();
-  const points = Array.from(trimmed);
-
-  if (points.length <= DESCRIPTION_PREVIEW_LIMIT) {
-    return trimmed;
-  }
-
-  return `${points.slice(0, DESCRIPTION_PREVIEW_LIMIT).join("")}…`;
-};
 
 export interface RecommendationRailProps {
   /**
@@ -240,7 +221,7 @@ export function RecommendationRail({
           const preview =
             dish.description === null || dish.description === undefined
               ? null
-              : toDescriptionPreview(dish.description);
+              : previewDescription(dish.description);
 
           const descriptionLanguage =
             dish.descriptionLanguage !== null &&
@@ -294,7 +275,10 @@ export function RecommendationRail({
                   <span className="block min-h-4 truncate text-[0.65rem] leading-4 font-bold tracking-[0.14em] text-food-orange-strong uppercase">
                     {regions ?? ""}
                   </span>
-                  <span className="mt-0.5 line-clamp-2 block min-h-[2.75em] text-sm leading-snug font-extrabold text-ink">
+                  <span
+                    title={title}
+                    className="mt-0.5 line-clamp-2 block min-h-[2.75em] text-sm leading-snug font-extrabold break-words text-ink"
+                  >
                     {title}
                   </span>
                   <span
@@ -305,7 +289,7 @@ export function RecommendationRail({
                   </span>
                   <span
                     lang={descriptionLanguage}
-                    className="mt-1 line-clamp-2 block min-h-[3.25em] text-xs leading-relaxed text-muted"
+                    className="mt-1 line-clamp-2 block min-h-[3.25em] text-xs leading-relaxed break-words text-muted"
                   >
                     {preview ?? ""}
                   </span>

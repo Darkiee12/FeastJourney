@@ -103,11 +103,15 @@ function RailSkeletonCard({ visibility }: { readonly visibility: string }): Reac
  * - "More recommendations" heading (real text, stable across the swap)
  *   plus 3–5 rail thumbnail placeholders matching real card geometry;
  * - no mode/warning content: nothing renders an AI or deterministic label
- *   before the backend responds.
+ *   before the backend responds. The one visible status line reuses the
+ *   generic `recLoading` copy only — Muse branding never appears for
+ *   deterministic-only loads because the client cannot know pre-response
+ *   whether the provider will run.
  *
  * Accessibility: the composition adds no live region, status, alert, or
- * interactive element of its own. Everything decorative is `aria-hidden`;
- * the single `sr-only` status line reuses `recLoading` so the caller's
+ * interactive element of its own. Everything decorative is `aria-hidden`
+ * (including the visible status line, which duplicates the `sr-only`
+ * announcement text); the single `sr-only` status line reuses `recLoading` so the caller's
  * `aria-live="polite" aria-busy` wrapper (quiz-flow `renderOutcome`)
  * announces loading exactly once. All motion is the shared subtle
  * `animate-pulse` with `motion-reduce:animate-none` — one speed, off under
@@ -125,6 +129,9 @@ export function ResultsLoadingSkeleton({
     return (
       <div>
         <p className="sr-only">{copy.recLoading}</p>
+        <p aria-hidden="true" className="mb-3 text-sm font-bold text-muted">
+          {copy.recLoading}
+        </p>
         <DishCarouselCompactSkeleton />
       </div>
     );
@@ -133,6 +140,9 @@ export function ResultsLoadingSkeleton({
   return (
     <div>
       <p className="sr-only">{copy.recLoading}</p>
+      <p aria-hidden="true" className="mb-3 text-sm font-bold text-muted">
+        {copy.recLoading}
+      </p>
       <DishCarouselSkeleton />
       <div aria-hidden="true" className="mt-4 flex flex-wrap items-center gap-3">
         <div className="h-11 w-11 animate-pulse rounded-full bg-border-soft motion-reduce:animate-none" />

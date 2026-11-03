@@ -83,6 +83,8 @@ export interface RecommendAnswers {
   readonly location?: RecommendationLocation | undefined;
   readonly mood: RecommendationMood;
   readonly locale: string;
+  /** Optional catalog cuisine slug; preserved end-to-end, never invented. */
+  readonly cuisine?: string | undefined;
 }
 
 export interface RecommendPayload {
@@ -95,6 +97,8 @@ export interface RecommendPayload {
   readonly mood: RecommendationMood;
   readonly locale: string;
   readonly surpriseSeed: number;
+  /** Optional catalog cuisine slug; mirrors the server query bound. */
+  readonly cuisine?: string | undefined;
 }
 
 export interface SurpriseInputs {
@@ -103,6 +107,7 @@ export interface SurpriseInputs {
   readonly mood: RecommendationMood;
   readonly locale: string;
   readonly surpriseSeed: number;
+  readonly cuisine?: string | undefined;
 }
 
 /** Split a comma-separated field into trimmed, deduplicated, non-empty terms. */
@@ -152,6 +157,7 @@ export const buildRecommendPayload = (
   mood: answers.mood,
   locale: answers.locale,
   surpriseSeed: answers.surpriseSeed ?? 0,
+  cuisine: answers.cuisine,
 });
 
 /**
@@ -236,6 +242,7 @@ export const buildSurprisePayload = (inputs: SurpriseInputs): RecommendPayload =
     mood: inputs.mood,
     locale: inputs.locale,
     surpriseSeed: inputs.surpriseSeed,
+    cuisine: inputs.cuisine,
   });
 
 /**
@@ -942,6 +949,7 @@ const journeySnapshotSchema = z.object({
       meal: z.enum(MEAL_OCCASIONS),
       excludedIngredients: z.array(z.string().max(100)).max(20),
       country: recCountrySchema.optional(),
+      cuisine: z.string().max(80).optional(),
       location: z
         .object({
           kind: z.literal("city"),
@@ -1078,6 +1086,7 @@ export const toCoarseSnapshot = (model: JourneyWriteModel): JourneySnapshot => {
     meal: model.submitted.meal,
     excludedIngredients: model.submitted.excludedIngredients,
     country: model.submitted.country,
+    cuisine: model.submitted.cuisine,
     mood: model.submitted.mood,
     locale: model.submitted.locale,
     surpriseSeed: model.submitted.surpriseSeed,
@@ -1335,6 +1344,7 @@ export const cacheKeyInputFor = (
   meal: payload.meal,
   mood: payload.mood,
   excludedIngredients: payload.excludedIngredients,
+  cuisine: payload.cuisine,
   scopeKey: geographicScopeKeyFor(payload),
   surpriseSeed: payload.surpriseSeed,
 });

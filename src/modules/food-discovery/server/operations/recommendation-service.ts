@@ -296,8 +296,30 @@ export const locationLogFields = (
   });
 
 /**
+ * Honest coarse region for the ranking model: explicit cuisine wins, then
+ * the country scope, then a city request's registry-resolved country hint.
+ * Coordinates never leave the scope object — precise and worldwide scopes
+ * stay null so the model cannot claim city-specific relevance it was not
+ * given. A bare city place id is not resolvable here (no registry read in
+ * this pure function), so the hint is the best truthful label available.
+ */
+const coarseRegionOf = (input: RecommendDishesInput): string | null => {
+  if (input.cuisine !== undefined) {
+    return input.cuisine;
+  }
+
+  return LocationScope.$match(resolveLocationScope(input), {
+    Country: ({ country }) => country,
+    City: ({ countryHint }) => countryHint,
+    Precise: () => null,
+    Worldwide: () => null,
+  });
+};
+
+/**
  * Ranking-model context. Carries occasion, mood, an optional cuisine or
- * country label, and the RESOLVED canonical exclusion names — never raw
+ * coarse region label (explicit cuisine, country scope, or a city request's
+ * country hint), and the RESOLVED canonical exclusion names — never raw
  * diner terms, never coordinates, never venue claims. The model only
  * re-ranks the candidate rows it is given, and its output only reorders
  * that bounded set: it can never mint dishes, edit the catalog, publish,
@@ -311,7 +333,7 @@ export const toRankContext = (
   input: RecommendDishesInput,
   canonicalExclusions?: ReadonlyArray<string>,
 ): MetaRankContext => ({
-  cuisineOrRegion: input.cuisine ?? scopeCountryOf(input),
+  cuisineOrRegion: coarseRegionOf(input),
   mood: input.mood,
   occasion: input.meal,
   excludedIngredients: [...(canonicalExclusions ?? input.excludedIngredients)],
@@ -667,6 +689,11 @@ const BANNED_REASON_CLAIMS: ReadonlyArray<{ readonly tag: string; readonly patte
     pattern: /([$€£¥]\s?\d|\bprices?\b|\bcosts?\b|\bcheap\b|\bexpensive\b|\baffordable\b)/i,
   },
   {
+    tag: "availability",
+    pattern:
+      /\b(available (at|nearby|in town)|served at (a |the |this )?restaurants?|order (it|this) at|find it at|on the menu at)\b/i,
+  },
+  {
     tag: "instruction",
     pattern:
       /\b(ignore|disregard|forget|override|bypass)\b[^.]{0,60}\b(instructions?|rules?|system|prompt|filters?|exclusions?|policy|policies)\b|\b(system prompt|jailbreak|developer mode|do anything now|as an ai|as a language model)\b/i,
@@ -791,19 +818,39 @@ const rankAllDeterministic = (
 };
 
 /**
- * Zip validated parallel reasons onto enriched summaries. Validation
- * guarantees equal lengths, so a mismatch here means an internal drift:
- * attach nothing rather than misattribute model text to the wrong dish.
+ * ID-based reason association: validated provider reasons ride a dish-ID map,
+ * never a positional assumption, so a reorder between ranking and hydration
+ * can never attach dish A's text to dish B. Any length drift means internal
+ * skew: attach nothing rather than misattribute model text to the wrong dish.
  */
 const zipReasons = (
   summaries: ReadonlyArray<DishSummary>,
+  ids: ReadonlyArray<string>,
   reasons: ReadonlyArray<string>,
 ): Array<RankedDishSummary> => {
-  if (summaries.length !== reasons.length) {
+  if (summaries.length !== ids.length || ids.length !== reasons.length) {
     return summaries.map((summary) => ({ ...summary }));
   }
 
-  return summaries.map((summary, index) => ({ ...summary, aiReason: reasons[index] }));
+  const reasonById = new Map<string, string>();
+
+  for (const [index, id] of ids.entries()) {
+    const reason = reasons[index];
+
+    if (reason !== undefined) {
+      reasonById.set(id, reason);
+    }
+  }
+
+  return summaries.map((summary) => {
+    const reason = reasonById.get(summary.id);
+
+    if (reason === undefined) {
+      return { ...summary };
+    }
+
+    return { ...summary, aiReason: reason };
+  });
 };
 
 /**
@@ -1068,9 +1115,9 @@ const finishRecommendations = (
     );
 
     return MuseRankResult.$match(ranked, {
-      Ranked: ({ reasons }) =>
+      Ranked: ({ ids, reasons }) =>
         RecommendationOutcome.ReadyMuse({
-          dishes: zipReasons(dishes, reasons),
+          dishes: zipReasons(dishes, ids, reasons),
           warnings: [...warnings],
           ranking: RankingProvenance.LiveMuse(),
           servedScope,
