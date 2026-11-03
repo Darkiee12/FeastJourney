@@ -161,6 +161,28 @@ Operator checklist per variable group:
   `muse-wonder-*` id + https base; misconfiguration fails loudly (HTTP
   500). Server-side key only — browser keys forbidden; no Contributor-tier
   key for staging experiments.
+- `MENU_SCANNER_ENABLED` / `WEB_RESEARCH_ENABLED` (+ tuning vars),
+  `REVIEW_INTELLIGENCE_ENABLED`, `COPILOT_VISION_ENABLED` — all four are
+  opt-in and default to disabled. Enabling one in Dokploy requires BOTH:
+  setting it in the Compose environment AND forwarding it under
+  `services.app.environment` in `docker-compose.swarm.yml` (all current
+  settings are forwarded; the release CI validates the rendered stack
+  before upload). All four reuse the server-side `MODEL_API_KEY`; the
+  scanner defaults to `muse-spark-1.3`. Changes take effect after a
+  successful stack deployment — updating environment variables never
+  modifies an already-running service process, and a manual
+  `docker service update --env-add` is overwritten by the next Dokploy
+  deployment. To enable:
+
+  ```dotenv
+  MENU_SCANNER_ENABLED=true
+  WEB_RESEARCH_ENABLED=true
+  ```
+- `FX_ENDPOINT` / `FX_REFRESH_HOURS` / `FX_MAX_AGE_HOURS` — reference FX
+  for local-currency display (Frankfurter v2, display only, never a
+  conversion feature flag). Forwarded with the Effect-Config defaults
+  (`https://api.frankfurter.dev/v2/`, 24h refresh, 72h max age); override
+  only for a mirror endpoint or a different refresh/staleness policy.
 - CI deploy secrets (GitHub `staging` environment only, never the app):
   `DOKPLOY_URL`, `DOKPLOY_API_KEY` (deploy-scoped `x-api-key`),
   `DOKPLOY_COMPOSE_ID` (the Dokploy **Compose** service id — not the
