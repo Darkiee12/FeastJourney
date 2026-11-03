@@ -95,6 +95,8 @@ const english = {
   hideTranslations: "Hide translations",
   openDetails: "View details",
   addToOrder: "Add to order",
+  expandLines: "Review selected lines",
+  collapseLines: "Hide selected lines",
   menuLanguageLabel: "Menu language",
   menuLanguageUnavailable: "Not available yet",
   moreLanguagesLabel: "More languages",
@@ -204,6 +206,8 @@ const vietnamese: typeof english = {
   hideTranslations: "Ẩn bản dịch",
   openDetails: "Xem chi tiết",
   addToOrder: "Thêm vào phiếu gọi",
+  expandLines: "Xem lại các món đã chọn",
+  collapseLines: "Ẩn các món đã chọn",
   menuLanguageLabel: "Ngôn ngữ thực đơn",
   menuLanguageUnavailable: "Chưa có",
   moreLanguagesLabel: "Ngôn ngữ khác",
@@ -384,6 +388,30 @@ const scanResultsEnglish = {
   metaPhotos: "Photos",
   dietNote:
     "Ingredient notes are interpretations, not allergy assurances. Confirm dietary needs with the waiter.",
+  contextLanguages: "Menu {source} → {target}",
+  currencyOriginalOnly: "Original prices only",
+  currencyConverted: "Showing approximate {target} equivalents",
+  overflowLabel: "More scan actions",
+  scanAnother: "Scan another menu",
+  reloadAction: "Reload status",
+  deleteAction: "Delete private scan",
+  deleteConfirm: "Delete this private scan and its photos? This cannot be undone.",
+  deleteYes: "Yes, delete",
+  deleteNo: "Keep scan",
+  photosTitle: "Menu photos",
+  photosHelp: "Open a photo to zoom and check the printed dish and price.",
+  photoOpen: "Open photo {n}",
+  photoClose: "Close viewer",
+  zoomIn: "Zoom in",
+  zoomOut: "Zoom out",
+  zoomLevel: "Zoom {percent}%",
+  correctDetails: "Correct details",
+  priceInferredNote: "Currency inferred from menu context — confirm with the waiter.",
+  pricePossibleNote: "Possible price — check the original menu.",
+  detailsProvenance: "Provenance",
+  detailsExpiry: "Expires",
+  locationName: "Menu location",
+  atLocation: "· {location}",
 };
 
 const scanResultsVietnamese: typeof scanResultsEnglish = {
@@ -413,8 +441,119 @@ const scanResultsVietnamese: typeof scanResultsEnglish = {
   metaPhotos: "Ảnh",
   dietNote:
     "Ghi chú thành phần chỉ là diễn giải, không bảo đảm dị ứng. Hãy xác nhận nhu cầu ăn uống với nhân viên.",
+  contextLanguages: "Thực đơn {source} → {target}",
+  currencyOriginalOnly: "Chỉ hiện giá gốc",
+  currencyConverted: "Đang hiện giá quy đổi tham khảo sang {target}",
+  overflowLabel: "Thao tác khác cho bản quét",
+  scanAnother: "Quét thực đơn khác",
+  reloadAction: "Tải lại trạng thái",
+  deleteAction: "Xóa bản quét riêng tư",
+  deleteConfirm: "Xóa bản quét riêng tư này và ảnh của nó? Không thể hoàn tác.",
+  deleteYes: "Xóa",
+  deleteNo: "Giữ lại",
+  photosTitle: "Ảnh thực đơn",
+  photosHelp: "Mở ảnh để phóng to và đối chiếu món cùng giá in trên thực đơn.",
+  photoOpen: "Mở ảnh {n}",
+  photoClose: "Đóng trình xem",
+  zoomIn: "Phóng to",
+  zoomOut: "Thu nhỏ",
+  zoomLevel: "Mức thu phóng {percent}%",
+  correctDetails: "Sửa chi tiết",
+  priceInferredNote: "Tiền tệ suy luận từ ngữ cảnh thực đơn — hãy hỏi nhân viên để xác nhận.",
+  pricePossibleNote: "Giá có thể đúng — kiểm tra thực đơn gốc.",
+  detailsProvenance: "Nguồn gốc",
+  detailsExpiry: "Hết hạn",
+  locationName: "Vị trí thực đơn",
+  atLocation: "· {location}",
 };
 
 /** Post-analysis results screen only; existing menu and scan-page copy above is untouched. */
 export const menuScanResultsCopy = (locale: string): typeof scanResultsEnglish =>
   locale === "vi" ? scanResultsVietnamese : scanResultsEnglish;
+
+const scanCurrencyEnglish = {
+  showInMyCurrency: "Show in my currency",
+  approximateConversion: "Approximate conversion",
+  alreadyDisplayedIn: "Already displayed in {currency}",
+  ratesUnavailable: "Reference rates unavailable — showing original prices.",
+  ratesLoading: "Loading reference rates…",
+  rateDetails: "Rate details",
+  convertedTotal: "Approximate equivalent",
+  changeCurrency: "Change currency",
+  pickCurrency: "Choose display currency",
+  noCurrency: "No display currency selected",
+};
+
+const scanCurrencyVietnamese: typeof scanCurrencyEnglish = {
+  showInMyCurrency: "Hiển thị theo tiền tệ của tôi",
+  approximateConversion: "Giá quy đổi tham khảo",
+  alreadyDisplayedIn: "Đã hiển thị bằng {currency}",
+  ratesUnavailable: "Không tải được tỷ giá tham khảo — đang hiện giá gốc.",
+  ratesLoading: "Đang tải tỷ giá tham khảo…",
+  rateDetails: "Chi tiết tỷ giá",
+  convertedTotal: "Giá quy đổi tham khảo",
+  changeCurrency: "Đổi tiền tệ",
+  pickCurrency: "Chọn tiền tệ hiển thị",
+  noCurrency: "Chưa chọn tiền tệ hiển thị",
+};
+
+/** Single menu-wide currency control; existing menu and scan-page copy above is untouched. */
+export const scanCurrencyCopy = (locale: string): typeof scanCurrencyEnglish =>
+  locale === "vi" ? scanCurrencyVietnamese : scanCurrencyEnglish;
+
+const scanTransportEnglish = {
+  transportUnavailable:
+    "FeastJourney couldn't reach the menu service. Your photos are still available.",
+  unexpectedResponse: "The server returned an unexpected response. Please try again.",
+  serviceUnavailable: "Menu reading is temporarily unavailable. Your photos are still available.",
+  tooSlow: "The request took too long. Try again with fewer or lighter photos.",
+  rateLimited: "Too many requests. Wait a moment, then retry; your photos are kept.",
+  unauthorized: "Your session expired. Sign in again, then continue.",
+  notFound: "This private scan expired. Start a fresh analysis with the current photos.",
+  invalidInput: "Check the highlighted photo limits, then correct them before retrying.",
+  emptyResponse: "The menu service returned no content. Please try again.",
+};
+
+const scanTransportVietnamese: typeof scanTransportEnglish = {
+  transportUnavailable: "Không kết nối được dịch vụ thực đơn. Ảnh của bạn vẫn được giữ nguyên.",
+  unexpectedResponse: "Máy chủ trả về phản hồi không mong đợi. Vui lòng thử lại.",
+  serviceUnavailable: "Đọc thực đơn tạm thời không khả dụng. Ảnh của bạn vẫn được giữ nguyên.",
+  tooSlow: "Yêu cầu quá lâu. Thử lại với ít ảnh hơn hoặc ảnh nhẹ hơn.",
+  rateLimited: "Quá nhiều yêu cầu. Chờ một chút rồi thử lại; ảnh của bạn được giữ nguyên.",
+  unauthorized: "Phiên đăng nhập đã hết. Đăng nhập lại rồi tiếp tục.",
+  notFound: "Bản quét riêng tư này đã hết hạn. Bắt đầu phân tích mới với ảnh hiện tại.",
+  invalidInput: "Kiểm tra giới hạn ảnh được đánh dấu, rồi sửa trước khi thử lại.",
+  emptyResponse: "Dịch vụ thực đơn không trả về nội dung. Vui lòng thử lại.",
+};
+
+/** Browser-transport failures; existing copy above is untouched. */
+export const scanTransportCopy = (locale: string): typeof scanTransportEnglish =>
+  locale === "vi" ? scanTransportVietnamese : scanTransportEnglish;
+
+const scanLocationEnglish = {
+  label: "Menu location (optional)",
+  hint: "Helps interpret prices and local context. Never required.",
+  useMyLocation: "Use my location",
+  locating: "Locating…",
+  denied: "Location unavailable — pick a city instead.",
+  clear: "Clear location",
+  cityHcmc: "Ho Chi Minh City, Vietnam",
+  cityHanoi: "Hanoi, Vietnam",
+  cityBangalore: "Bengaluru, India",
+};
+
+const scanLocationVietnamese: typeof scanLocationEnglish = {
+  label: "Vị trí thực đơn (không bắt buộc)",
+  hint: "Giúp diễn giải giá và ngữ cảnh địa phương. Không bao giờ bắt buộc.",
+  useMyLocation: "Dùng vị trí của tôi",
+  locating: "Đang định vị…",
+  denied: "Không lấy được vị trí — hãy chọn thành phố.",
+  clear: "Xóa vị trí",
+  cityHcmc: "TP. Hồ Chí Minh, Việt Nam",
+  cityHanoi: "Hà Nội, Việt Nam",
+  cityBangalore: "Bengaluru, Ấn Độ",
+};
+
+/** Optional capture location; existing copy above is untouched. */
+export const scanLocationCopy = (locale: string): typeof scanLocationEnglish =>
+  locale === "vi" ? scanLocationVietnamese : scanLocationEnglish;

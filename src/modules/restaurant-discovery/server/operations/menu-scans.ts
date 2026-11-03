@@ -4,6 +4,11 @@ import { Data, Effect, Exit } from "effect";
 import { type z } from "zod";
 
 import {
+  normalizeCurrencyContext,
+  resolveMenuCityId,
+  type CurrencyContext,
+} from "@/modules/restaurant-discovery/menu-price-evidence";
+import {
   menuDocumentFitsStorage,
   validateMenuRevision,
 } from "@/modules/restaurant-discovery/menu-scan-revision";
@@ -327,6 +332,7 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
   principal: ScanPrincipal,
   scanId: string,
   requestId: string,
+  location?: { readonly trustedCountry?: string | null; readonly menuCityId?: string | null },
 ) {
   // Revision provenance records the actual configured model, so resolve it
   // before any lease or inference. A disabled or misconfigured scanner fails
@@ -337,6 +343,7 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
       new ExtractionUnavailable({
         reason: "Menu analysis is unavailable. Please retry later.",
         retryable: false,
+        category: "unavailable",
       }),
   });
 
@@ -344,6 +351,7 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
     return yield* new ExtractionUnavailable({
       reason: "Menu analysis is unavailable. Please retry later.",
       retryable: false,
+      category: "unavailable",
     });
 
   const token = yield* withTransaction(
@@ -417,12 +425,26 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
 
         const extractor = yield* MenuExtractor;
 
+        // Currency context merges existing scan fields only: the linked
+        // venue (venue_id/venue_name already on the scan row) outranks the
+        // coarse trusted visitor country. The visitor-selected menu city id
+        // resolves server-side against the curated preset map (unknown ids
+        // are dropped, never trusted as geography). No new persistence, no
+        // raw GPS or street addresses, and language is never treated as
+        // location.
+        const currencyContext: CurrencyContext = normalizeCurrencyContext({
+          venueName: state.scan.venue_name,
+          menuCity: resolveMenuCityId(location?.menuCityId ?? null),
+          trustedCountry: location?.trustedCountry ?? null,
+        });
+
         const extraction = yield* extractor.extract({
           images,
           targetLanguage: menuScanDocumentSchema.shape.targetLanguage.parse(
             state.scan.target_language,
           ),
           requestId,
+          currencyContext,
         });
 
         const document: MenuScanDocument = {
@@ -446,6 +468,7 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
           return yield* new InvalidModelOutput({
             reason: "The extracted menu is too large. Retry with fewer pages.",
             retryable: false,
+            category: "truncated",
           });
         }
 

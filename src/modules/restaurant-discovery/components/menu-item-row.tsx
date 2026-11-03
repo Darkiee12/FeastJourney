@@ -9,11 +9,52 @@ import type {
   InteractiveMenu,
   MenuSelection,
 } from "@/modules/restaurant-discovery/menu-presentation";
+import {
+  conversionRateFor,
+  priceAssociationOf,
+  priceTrustOf,
+} from "@/modules/restaurant-discovery/menu-presentation";
 import type { ExchangeRate } from "@/shared/money";
 
 export type MenuRowItem = InteractiveMenu["items"][number];
 
 export type MenuRowVariant = MenuRowItem["variants"][number];
+
+/**
+ * Brief contextual price note for one variant. Ambiguous associations and
+ * inferred currencies stay visible next to the affected dish; unknown or
+ * missing prices are owned by the caller's unknown-price line, not this
+ * note. Conversion never upgrades trust — the note renders regardless of
+ * whether a converted amount is shown.
+ */
+export function PriceConfidenceNote({
+  price,
+  inferredNote,
+  possibleNote,
+  associationNote,
+}: {
+  readonly price: MenuRowVariant["price"];
+  readonly inferredNote: string | undefined;
+  readonly possibleNote: string | undefined;
+  readonly associationNote?: string | null | undefined;
+}): ReactNode {
+  if (price === null || price.amount === null || price.currency === null) return null;
+
+  if (priceAssociationOf(price) === "ambiguous" && possibleNote !== undefined)
+    return (
+      <p className="menu-row-note">
+        {possibleNote}
+        {associationNote === null || associationNote === undefined || associationNote === ""
+          ? null
+          : ` — ${associationNote}`}
+      </p>
+    );
+
+  if (priceTrustOf(price) === "inferred" && inferredNote !== undefined)
+    return <p className="menu-row-note">{inferredNote}</p>;
+
+  return null;
+}
 
 /**
  * Compact menu row: thumbnail slot + names + 2-line description + listed
@@ -29,6 +70,9 @@ export interface MenuRowLabels {
   readonly openDetails: string;
   readonly quantity: string;
   readonly priceUnknown: string;
+  readonly uncertaintyMarker?: string | undefined;
+  readonly inferredNote?: string | undefined;
+  readonly possibleNote?: string | undefined;
 }
 
 /** Thumbnail slot geometry: 68–76px, centered. The guest thumbnail
@@ -128,6 +172,15 @@ export function MenuItemRow({
           aria-label={`${labels.openDetails}: ${name}`}
         >
           <span className="menu-row-name" lang={showOriginal ? targetLanguage : sourceLanguage}>
+            {item.uncertainties.length > 0 && labels.uncertaintyMarker !== undefined ? (
+              <span
+                className="menu-row-flag"
+                title={labels.uncertaintyMarker}
+                aria-label={labels.uncertaintyMarker}
+              >
+                ⚠
+              </span>
+            ) : null}
             {name}
           </span>
           {showOriginal ? (
@@ -150,7 +203,13 @@ export function MenuItemRow({
               amount={price.amount}
               currency={price.currency}
               locale={locale}
-              rate={rates?.get(price.currency)}
+              rate={conversionRateFor(price, rates)}
+            />
+            <PriceConfidenceNote
+              price={price}
+              inferredNote={labels.inferredNote}
+              possibleNote={labels.possibleNote}
+              associationNote={price.associationNote}
             />
           </span>
         ) : (

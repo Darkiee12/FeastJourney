@@ -1,8 +1,12 @@
-import { Camera, Images } from "lucide-react";
-import { useId, type ReactNode } from "react";
+import { Camera, Images, MapPin } from "lucide-react";
+import { useId, useState, type ReactNode } from "react";
 
 import { SharedSelectField } from "@/components/ui/select";
-import { menuLanguageNames } from "@/modules/restaurant-discovery/components/menu-copy";
+import { nearestCityFn } from "@/modules/food-discovery/food.functions";
+import {
+  menuLanguageNames,
+  scanLocationCopy,
+} from "@/modules/restaurant-discovery/components/menu-copy";
 import {
   ScanPhotoPreview,
   type ScanPreviewPhoto,
@@ -11,7 +15,14 @@ import {
   ScanPrivacyDetails,
   ScanPrivacyNotice,
 } from "@/modules/restaurant-discovery/components/scan-privacy";
+import { CITY_PRESETS } from "@/modules/restaurant-discovery/map-bounds";
 import { menuLanguages } from "@/modules/restaurant-discovery/menu-scan.schema";
+
+/** Optional coarse menu location: a curated city id + display label. */
+export interface ScanMenuLocation {
+  readonly cityId: string;
+  readonly label: string;
+}
 
 interface CaptureCopy {
   readonly camera: string;
@@ -46,16 +57,147 @@ const captureCopy = (locale: string): CaptureCopy => {
   };
 };
 
+const cityLabelFor = (cityId: string, locale: string): string => {
+  const copy = scanLocationCopy(locale);
+
+  if (cityId === "hcmc") return copy.cityHcmc;
+
+  if (cityId === "hanoi") return copy.cityHanoi;
+
+  if (cityId === "bangalore") return copy.cityBangalore;
+
+  return cityId;
+};
+
+/**
+ * Optional coarse location for one scan. City chips reuse the curated
+ * CITY_PRESETS ids (no new location database); "Use my location" is an
+ * explicit action that resolves one city label through the existing
+ * nearest-city service with rounded coordinates. Raw coordinates are
+ * never stored and never sent to Muse — only the city label is kept.
+ */
+function ScanLocationSetting({
+  locale,
+  menuLocation,
+  disabled,
+  onLocationChange,
+}: {
+  readonly locale: string;
+  readonly menuLocation: ScanMenuLocation | null;
+  readonly disabled: boolean;
+  readonly onLocationChange: (location: ScanMenuLocation | null) => void;
+}): ReactNode {
+  const copy = scanLocationCopy(locale);
+  const [locating, setLocating] = useState(false);
+  const [denied, setDenied] = useState(false);
+
+  const useMyLocation = (): void => {
+    if (!("geolocation" in navigator)) {
+      setDenied(true);
+
+      return;
+    }
+
+    setLocating(true);
+    setDenied(false);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        // Coarsen to ~1km before the lookup; the fix itself never persists.
+        const latitude = Math.round(position.coords.latitude * 100) / 100;
+        const longitude = Math.round(position.coords.longitude * 100) / 100;
+        nearestCityFn({ data: { latitude, longitude, locale } }).then(
+          (city) => {
+            setLocating(false);
+
+            if (city === null || city.name === undefined || city.name === "") {
+              setDenied(true);
+
+              return;
+            }
+
+            onLocationChange({ cityId: `geo:${city.name}`, label: city.name });
+          },
+          () => {
+            setLocating(false);
+            setDenied(true);
+          },
+        );
+      },
+      () => {
+        setLocating(false);
+        setDenied(true);
+      },
+      { timeout: 10000, maximumAge: 300000 },
+    );
+  };
+
+  return (
+    <details className="scan-location">
+      <summary>{copy.label}</summary>
+      <p>{copy.hint}</p>
+      <fieldset className="scan-location-chips">
+        <legend className="sr-only">{copy.label}</legend>
+        {CITY_PRESETS.map((city) => {
+          const active = menuLocation?.cityId === city.id;
+
+          return (
+            <button
+              key={city.id}
+              type="button"
+              aria-pressed={active}
+              disabled={disabled}
+              className="scan-location-chip"
+              onClick={() =>
+                onLocationChange(
+                  active ? null : { cityId: city.id, label: cityLabelFor(city.id, locale) },
+                )
+              }
+            >
+              <MapPin aria-hidden="true" />
+              {cityLabelFor(city.id, locale)}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          disabled={disabled || locating}
+          className="scan-location-mine"
+          onClick={useMyLocation}
+        >
+          <MapPin aria-hidden="true" />
+          {locating ? copy.locating : copy.useMyLocation}
+        </button>
+      </fieldset>
+      {menuLocation !== null && (
+        <p className="scan-location-current">
+          {menuLocation.label}{" "}
+          <button type="button" disabled={disabled} onClick={() => onLocationChange(null)}>
+            {copy.clear}
+          </button>
+        </p>
+      )}
+      {denied && (
+        <p role="alert" className="scan-location-denied">
+          {copy.denied}
+        </p>
+      )}
+    </details>
+  );
+}
+
 /**
  * Cohesive capture surface: camera primary, gallery secondary, compact
- * language setting, thumbnail strip, and the single inline primary action.
- * Upload limits appear only contextually (once photos exist). No giant navy
- * blocks, no sticky bar, no duplicate submit buttons.
+ * language setting, optional coarse location, thumbnail strip, and the
+ * single inline primary action. Upload limits appear only contextually
+ * (once photos exist). No giant navy blocks, no sticky bar, no duplicate
+ * submit buttons.
  */
 export function ScanCapture({
   locale,
   targetLanguage,
   onTargetLanguageChange,
+  menuLocation,
+  onLocationChange,
   photos,
   onAddFiles,
   onRemovePhoto,
@@ -68,6 +210,8 @@ export function ScanCapture({
   readonly locale: string;
   readonly targetLanguage: string;
   readonly onTargetLanguageChange: (value: string) => void;
+  readonly menuLocation: ScanMenuLocation | null;
+  readonly onLocationChange: (location: ScanMenuLocation | null) => void;
   readonly photos: ReadonlyArray<ScanPreviewPhoto>;
   readonly onAddFiles: (files: FileList | null) => void;
   readonly onRemovePhoto: (id: string) => void;
@@ -128,6 +272,13 @@ export function ScanCapture({
           value: language,
         }))}
         size="regular"
+      />
+
+      <ScanLocationSetting
+        locale={locale}
+        menuLocation={menuLocation}
+        disabled={busy}
+        onLocationChange={onLocationChange}
       />
 
       {photos.length > 0 ? (

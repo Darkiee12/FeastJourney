@@ -333,6 +333,94 @@
   cursor: pointer;
 }
 
+/* Optional coarse menu location: disclosure + city chips + explicit fix. */
+.scan-location {
+  margin-block: 0.75rem 0;
+  border-block-start: 1px solid var(--color-border-soft);
+  padding-block-start: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.scan-location summary {
+  min-height: 2.75rem;
+  padding-block: 0.5rem;
+  cursor: pointer;
+  font-weight: 650;
+  color: var(--color-ink);
+}
+
+.scan-location p {
+  margin-block: 0 0.5rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.scan-location-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.scan-location-chips legend {
+  padding: 0;
+}
+
+.scan-location-chip,
+.scan-location-mine {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2.75rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 9999px;
+  background: white;
+  color: var(--color-ink);
+  font-size: 0.8125rem;
+  font-weight: 650;
+  padding: 0.5rem 0.875rem;
+  cursor: pointer;
+}
+
+.scan-location-chip[aria-pressed="true"] {
+  border-color: var(--color-ink);
+  background: var(--color-ink);
+  color: white;
+}
+
+.scan-location-chip svg,
+.scan-location-mine svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+}
+
+.scan-location-current {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 650;
+  color: var(--color-ink);
+}
+
+.scan-location-current button {
+  min-height: 2.75rem;
+  border: 0;
+  background: none;
+  color: var(--color-brand-blue-hover);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  padding: 0.5rem;
+}
+
+.scan-location-denied {
+  color: var(--color-food-orange-strong);
+  font-weight: 650;
+}
+
 /* Privacy: one line + disclosure. */
 .scan-privacy-line {
   margin-block: 0.75rem 0;
@@ -566,6 +654,105 @@
   min-height: 2.75rem;
 }
 
+/* Results context row + single menu-wide currency control. */
+.scan-results-context {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.scan-currency {
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 0.5rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  background: white;
+}
+
+.scan-currency-check {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 2.75rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.scan-currency-check input {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+  accent-color: var(--color-food-orange-dark);
+}
+
+.scan-currency-change {
+  justify-self: start;
+  min-height: 2.75rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.5rem;
+  background: white;
+  font-weight: 700;
+  padding: 0.5rem 0.875rem;
+  cursor: pointer;
+}
+
+.scan-currency-status {
+  margin-block: 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+/* Compact overflow actions: scan another / reload / delete. */
+.scan-results-overflow {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.5rem;
+  padding: 0.25rem 1rem 1rem;
+  background: white;
+}
+
+.scan-results-overflow > summary {
+  min-height: 2.75rem;
+  padding-block: 0.75rem;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.scan-results-overflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.scan-results-overflow-actions button {
+  min-height: 2.75rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.25rem;
+  background: white;
+  color: var(--color-ink);
+  font-weight: 650;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+.scan-delete {
+  border-color: var(--color-food-orange-strong);
+  color: var(--color-food-orange-strong);
+}
+
+.scan-delete-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
 /* Tentative dish→venue matches stay visibly uncertain. */
 .price-compare-tentative {
   font-weight: 650;
@@ -575,6 +762,13 @@
 @media (min-width: 28rem) {
   .scan-research-place {
     grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+/* Narrow phones: stack capture actions with the primary first. */
+@media (max-width: 22rem) {
+  .scan-capture-actions {
+    grid-template-columns: 1fr;
   }
 }
 
