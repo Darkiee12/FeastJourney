@@ -61,7 +61,7 @@ jobs:
   quality:
     name: Quality gate and verified build
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     env:
       # Disposable CI-only values (fresh Postgres per run).
       DATABASE_URL: postgres://feastjourney:replace-with-strong-local-only-password@127.0.0.1:5433/feastjourney
@@ -87,18 +87,69 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Start disposable PostgreSQL with loopback access
+      - name: Start disposable PostgreSQL and Garage with loopback access
         run: |
           cp infra/.env.example infra/.env
-          docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml up -d --wait postgres
+          # Disposable CI-only S3 credentials (fresh per run, never committed):
+          # the committed example holds placeholders that Garage rejects, so
+          # replace them with generated values before startup.
+          RPC_SECRET="$(openssl rand -hex 32)"
+          APP_ID="GK$(openssl rand -hex 16)"
+          APP_SECRET="$(openssl rand -hex 32)"
+          sed -i "s/^GARAGE_RPC_SECRET=.*/GARAGE_RPC_SECRET=${RPC_SECRET}/" infra/.env
+          sed -i "s/^S3_ACCESS_KEY_ID=.*/S3_ACCESS_KEY_ID=${APP_ID}/" infra/.env
+          sed -i "s/^S3_SECRET_ACCESS_KEY=.*/S3_SECRET_ACCESS_KEY=${APP_SECRET}/" infra/.env
+          docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml up -d --wait postgres garage
+          {
+            echo "S3_ENDPOINT_INTERNAL=http://127.0.0.1:3900"
+            echo "S3_ENDPOINT=http://127.0.0.1:3900"
+            echo "S3_REGION=garage"
+            echo "S3_BUCKET_PRIVATE=feastjourney-private"
+            echo "S3_BUCKET_MEDIA=feastjourney-private"
+            echo "S3_BUCKET=feastjourney-private"
+            echo "S3_ACCESS_KEY_ID=${APP_ID}"
+            echo "S3_SECRET_ACCESS_KEY=${APP_SECRET}"
+          } >> "$GITHUB_ENV"
       - name: Run Flyway migrations
         run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator
       - name: Validate Flyway migration history
         run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator validate
+      - name: Prove disposable Garage S3 readiness (fail fast)
+        run: |
+          deadline=$((SECONDS + 60))
+          while [ $SECONDS -lt $deadline ]; do
+            if node infra/scripts/garage-s3-check.mjs >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          node infra/scripts/garage-s3-check.mjs
+      - name: Restore Reylo analysis cache
+        id: reylo-cache
+        uses: actions/cache/restore@v4
+        with:
+          # Same fingerprint as quality.yml: Reylo caches each query's
+          # analysis in .reylo/, keyed by schema + queries + config.
+          path: .reylo
+          key: reylo-${{ runner.os }}-${{ hashFiles('src/**/*.sql', 'db/migrations/**', '.reylo.yaml', 'bun.lock') }}
+          restore-keys: |
+            reylo-${{ runner.os }}-
       - name: Reylo-aware TypeScript
         run: bun run check-types
+      - name: Save Reylo analysis cache
+        if: steps.reylo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .reylo
+          key: ${{ steps.reylo-cache.outputs.cache-primary-key }}
       - name: Unit and integration tests
-        run: bun test tests/
+        # --isolate runs each test file with a fresh module registry:
+        # tests/admin-places-routing.test.ts stubs @tanstack/react-router via
+        # mock.module, which is process-persistent in bun 1.4.4
+        # (mock.restore() does not clear it) and otherwise leaks into the
+        # venue component suites (router.routesById TypeError). Isolation
+        # keeps every file's module handles to itself.
+        run: bun test --isolate tests/
       - name: Production build
         run: bun run build
       - name: Prove the build artifact is self-contained
