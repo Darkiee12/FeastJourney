@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 /**
  * Independent menu-reading language preference.
  *
@@ -6,9 +8,10 @@
  * Malay. Menu language therefore resolves through its own chain and never
  * changes the application UI.
  *
- * Resolution order: explicit session choice > saved preference > current
- * application language (when supported) > browser language (when supported)
- * > English fallback. Geolocation, ethnicity, or IP never decide.
+ * Resolution order: explicit session choice > remembered preference (only
+ * when the traveler opts into remembering it) > current application
+ * language (when supported) > browser language (when supported) > English
+ * fallback. Geolocation, ethnicity, or IP never decide.
  *
  * Only languages with a persisted, review-gated translation path are
  * offered as reading targets (the seven CHECK-constrained codes). Hinglish
@@ -66,7 +69,9 @@ export function isMenuReadingLanguage(code: string): code is MenuReadingLanguage
 
 /**
  * Resolve the menu-reading language. First valid choice wins; unknown or
- * blank inputs never count. Defaults to English.
+ * blank inputs never count. Defaults to English. Callers pass a saved
+ * preference only when the traveler opted into remembering it independently;
+ * otherwise the application language decides (see useMenuLanguage).
  */
 export function resolveMenuLanguage(input: {
   readonly explicit?: string | null | undefined;
@@ -86,6 +91,7 @@ export function resolveMenuLanguage(input: {
 }
 
 const MENU_STORAGE_KEY = "feastjourney.menu-reading-language";
+const MENU_REMEMBER_KEY = "feastjourney.menu-reading-language.remember";
 
 /** Saved preference only: a benign UI choice, never private scan text. */
 export function readSavedMenuLanguage(): string | null {
@@ -157,4 +163,188 @@ export function suggestedMenuLanguagesFor(
   if (code === "ES" || code === "MX") return ["es", "en"];
 
   return ["en"];
+}
+
+/**
+ * Whether the traveler opted into remembering the menu language
+ * independently of the application language. Persisted as "1"; anything
+ * else (missing, invalid, unreadable storage) means off.
+ */
+export function readMenuLanguageRemember(): boolean {
+  if (typeof window === "undefined" || typeof window.localStorage === "undefined") return false;
+
+  try {
+    return window.localStorage.getItem(MENU_REMEMBER_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistMenuLanguageRemember(on: boolean): void {
+  if (typeof window === "undefined" || typeof window.localStorage === "undefined") return;
+
+  try {
+    if (on) window.localStorage.setItem(MENU_REMEMBER_KEY, "1");
+    else window.localStorage.removeItem(MENU_REMEMBER_KEY);
+  } catch {
+    // Private mode or quota: the session choice still applies.
+  }
+}
+
+/** Drop the persisted menu-language value; the session choice continues. */
+export function clearSavedMenuLanguage(): void {
+  if (typeof window === "undefined" || typeof window.localStorage === "undefined") return;
+
+  try {
+    window.localStorage.removeItem(MENU_STORAGE_KEY);
+  } catch {
+    // Private mode or quota: the session choice still applies.
+  }
+}
+
+/** Same-tab notice for menu-language saves (cross-tab arrives via the
+ *  storage event). Same name the panel already listens on. */
+const menuLanguageStoreEvent = "feastjourney-menu-language";
+
+function notifyMenuLanguageStore(): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.dispatchEvent(new Event(menuLanguageStoreEvent));
+  } catch {
+    // Notification is best-effort: the next snapshot read still applies.
+  }
+}
+
+/** In-memory explicit session choice. Never persisted directly: persistence
+ *  happens only through the remember-gated saved value. */
+let sessionExplicitChoice: string | null = null;
+
+export function subscribeToMenuLanguageStore(notify: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+
+  window.addEventListener("storage", notify);
+  window.addEventListener(menuLanguageStoreEvent, notify);
+
+  return () => {
+    window.removeEventListener("storage", notify);
+    window.removeEventListener(menuLanguageStoreEvent, notify);
+  };
+}
+
+/**
+ * Client snapshot: explicit session choice wins, then the remembered value
+ * (only when the traveler opted in), then the application language, then
+ * the browser language, then English. When nothing overrides, the snapshot
+ * follows the appLang argument, so a global language change updates the
+ * default with no extra wiring.
+ */
+export function getMenuLanguageClientSnapshot(appLang: string): MenuLanguageChoice {
+  const remembered = readMenuLanguageRemember() ? readSavedMenuLanguage() : null;
+  // DOM lib types navigator.languages as always present, but non-browser
+  // runtimes leave it undefined — detectMenuBrowserLanguage tolerates that.
+
+  const browser =
+    typeof navigator === "undefined" ? null : detectMenuBrowserLanguage(navigator.languages);
+
+  return resolveMenuLanguage({
+    explicit: sessionExplicitChoice,
+    saved: remembered,
+    app: appLang,
+    browser,
+  });
+}
+
+/**
+ * Server snapshot: the application language only. Browser globals (saved
+ * preference, navigator.languages) are unreadable during SSR and differ per
+ * visitor, so they enter through the external store on the client — the
+ * server renders exactly what it resolved and hydration agrees, then the
+ * client snapshot folds the remembered/browser preferences in.
+ */
+export function getMenuLanguageServerSnapshot(appLang: string): MenuLanguageChoice {
+  return resolveMenuLanguage({ app: appLang });
+}
+
+/**
+ * Record an explicit in-memory session choice. Invalid values are ignored.
+ * Persists only when the traveler opted into remembering.
+ */
+export function changeMenuLanguage(value: string): void {
+  const cleaned = value.trim();
+
+  if (cleaned === "" || !isMenuLanguageChoice(cleaned)) return;
+
+  sessionExplicitChoice = cleaned;
+
+  if (readMenuLanguageRemember()) writeSavedMenuLanguage(cleaned);
+
+  notifyMenuLanguageStore();
+}
+
+/**
+ * Opt into (or out of) remembering the menu language independently.
+ * Turning on persists the current choice; turning off clears the saved
+ * value while the in-memory session choice continues to apply.
+ */
+export function setMenuLanguageRemember(on: boolean, current: string): void {
+  const cleaned = current.trim();
+  const valid = cleaned !== "" && isMenuLanguageChoice(cleaned) ? cleaned : null;
+
+  if (on) {
+    persistMenuLanguageRemember(true);
+
+    if (valid !== null) writeSavedMenuLanguage(valid);
+  } else {
+    if (sessionExplicitChoice === null && valid !== null) sessionExplicitChoice = valid;
+
+    clearSavedMenuLanguage();
+    persistMenuLanguageRemember(false);
+  }
+
+  notifyMenuLanguageStore();
+}
+
+/**
+ * Menu-language state owned by useMenuLanguage: the resolved language plus
+ * its independent controls. Setting the menu language never changes the
+ * application UI.
+ */
+export interface MenuLanguageSelection {
+  readonly menuLang: string;
+  readonly changeMenuLanguage: (value: string) => void;
+  readonly remember: boolean;
+  readonly setRemember: (on: boolean) => void;
+}
+
+/**
+ * Stable menu-language hook for the panel. Takes the application language
+ * and returns the resolved menu language plus its independent controls;
+ * setting the menu language never changes the application UI.
+ */
+export function useMenuLanguage(appLang: string): MenuLanguageSelection {
+  const menuLang = useSyncExternalStore(
+    subscribeToMenuLanguageStore,
+    () => getMenuLanguageClientSnapshot(appLang),
+    () => getMenuLanguageServerSnapshot(appLang),
+  );
+
+  const remember = useSyncExternalStore(
+    subscribeToMenuLanguageStore,
+    () => readMenuLanguageRemember(),
+    () => false,
+  );
+
+  return {
+    menuLang,
+    changeMenuLanguage,
+    remember,
+    setRemember: (on: boolean) =>
+      setMenuLanguageRemember(on, getMenuLanguageClientSnapshot(appLang)),
+  };
+}
+
+/** Test-only reset for the in-memory session choice. Storage is untouched. */
+export function resetMenuLanguageSessionForTests(): void {
+  sessionExplicitChoice = null;
 }

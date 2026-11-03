@@ -1,13 +1,26 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+
+import { createElement, type ReactNode } from "react";
+import { renderToString } from "react-dom/server";
 
 import {
   HINGLISH_STYLE,
   UNAVAILABLE_MENU_LANGUAGES,
+  changeMenuLanguage,
+  clearSavedMenuLanguage,
   detectMenuBrowserLanguage,
+  getMenuLanguageClientSnapshot,
+  getMenuLanguageServerSnapshot,
   isMenuLanguageChoice,
   isMenuReadingLanguage,
+  readMenuLanguageRemember,
+  readSavedMenuLanguage,
+  resetMenuLanguageSessionForTests,
   resolveMenuLanguage,
+  setMenuLanguageRemember,
   suggestedMenuLanguagesFor,
+  useMenuLanguage,
+  writeSavedMenuLanguage,
 } from "@/modules/restaurant-discovery/menu-language";
 
 describe("menu reading language resolution", () => {
@@ -88,5 +101,183 @@ describe("regional suggestions", () => {
   test("unknown regions fall back to English", () => {
     expect(suggestedMenuLanguagesFor("XX")).toEqual(["en"]);
     expect(suggestedMenuLanguagesFor(null)).toEqual(["en"]);
+  });
+});
+
+/** Map-backed stand-in for window.localStorage (bun has no DOM window). */
+interface FakeMenuWindow {
+  readonly localStorage: {
+    readonly getItem: (key: string) => string | null;
+    readonly setItem: (key: string, value: string) => void;
+    readonly removeItem: (key: string) => void;
+  };
+  readonly addEventListener: () => void;
+  readonly removeEventListener: () => void;
+  readonly dispatchEvent: () => boolean;
+}
+
+function fakeMenuWindow(store: Map<string, string>): FakeMenuWindow {
+  return {
+    localStorage: {
+      getItem: (key: string): string | null => store.get(key) ?? null,
+      setItem: (key: string, value: string): void => {
+        store.set(key, value);
+      },
+      removeItem: (key: string): void => {
+        store.delete(key);
+      },
+    },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => true,
+  };
+}
+
+function installFakeMenuWindow(store: Map<string, string>): void {
+  Object.defineProperty(globalThis, "window", {
+    value: fakeMenuWindow(store),
+    configurable: true,
+    writable: true,
+  });
+}
+
+function removeFakeMenuWindow(): void {
+  Reflect.deleteProperty(globalThis, "window");
+}
+
+function MenuLanguageProbe({ app }: { readonly app: string }): ReactNode {
+  const state = useMenuLanguage(app);
+
+  return createElement(
+    "p",
+    null,
+    `${state.menuLang}:${state.remember}:${state.changeMenuLanguage.name}:${state.setRemember.name}`,
+  );
+}
+
+describe("menu language remember flag", () => {
+  // Mirrors the private storage keys in menu-language.ts.
+  const SAVED_KEY = "feastjourney.menu-reading-language";
+  const REMEMBER_KEY = "feastjourney.menu-reading-language.remember";
+
+  let store: Map<string, string>;
+
+  beforeEach(() => {
+    resetMenuLanguageSessionForTests();
+    store = new Map<string, string>();
+    installFakeMenuWindow(store);
+  });
+
+  afterEach(() => {
+    resetMenuLanguageSessionForTests();
+    removeFakeMenuWindow();
+  });
+
+  test("remember is off by default and invalid flags mean off", () => {
+    expect(readMenuLanguageRemember()).toBe(false);
+    store.set(REMEMBER_KEY, "yes");
+    expect(readMenuLanguageRemember()).toBe(false);
+  });
+
+  test("explicit choice is session-only until remember turns on", () => {
+    changeMenuLanguage("ja");
+    expect(getMenuLanguageClientSnapshot("en")).toBe("ja");
+    expect(readSavedMenuLanguage()).toBeNull();
+
+    setMenuLanguageRemember(true, getMenuLanguageClientSnapshot("en"));
+    expect(readMenuLanguageRemember()).toBe(true);
+    expect(readSavedMenuLanguage()).toBe("ja");
+  });
+
+  test("remembered choice beats an app language change", () => {
+    setMenuLanguageRemember(true, "ja");
+    expect(getMenuLanguageClientSnapshot("en")).toBe("ja");
+    expect(getMenuLanguageClientSnapshot("vi")).toBe("ja");
+  });
+
+  test("turning remember off clears the saved value and the session choice continues", () => {
+    changeMenuLanguage("ja");
+    setMenuLanguageRemember(true, getMenuLanguageClientSnapshot("en"));
+    setMenuLanguageRemember(false, getMenuLanguageClientSnapshot("en"));
+
+    expect(readMenuLanguageRemember()).toBe(false);
+    expect(readSavedMenuLanguage()).toBeNull();
+    expect(getMenuLanguageClientSnapshot("en")).toBe("ja");
+  });
+
+  test("turning remember off with no prior explicit choice promotes the current one", () => {
+    setMenuLanguageRemember(true, "vi");
+    setMenuLanguageRemember(false, getMenuLanguageClientSnapshot("vi"));
+
+    expect(readSavedMenuLanguage()).toBeNull();
+    expect(getMenuLanguageClientSnapshot("en")).toBe("vi");
+  });
+
+  test("clearSavedMenuLanguage drops the persisted value", () => {
+    writeSavedMenuLanguage("ja");
+    expect(readSavedMenuLanguage()).toBe("ja");
+    clearSavedMenuLanguage();
+    expect(readSavedMenuLanguage()).toBeNull();
+  });
+
+  test("app language change updates the default when nothing overrides", () => {
+    expect(getMenuLanguageClientSnapshot("en")).toBe("en");
+    expect(getMenuLanguageClientSnapshot("vi")).toBe("vi");
+  });
+
+  test("explicit beats app", () => {
+    changeMenuLanguage("fr");
+    expect(getMenuLanguageClientSnapshot("vi")).toBe("fr");
+    expect(resolveMenuLanguage({ explicit: "fr", saved: "ja", app: "vi", browser: "es" })).toBe(
+      "fr",
+    );
+  });
+
+  test("browser is the fallback when the app language is unsupported", () => {
+    expect(resolveMenuLanguage({ app: "ms", browser: "fr" })).toBe("fr");
+    expect(resolveMenuLanguage({ app: "ms", browser: "hi" })).toBe("en");
+  });
+
+  test("invalid stored and session values are ignored", () => {
+    store.set(SAVED_KEY, "xx");
+    store.set(REMEMBER_KEY, "1");
+    expect(readSavedMenuLanguage()).toBeNull();
+    expect(getMenuLanguageClientSnapshot("vi")).toBe("vi");
+
+    writeSavedMenuLanguage("xx");
+    expect(readSavedMenuLanguage()).toBeNull();
+
+    resetMenuLanguageSessionForTests();
+    changeMenuLanguage("xx");
+    changeMenuLanguage("  ");
+    expect(getMenuLanguageClientSnapshot("en")).toBe("en");
+  });
+
+  test("Hinglish passes through as an explicit and remembered choice", () => {
+    changeMenuLanguage(HINGLISH_STYLE);
+    expect(getMenuLanguageClientSnapshot("en")).toBe(HINGLISH_STYLE);
+
+    setMenuLanguageRemember(true, getMenuLanguageClientSnapshot("en"));
+    expect(readSavedMenuLanguage()).toBe(HINGLISH_STYLE);
+    expect(getMenuLanguageClientSnapshot("vi")).toBe(HINGLISH_STYLE);
+  });
+});
+
+describe("menu language server snapshot", () => {
+  test("server snapshot resolves from the app language only", () => {
+    resetMenuLanguageSessionForTests();
+    expect(getMenuLanguageServerSnapshot("vi")).toBe("vi");
+    expect(getMenuLanguageServerSnapshot("ms")).toBe("en");
+    resetMenuLanguageSessionForTests();
+  });
+
+  test("hook server-renders from the app language without browser globals", () => {
+    resetMenuLanguageSessionForTests();
+    removeFakeMenuWindow();
+
+    expect(renderToString(createElement(MenuLanguageProbe, { app: "vi" }))).toContain(
+      "vi:false:changeMenuLanguage:setRemember",
+    );
+    resetMenuLanguageSessionForTests();
   });
 });
