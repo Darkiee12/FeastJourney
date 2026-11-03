@@ -1,10 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, getRouteApi, useRouterState } from "@tanstack/react-router";
+import { Match } from "effect";
 import { Crosshair, MapPin } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
+import { MuseResearchStatus } from "@/components/research/muse-research-status";
+import type { ResearchStatusState } from "@/components/research/muse-research-status";
+import { researchCopyFor } from "@/components/research/research-copy";
+import type { ResearchLanguage } from "@/components/research/research-copy";
+import { ResearchFindingsList } from "@/components/research/research-findings";
+import type { ResearchFinding } from "@/components/research/research-findings";
 import {
   CurrencySelector,
   useExchangeRates,
@@ -20,6 +27,7 @@ import { PanelToolbar } from "@/modules/restaurant-discovery/components/panel-to
 import {
   PriceComparePanel,
   type PriceCompareRow,
+  type PriceResearchContext,
 } from "@/modules/restaurant-discovery/components/price-compare-panel";
 import { RestaurantCard } from "@/modules/restaurant-discovery/components/restaurant-card";
 import type { RestaurantCardModel } from "@/modules/restaurant-discovery/components/restaurant-card";
@@ -69,6 +77,7 @@ import type {
   RestaurantResult,
 } from "@/modules/restaurant-discovery/server/index";
 import { getSessionStateFn, type SessionState } from "@/modules/user/session.functions";
+import { researchRestaurantsFn } from "@/server/web-research/research-functions";
 import { formatMoney } from "@/shared/money";
 
 const route = getRouteApi("/restaurants/");
@@ -123,6 +132,217 @@ function regionSearchKey(search: RestaurantSearch): string {
     channel: search.channel,
     portion: search.portion ?? null,
   });
+}
+
+/**
+ * Web-research wiring against the peer-owned contracts:
+ * `MuseResearchStatus({state, contextLine, onRetry, onContinue,
+ * retryLabel, continueLabel})`,
+ * `ResearchFindingsList({findings, badgeLabel, notVerifiedNote})`, and
+ * `researchRestaurantsFn({city, country, dish, language})`. The outcome is
+ * validated at this boundary: unknown shapes degrade to a failed pass
+ * with retry, never to fabricated venues. Nothing here persists: evidence
+ * stays in memory for a future curator flow, canonical tables untouched.
+ */
+export interface NormalizedResearchOutcome {
+  readonly tag: "ResearchFound" | "ResearchEmpty" | "ResearchUnavailable" | "ResearchSkipped";
+  readonly findings: ReadonlyArray<ResearchFinding>;
+  readonly reason: string;
+}
+
+function isHttpUrl(raw: string): boolean {
+  let parsed: URL;
+
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+
+  return parsed.protocol === "http:" || parsed.protocol === "https:";
+}
+
+function isRenderableFinding(finding: ResearchFinding): boolean {
+  return finding.sources.some((source) => isHttpUrl(source.url));
+}
+
+function optionalText(value: string | undefined): string | undefined {
+  if (value === undefined || value.trim() === "") {
+    return undefined;
+  }
+
+  return value;
+}
+
+const researchSourceSchema = z.object({
+  title: z.string().trim().min(1),
+  url: z.string().trim().min(1),
+  snippet: z.string(),
+});
+
+const researchFindingSchema = z.object({
+  title: z.string().trim().min(1),
+  summary: z.string().trim().min(1),
+  venueName: z.string().optional(),
+  dishName: z.string().optional(),
+  originalName: z.string().optional(),
+  sources: z.array(researchSourceSchema),
+});
+
+const researchOutcomeSchema = z.discriminatedUnion("_tag", [
+  z.object({ _tag: z.literal("ResearchFound"), findings: z.array(researchFindingSchema) }),
+  z.object({ _tag: z.literal("ResearchEmpty") }),
+  z.object({ _tag: z.literal("ResearchUnavailable"), reason: z.string() }),
+  z.object({ _tag: z.literal("ResearchSkipped"), reason: z.string() }),
+]);
+
+/** Peer-typed server result; still validated at runtime for transport drift. */
+type ResearchRestaurantsResult = Awaited<ReturnType<typeof researchRestaurantsFn>>;
+
+/** Boundary normalizer for the peer outcome: Zod validates the
+ *  peer-typed result at this boundary, then renderability mirrors the
+ *  shared list so `completed` always shows at least one card. Unknown
+ *  shapes return null so the caller renders failed/retry instead of
+ *  inventing results. */
+export function normalizeResearchOutcome(
+  value: ResearchRestaurantsResult,
+): NormalizedResearchOutcome | null {
+  const parsed = researchOutcomeSchema.safeParse(value);
+
+  if (!parsed.success) {
+    return null;
+  }
+
+  return Match.value(parsed.data).pipe(
+    Match.tag("ResearchFound", (found): NormalizedResearchOutcome => ({
+      tag: "ResearchFound",
+      findings: found.findings
+        .map((finding) => ({
+          title: finding.title,
+          summary: finding.summary,
+          venueName: optionalText(finding.venueName),
+          dishName: optionalText(finding.dishName),
+          originalName: optionalText(finding.originalName),
+          sources: finding.sources,
+        }))
+        .filter((finding) => isRenderableFinding(finding)),
+      reason: "",
+    })),
+    Match.tag("ResearchEmpty", (): NormalizedResearchOutcome => ({
+      tag: "ResearchEmpty",
+      findings: [],
+      reason: "",
+    })),
+    Match.tag("ResearchUnavailable", (failure): NormalizedResearchOutcome => ({
+      tag: "ResearchUnavailable",
+      findings: [],
+      reason: failure.reason,
+    })),
+    Match.tag("ResearchSkipped", (skipped): NormalizedResearchOutcome => ({
+      tag: "ResearchSkipped",
+      findings: [],
+      reason: skipped.reason,
+    })),
+    Match.exhaustive,
+  );
+}
+
+interface ResearchScope {
+  readonly city: string;
+  readonly country: string;
+}
+
+/** Known preset countries. The product default region is Vietnam; only
+ *  explicitly curated presets may resolve a different country. An unknown
+ *  preset resolves null (no research) rather than a guessed country. */
+const PRESET_COUNTRY: ReadonlyMap<string, string> = new Map([
+  ["hcmc", "Vietnam"],
+  ["hanoi", "Vietnam"],
+  ["bangalore", "India"],
+]);
+
+function viewportCenter(search: RestaurantSearch): {
+  longitude: number;
+  latitude: number;
+} | null {
+  if (search.longitude !== undefined && search.latitude !== undefined) {
+    return { longitude: search.longitude, latitude: search.latitude };
+  }
+
+  if (
+    search.west !== undefined &&
+    search.south !== undefined &&
+    search.east !== undefined &&
+    search.north !== undefined
+  ) {
+    return {
+      longitude: (search.west + search.east) / 2,
+      latitude: (search.south + search.north) / 2,
+    };
+  }
+
+  return null;
+}
+
+function presetAt(center: { longitude: number; latitude: number }): {
+  id: string;
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+} | null {
+  for (const preset of CITY_PRESETS) {
+    if (
+      center.longitude >= preset.west &&
+      center.longitude <= preset.east &&
+      center.latitude >= preset.south &&
+      center.latitude <= preset.north
+    ) {
+      return preset;
+    }
+  }
+
+  return null;
+}
+
+/** Resolve the requested city/country for a research pass without widening
+ *  scope: a named area stays verbatim (country follows the viewport, which
+ *  defaults to the product home region); otherwise the browsed preset
+ *  supplies both. Anything else returns null so no research is offered. */
+function researchScopeFor(search: RestaurantSearch, copy: RestaurantCopy): ResearchScope | null {
+  const area = search.area.trim();
+  const center = viewportCenter(search);
+  const preset = center === null ? null : presetAt(center);
+
+  const country = preset?.id === "bangalore" ? "India" : "Vietnam";
+
+  if (area !== "") {
+    return { city: area, country };
+  }
+
+  if (preset === null) {
+    return null;
+  }
+
+  const presetCountry = PRESET_COUNTRY.get(preset.id);
+
+  if (presetCountry === undefined) return null;
+
+  if (preset.id === "hcmc") return { city: copy.browseCityHcmc, country: presetCountry };
+
+  if (preset.id === "hanoi") return { city: copy.browseCityHanoi, country: presetCountry };
+
+  return { city: "Bangalore", country: presetCountry };
+}
+
+/** Hint line for the page-inline missing-evidence blocks. The caller only
+ *  renders it when a scope resolved, so `{city}` always interpolates. */
+function researchHintLine(copy: RestaurantCopy, city: string, dish: string | null): string {
+  if (dish !== null && dish.trim() !== "") {
+    return copy.researchHintDish.replace("{dish}", dish.trim()).replace("{city}", city);
+  }
+
+  return copy.researchHint.replace("{city}", city);
 }
 
 /** In-sheet loading placeholder: the map stays mounted behind it, no
@@ -267,6 +487,13 @@ export function RestaurantSearchPage() {
   const [chooserManual, setChooserManual] = useState(false);
   const [chooserDismissed, setChooserDismissed] = useState(false);
   const [chooserAuto, setChooserAuto] = useState(false);
+  // Web-research pass state (idle → preparing → searching → reviewing →
+  // completed / no-evidence / failed). Findings stay in memory only and
+  // never flow into map pins (`points` keeps the verified rows).
+  const [researchState, setResearchState] = useState<ResearchStatusState>("idle");
+  const [researchFindings, setResearchFindings] = useState<ReadonlyArray<ResearchFinding>>([]);
+  const [researchContext, setResearchContext] = useState("");
+  const researchRun = useRef(0);
 
   const initRan = useRef(false);
   const firstSearch = useRef(search);
@@ -308,6 +535,15 @@ export function RestaurantSearchPage() {
 
   useEffect(() => {
     latestKey.current = searchKey;
+  }, [searchKey]);
+
+  // A new region/filter search invalidates in-memory web leads: they are
+  // never persisted, so a stale pass collapses instead of misleading.
+  useEffect(() => {
+    researchRun.current += 1;
+    setResearchState("idle");
+    setResearchFindings([]);
+    setResearchContext("");
   }, [searchKey]);
 
   const reportCamera = useCallback(
@@ -624,6 +860,99 @@ export function RestaurantSearchPage() {
     });
   };
 
+  const dismissResearch = useCallback(() => {
+    researchRun.current += 1;
+    setResearchState("idle");
+    setResearchFindings([]);
+    setResearchContext("");
+  }, []);
+
+  /**
+   * Start a Muse web-research pass for the current geography + dish filter.
+   * Public discovery for guests and members alike: no authz change, no
+   * writes. Geography is preserved verbatim (no silent scope widening);
+   * without a resolvable city — or without a dish, which the restaurant
+   * lookup requires — the caller offers no research at all. Progress
+   * mirrors real phases: preparing (input), searching (remote call),
+   * reviewing (outcome validation). Provider outage or an unknown outcome
+   * shape lands on failed with retry — never "no restaurants".
+   */
+  const startResearch = useCallback(() => {
+    const scope = researchScopeFor(search, copy);
+
+    if (scope === null) return;
+
+    const meal = dishName?.trim() ?? "";
+
+    if (meal === "") return;
+
+    const run = researchRun.current + 1;
+
+    researchRun.current = run;
+    const alive = () => researchRun.current === run;
+    const language: ResearchLanguage = search.lang === "vi" ? "vi" : "en";
+    const strings = researchCopyFor(language);
+
+    setResearchFindings([]);
+    setResearchContext(strings.statusSearching);
+    setResearchState("preparing");
+    void (async () => {
+      try {
+        if (!alive()) return;
+        setResearchState("searching");
+
+        const raw = await researchRestaurantsFn({
+          data: {
+            city: scope.city,
+            country: scope.country,
+            dish: meal,
+            language,
+          },
+        });
+
+        if (!alive()) return;
+        setResearchContext(strings.statusReviewing);
+        setResearchState("reviewing");
+        const outcome = normalizeResearchOutcome(raw);
+
+        if (!alive()) return;
+
+        if (outcome === null) {
+          setResearchContext(strings.statusFailed);
+          setResearchState("failed");
+
+          return;
+        }
+
+        if (outcome.tag === "ResearchFound" && outcome.findings.length > 0) {
+          setResearchFindings(outcome.findings);
+          setResearchContext(strings.statusCompleted);
+          setResearchState("completed");
+
+          return;
+        }
+
+        if (outcome.tag === "ResearchUnavailable") {
+          setResearchContext(strings.statusFailed);
+          setResearchState("failed");
+
+          return;
+        }
+
+        // ResearchEmpty, ResearchSkipped, or a well-formed but empty
+        // finding set: keep the existing recovery actions, show the
+        // no-usable-evidence line. A skip stays visible with retry
+        // available rather than collapsing silently after a click.
+        setResearchContext(strings.statusNoEvidence);
+        setResearchState("no-evidence");
+      } catch {
+        if (!alive()) return;
+        setResearchContext(researchCopyFor(search.lang === "vi" ? "vi" : "en").statusFailed);
+        setResearchState("failed");
+      }
+    })();
+  }, [search, copy, dishName]);
+
   const submitText = (text: string) => {
     if (text === "") return;
 
@@ -774,6 +1103,34 @@ export function RestaurantSearchPage() {
       })
     : [];
 
+  // Price-research scope for the compare panel: dish and geography stay
+  // verbatim (no widening). The portion passes through only when every
+  // compared row agrees; otherwise the panel's comparability warning
+  // stands in place of a guessed portion.
+  const priceResearchScope = isDishMode ? researchScopeFor(search, copy) : null;
+  const priceResearchDish = dishName?.trim() ?? "";
+  const priceResearchVariants = compareRows.map((row) => row.variantName);
+
+  const priceResearchPortion =
+    priceResearchVariants.length > 0 &&
+    priceResearchVariants.every((variant) => variant === priceResearchVariants[0]) &&
+    priceResearchVariants[0] !== undefined
+      ? priceResearchVariants[0]
+      : undefined;
+
+  const priceResearchContext: PriceResearchContext | null =
+    priceResearchScope === null || priceResearchDish === ""
+      ? null
+      : {
+          dish: priceResearchDish,
+          city: priceResearchScope.city,
+          country: priceResearchScope.country,
+          portion: priceResearchPortion,
+          channel: search.channel,
+          currency: preference.currency,
+          language: search.lang === "vi" ? "vi" : "en",
+        };
+
   const detailQuery = useQuery({
     queryKey: ["restaurant-detail", selected, search.channel],
     queryFn: () => getRestaurantFn({ data: { venueId: selected ?? "", channel: search.channel } }),
@@ -919,6 +1276,20 @@ export function RestaurantSearchPage() {
   // render no own back buttons; every transition stays on this route (same
   // mounted map, no refetch), preserving dish/radius/venue/item/quantities
   // through the URL and the existing stores.
+  // Research availability follows the requested geography plus the dish
+  // the restaurant lookup requires: without either, only the existing
+  // recovery actions render.
+  const researchScope = researchScopeFor(search, copy);
+  const researchDish = dishName?.trim() ?? "";
+  const researchLanguage: ResearchLanguage = search.lang === "vi" ? "vi" : "en";
+  const researchStrings = researchCopyFor(researchLanguage);
+
+  const researchCity: string | null =
+    researchScope === null || researchDish === "" ? null : researchScope.city;
+
+  const researching =
+    researchState === "preparing" || researchState === "searching" || researchState === "reviewing";
+
   let toolbar: ReactNode;
 
   if (panel.kind === "overview") {
@@ -1021,6 +1392,9 @@ export function RestaurantSearchPage() {
         <div className="mapapp-status" aria-live="polite">
           <h3>{copy.noReviewedTitle}</h3>
           <p>{copy.noReviewedBody}</p>
+          {researchCity === null ? null : (
+            <p className="mapapp-note">{researchHintLine(copy, researchCity, researchDish)}</p>
+          )}
           <div className="mapapp-status-actions">
             <button type="button" className="mapapp-primary-btn" onClick={clearDish}>
               {copy.clearDish}
@@ -1031,6 +1405,16 @@ export function RestaurantSearchPage() {
             <button type="button" className="mapapp-ghost-btn" onClick={clearAll}>
               {copy.clearFilters}
             </button>
+            {researchCity === null ? null : (
+              <button
+                type="button"
+                className="mapapp-ghost-btn"
+                onClick={startResearch}
+                disabled={researching}
+              >
+                {researching ? copy.researchBusy : copy.researchAction}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1069,6 +1453,26 @@ export function RestaurantSearchPage() {
             </button>
           </div>
         </div>
+      )}
+      {!previewOpen && researchState !== "idle" && (
+        <section aria-label={researchStrings.statusTitle} data-state={researchState}>
+          <h3>{researchStrings.statusTitle}</h3>
+          <MuseResearchStatus
+            state={researchState}
+            contextLine={researchContext}
+            onRetry={startResearch}
+            onContinue={dismissResearch}
+            retryLabel={researchStrings.retryAction}
+            continueLabel={researchStrings.continueCatalogAction}
+          />
+          {researchState === "completed" && (
+            <ResearchFindingsList
+              findings={researchFindings}
+              badgeLabel={researchStrings.webResultBadge}
+              notVerifiedNote={researchStrings.notVerifiedNote}
+            />
+          )}
+        </section>
       )}
       {!previewOpen && rows.length > 0 && (
         <>
@@ -1128,6 +1532,7 @@ export function RestaurantSearchPage() {
               sortMode={search.sort}
               ratesAvailable={!conversion.unavailable}
               locale={search.lang}
+              researchContext={priceResearchContext}
             />
           )}
           <ul

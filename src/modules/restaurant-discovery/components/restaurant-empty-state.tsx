@@ -18,8 +18,10 @@ import type { RestaurantCopy } from "@/modules/restaurant-discovery/components/r
  * - basemap tile failure          -> kind "map-tiles-failure"
  *
  * Every kind renders at most one primary (orange) action plus one secondary
- * (outlined) action. Extra recovery operations (remove-dish, clear-all,
- * radius edits) belong in the filter sheet, never in this card. Display
+ * (outlined) action. The two missing-evidence kinds (`no-venues`,
+ * `no-dish-evidence`) may add one tertiary research action when
+ * `onResearch` is provided. No other kind offers research: tight filters,
+ * loading, and errors never trigger a web-research pass. Display
  * options, price comparison, and sort controls must NOT render here: the
  * coordinator gates those in the page (only with eligible price data or a
  * meaningful choice).
@@ -68,6 +70,20 @@ export interface RestaurantEmptyStateProps {
   readonly onResetFilters?: (() => void) | undefined;
   /** Retry the failed load. Sole action for error. */
   readonly onRetry?: (() => void) | undefined;
+  /** Browsed city/area display name for the research hint (`{city}`).
+   *  Null or blank falls back to the generic hint so the placeholder is
+   *  never rendered raw. */
+  readonly cityName?: string | null | undefined;
+  /**
+   * Start a Muse web-research pass. Offered ONLY for the missing-evidence
+   * kinds (`no-venues`, `no-dish-evidence`); never for
+   * `filters-too-restrictive`, `error`, or `loading`. Research is a
+   * read-only evidence lookup: it never writes venue records.
+   */
+  readonly onResearch?: (() => void) | undefined;
+  /** Research request in flight: the tertiary action shows a busy label and
+   *  disables itself until the pass settles. */
+  readonly researching?: boolean | undefined;
   /** Explore dishes. Primary for empty-catalog. */
   readonly onExploreDishes?: (() => void) | undefined;
   /** Scan a menu. Secondary for empty-catalog. */
@@ -83,10 +99,34 @@ function dishTitleFor(copy: RestaurantCopy, dishName: string | null | undefined)
   return copy.emptyNoDishTitle.replace("{dish}", name);
 }
 
+/** Safe research hint: city and dish interpolate only when non-blank,
+ *  otherwise the generic line renders so no placeholder ever leaks raw. */
+function researchHintFor(
+  copy: RestaurantCopy,
+  cityName: string | null | undefined,
+  dishName: string | null | undefined,
+): string {
+  const city = cityName?.trim() ?? "";
+  const dish = dishName?.trim() ?? "";
+
+  if (city !== "" && dish !== "") {
+    return copy.researchHintDish.replace("{dish}", dish).replace("{city}", city);
+  }
+
+  if (city !== "") {
+    return copy.researchHint.replace("{city}", city);
+  }
+
+  return copy.researchHintGeneric;
+}
+
 export function RestaurantEmptyState({
   copy,
   kind,
   dishName,
+  cityName,
+  onResearch,
+  researching,
   onChooseLocation,
   onSearchWider,
   onBrowseAll,
@@ -147,6 +187,7 @@ export function RestaurantEmptyState({
       <div className="mapapp-status" aria-live="polite">
         <h3>{copy.emptyNoVenuesTitle}</h3>
         <p>{copy.emptyNoVenuesBody}</p>
+        {onResearch === undefined ? null : <p>{researchHintFor(copy, cityName, dishName)}</p>}
         <div className="mapapp-status-actions">
           {onChooseLocation === undefined ? null : (
             <button type="button" className="mapapp-primary-btn" onClick={onChooseLocation}>
@@ -159,6 +200,16 @@ export function RestaurantEmptyState({
               {copy.emptyExploreWider}
             </button>
           )}
+          {onResearch === undefined ? null : (
+            <button
+              type="button"
+              className="mapapp-ghost-btn"
+              onClick={onResearch}
+              disabled={researching === true}
+            >
+              {researching === true ? copy.researchBusy : copy.researchAction}
+            </button>
+          )}
         </div>
       </div>
     );
@@ -169,6 +220,7 @@ export function RestaurantEmptyState({
       <div className="mapapp-status" aria-live="polite">
         <h3>{dishTitleFor(copy, dishName)}</h3>
         <p>{copy.emptyNoDishBody}</p>
+        {onResearch === undefined ? null : <p>{researchHintFor(copy, cityName, dishName)}</p>}
         <div className="mapapp-status-actions">
           {onSearchWider === undefined ? null : (
             <button type="button" className="mapapp-primary-btn" onClick={onSearchWider}>
@@ -178,6 +230,16 @@ export function RestaurantEmptyState({
           {onBrowseAll === undefined ? null : (
             <button type="button" className="mapapp-ghost-btn" onClick={onBrowseAll}>
               {copy.emptyBrowseAll}
+            </button>
+          )}
+          {onResearch === undefined ? null : (
+            <button
+              type="button"
+              className="mapapp-ghost-btn"
+              onClick={onResearch}
+              disabled={researching === true}
+            >
+              {researching === true ? copy.researchBusy : copy.researchAction}
             </button>
           )}
         </div>

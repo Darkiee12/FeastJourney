@@ -1,12 +1,13 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { ChevronDownIcon, Globe2Icon, MapPinIcon, RefreshCwIcon } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { DishCarousel } from "@/components/dish/dish-carousel";
 import {
   DiscoveryFallback,
   DiscoveryLoadingState,
+  DiscoveryResearchSlot,
   resolveDiscoveryFallbackState,
 } from "@/components/home/discovery-fallback";
 import {
@@ -457,6 +458,43 @@ export function DiscoverySection({
     precise.request();
   };
 
+  // Database-first research gate: the research slot mounts only on the two
+  // catalog-empty states (scoped query served nothing, or the worldwide pool
+  // itself is empty while a country context exists). It never fires on its
+  // own — DiscoveryResearchSlot starts idle behind an explicit button — and
+  // findings render outside the canonical carousel.
+  let researchSlot: ReactNode = null;
+
+  const researchCountryName = countryNameFor(
+    countriesQuery.data,
+    servedCountryCode ?? effectiveCountry,
+  );
+
+  if (
+    (fallbackState === "region-empty" || fallbackState === "catalog-empty") &&
+    researchCountryName !== null
+  ) {
+    let researchCityName = researchCountryName;
+    const activeCity = city ?? servedCity;
+
+    if (activeCity !== null) {
+      const cityLabel = discoveryCityLabelFor(activeCity);
+
+      if (cityLabel !== null) {
+        researchCityName = cityLabel;
+      }
+    }
+
+    researchSlot = (
+      <DiscoveryResearchSlot
+        city={researchCityName}
+        country={researchCountryName}
+        language={lang === "vi" ? "vi" : "en"}
+        onContinueWorldwide={exploreWorldwide}
+      />
+    );
+  }
+
   if (inSheet && mobile?.state.mode === "location") {
     return (
       <MobileLocationPicker
@@ -589,6 +627,7 @@ export function DiscoverySection({
           onRetry={() => {
             void carouselQuery.refetch();
           }}
+          researchSlot={researchSlot}
         />
       </div>
     </section>

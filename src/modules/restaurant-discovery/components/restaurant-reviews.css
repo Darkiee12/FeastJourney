@@ -1,196 +1,316 @@
-/* Customer review panel styles (traveler discovery).
-   Scoped under .rv-* so the homepage, admin Feast Lab, and search surfaces
-   stay untouched. Cream/white surfaces, restrained single borders. */
+/* Customer review panel (traveler discovery).
+   Scoped under .reviews-* so the homepage, admin Feast Lab, and search
+   surfaces stay untouched. Surfaces mirror the venue overview and menu
+   panels: white cards, one restrained border, cream hover, display titles. */
 @layer components {
-  .rv-panel {
+  .reviews-panel {
     display: grid;
-    gap: 1.25rem;
+    gap: 0.75rem;
     min-width: 0;
     align-content: start;
   }
-  .rv-head {
+  .reviews-head {
     display: grid;
-    gap: 0.5rem;
+    gap: 0.35rem;
   }
-  .rv-back {
-    display: inline-flex;
-    min-height: 2.75rem;
-    align-items: center;
-    gap: 0.45rem;
-    justify-self: start;
-    border-radius: 9999px;
-    border: 1px solid var(--color-border-soft);
-    background: white;
-    color: var(--color-ink);
-    font-weight: 600;
-    font-size: 0.9rem;
-    padding: 0.5rem 1.1rem;
-    cursor: pointer;
-  }
-  .rv-back:hover {
-    background: var(--color-cream);
-  }
-  .rv-back:focus-visible {
-    outline: 2px solid var(--color-brand-blue);
-    outline-offset: 2px;
-  }
-  .rv-back svg {
-    width: 1rem;
-    height: 1rem;
-  }
-  .rv-head h2 {
+  .reviews-head h2 {
     font-family: var(--font-display);
-    font-size: 1.9rem;
-    letter-spacing: 0.02em;
+    font-size: clamp(1.5rem, 4vw, 1.9rem);
+    line-height: 1.15;
+    letter-spacing: 0.015em;
   }
-  .rv-section {
+  .reviews-section {
     display: grid;
-    gap: 0.75rem;
+    gap: 0.6rem;
     align-content: start;
+    min-width: 0;
   }
-  .rv-summary {
+  .reviews-summary {
     display: grid;
     gap: 0.6rem;
     background: white;
     border: 1px solid var(--color-border-soft);
-    border-radius: 1rem;
-    padding: 1.25rem;
+    border-radius: 0.75rem;
+    padding: 0.9rem 1rem;
   }
-  .rv-summary h3 {
+  .reviews-summary h3 {
     font-size: 1.1rem;
     font-weight: 700;
   }
-  .rv-average-row {
+  .reviews-average-row {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.6rem;
   }
-  .rv-average {
+  .reviews-average {
     font-family: var(--font-display);
-    font-size: 2.5rem;
+    font-size: 2rem;
     line-height: 1;
   }
-  .rv-stars {
+  .reviews-stars {
     display: inline-flex;
     gap: 0.15rem;
     color: var(--color-food-orange-strong);
   }
-  .rv-star {
-    width: 1.25rem;
-    height: 1.25rem;
+  .reviews-star {
+    width: 1.1rem;
+    height: 1.1rem;
   }
-  .rv-star[data-filled="false"] {
+  .reviews-star[data-filled="false"] {
     color: var(--color-muted);
   }
-  .rv-stars-small .rv-star {
-    width: 1rem;
-    height: 1rem;
+  .reviews-stars-small .reviews-star {
+    width: 0.95rem;
+    height: 0.95rem;
   }
-  .rv-count {
-    font-size: 0.9rem;
+  .reviews-count {
+    font-size: 0.88rem;
     color: var(--color-muted);
   }
-  .rv-bars {
+  .reviews-bars {
     display: grid;
-    gap: 0.4rem;
+    gap: 0.35rem;
     list-style: none;
     margin: 0;
     padding: 0;
   }
-  .rv-bar-row {
+  .reviews-bar-row {
+    min-width: 0;
+  }
+  .reviews-bar-row[data-active="true"] .reviews-bar-button {
+    border-color: var(--color-food-orange-strong);
+    background: var(--color-cream);
+  }
+  .reviews-bar-button {
     display: grid;
-    grid-template-columns: 4.5rem 1fr 2rem;
+    grid-template-columns: 4.25rem 1fr 2rem;
     align-items: center;
     gap: 0.6rem;
+    width: 100%;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    border: 1px solid transparent;
+    border-radius: 0.6rem;
+    background: transparent;
+    padding: 0.2rem 0.4rem;
+    margin-inline: -0.4rem;
+    cursor: pointer;
+  }
+  .reviews-bar-button:hover {
+    background: var(--color-cream);
+  }
+  .reviews-bar-button:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .reviews-bar-label {
+    font-weight: 600;
     font-size: 0.85rem;
   }
-  .rv-bar-label {
-    font-weight: 600;
-  }
-  .rv-bar-track {
+  .reviews-bar-track {
     display: block;
-    height: 0.6rem;
+    height: 0.55rem;
     border-radius: 9999px;
     background: var(--color-cream);
     border: 1px solid var(--color-border-soft);
     overflow: hidden;
   }
-  .rv-bar-fill {
+  .reviews-bar-fill {
     display: block;
     height: 100%;
     background: var(--color-food-orange-strong);
   }
-  .rv-bar-count {
+  .reviews-bar-count {
     text-align: right;
+    font-size: 0.85rem;
     color: var(--color-muted);
     font-variant-numeric: tabular-nums;
   }
-  .rv-toolbar {
+  .reviews-highlights {
+    display: grid;
+    gap: 0.6rem;
+    background: white;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    padding: 0.9rem 1rem;
+  }
+  .reviews-highlights h3 {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+  }
+  .reviews-highlights h3 svg {
+    width: 1.1rem;
+    height: 1.1rem;
+    color: var(--color-food-orange-strong);
+  }
+  .reviews-highlights-loading {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-weight: 600;
+    color: var(--color-muted);
+  }
+  .reviews-highlights-loading svg {
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+  .reviews-highlights-overview {
+    font-size: 0.95rem;
+    line-height: 1.55;
+  }
+  .reviews-highlights-group {
+    display: grid;
+    gap: 0.3rem;
+  }
+  .reviews-highlights-group h4 {
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-food-orange-strong);
+  }
+  .reviews-highlights-group ul {
+    display: grid;
+    gap: 0.25rem;
+    list-style: disc;
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.92rem;
+    line-height: 1.5;
+  }
+  .reviews-highlights-sample {
+    font-size: 0.85rem;
+    color: var(--color-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .reviews-highlights-unavailable {
+    font-size: 0.92rem;
+    color: var(--color-muted);
+    line-height: 1.5;
+  }
+  .reviews-highlights-evidence {
+    display: grid;
+    gap: 0.5rem;
+    justify-items: start;
+  }
+  .reviews-evidence-list {
+    display: grid;
+    gap: 0.5rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+  }
+  .reviews-evidence-item {
+    display: grid;
+    gap: 0.35rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.6rem;
+    background: var(--color-cream);
+    padding: 0.7rem 0.85rem;
+  }
+  .reviews-evidence-item blockquote {
+    margin: 0;
+    padding: 0;
+    font-size: 0.9rem;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+  .reviews-toolbar {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 0.75rem;
+    align-items: end;
+    gap: 0.6rem 0.75rem;
   }
-  .rv-toolbar h3 {
+  .reviews-toolbar h3 {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
     margin-right: auto;
     font-size: 1.1rem;
     font-weight: 700;
   }
-  .rv-toolbar label {
-    font-size: 0.85rem;
-    font-weight: 700;
+  .reviews-toolbar h3 svg {
+    width: 1.1rem;
+    height: 1.1rem;
+    color: var(--color-food-orange-strong);
   }
-  .rv-toolbar select {
-    min-height: 2.75rem;
-    font-size: 0.9rem;
-    border: 1px solid var(--color-border-soft);
-    border-radius: 0.75rem;
-    background: white;
-    color: var(--color-ink);
-    padding: 0.45rem 0.8rem;
+  .reviews-filter-chip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.6rem;
+    font-size: 0.88rem;
+    font-weight: 600;
   }
-  .rv-list {
+  .reviews-list {
     display: grid;
-    gap: 0.9rem;
+    gap: 0.6rem;
     list-style: none;
     margin: 0;
     padding: 0;
     align-content: start;
   }
-  .rv-card {
+  .reviews-card {
     display: grid;
-    gap: 0.6rem;
+    gap: 0.55rem;
     background: white;
     border: 1px solid var(--color-border-soft);
-    border-radius: 1rem;
-    padding: 1.1rem 1.25rem;
+    border-radius: 0.75rem;
+    padding: 0.9rem 1rem;
+    scroll-margin-block: 5rem;
   }
-  .rv-card-head {
+  .reviews-card-head {
     display: grid;
-    gap: 0.35rem;
+    gap: 0.3rem;
   }
-  .rv-card-meta {
+  .reviews-card-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.35rem 0.75rem;
+    gap: 0.3rem 0.7rem;
     font-size: 0.85rem;
     color: var(--color-muted);
   }
-  .rv-card-meta time {
+  .reviews-card-date {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
     font-variant-numeric: tabular-nums;
   }
-  .rv-card-body {
+  .reviews-card-date svg {
+    width: 0.9rem;
+    height: 0.9rem;
+  }
+  .reviews-card-body {
     font-size: 0.95rem;
     line-height: 1.55;
     overflow-wrap: anywhere;
     white-space: pre-line;
   }
-  .rv-card-actions {
+  .reviews-card-note {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-muted);
+  }
+  .reviews-card-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.6rem;
+    gap: 0.5rem;
   }
-  .rv-ghost {
+  .reviews-chevron {
+    transition: transform 150ms ease;
+  }
+  .reviews-chevron[data-open="true"] {
+    transform: rotate(180deg);
+  }
+  .reviews-danger {
+    color: #b91c1c;
+  }
+  .reviews-ghost {
     display: inline-flex;
     min-height: 2.75rem;
     align-items: center;
@@ -200,26 +320,26 @@
     background: white;
     color: var(--color-ink);
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     padding: 0.45rem 1rem;
     cursor: pointer;
   }
-  .rv-ghost:hover:not(:disabled) {
+  .reviews-ghost:hover:not(:disabled) {
     background: var(--color-cream);
   }
-  .rv-ghost:disabled {
+  .reviews-ghost:disabled {
     cursor: wait;
     opacity: 0.65;
   }
-  .rv-ghost:focus-visible {
+  .reviews-ghost:focus-visible {
     outline: 2px solid var(--color-brand-blue);
     outline-offset: 2px;
   }
-  .rv-ghost svg {
+  .reviews-ghost svg {
     width: 1rem;
     height: 1rem;
   }
-  .rv-primary {
+  .reviews-primary {
     display: inline-flex;
     min-height: 2.75rem;
     align-items: center;
@@ -234,71 +354,115 @@
     cursor: pointer;
     text-decoration: none;
   }
-  .rv-primary:hover:not(:disabled) {
+  .reviews-primary:hover:not(:disabled) {
     background: var(--color-food-orange-dark);
   }
-  .rv-primary:disabled {
+  .reviews-primary:disabled {
     cursor: wait;
     opacity: 0.65;
   }
-  .rv-primary:focus-visible {
+  .reviews-primary:focus-visible {
     outline: 2px solid var(--color-brand-blue);
     outline-offset: 2px;
   }
-  .rv-primary svg {
+  .reviews-primary svg {
     width: 1rem;
     height: 1rem;
   }
-  .rv-empty {
+  .reviews-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--color-brand-blue);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .reviews-link:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+    border-radius: 0.25rem;
+  }
+  .reviews-empty {
     display: grid;
     gap: 0.6rem;
     justify-items: start;
     background: white;
     border: 1px solid var(--color-border-soft);
-    border-radius: 1rem;
-    padding: 1.5rem;
+    border-radius: 0.75rem;
+    padding: 1.1rem 1.2rem;
   }
-  .rv-empty p {
+  .reviews-empty p {
     color: var(--color-muted);
   }
-  .rv-notice {
+  .reviews-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
     border: 1px solid var(--color-food-orange-strong);
     border-radius: 0.75rem;
     background: white;
     color: var(--color-ink);
     font-weight: 600;
-    padding: 0.9rem 1.1rem;
+    font-size: 0.92rem;
+    padding: 0.8rem 1rem;
   }
-  .rv-error {
+  .reviews-status-dot {
+    width: 0.6rem;
+    height: 0.6rem;
+    flex: none;
+    border-radius: 9999px;
+    background: var(--color-food-orange-strong);
+  }
+  .reviews-notice {
+    display: grid;
+    gap: 0.6rem;
+    border: 1px solid var(--color-food-orange-strong);
+    border-radius: 0.75rem;
+    background: white;
+    color: var(--color-ink);
+    font-weight: 600;
+    padding: 0.9rem 1rem;
+  }
+  .reviews-error {
     border: 2px solid #b91c1c;
     border-radius: 0.75rem;
     background: white;
     color: var(--color-ink);
     font-weight: 600;
-    padding: 0.9rem 1.1rem;
+    padding: 0.9rem 1rem;
   }
-  .rv-skeleton {
+  .reviews-skeleton {
     border-radius: 0.5rem;
     background: var(--color-cream);
-    animation: rv-pulse 1.2s ease-in-out infinite;
+    animation: reviews-pulse 1.2s ease-in-out infinite;
   }
-  .rv-skeleton-average {
-    width: 9rem;
-    height: 2.5rem;
+  .reviews-skeleton-average {
+    width: 8rem;
+    height: 2rem;
   }
-  .rv-skeleton-bar {
+  .reviews-skeleton-bar {
+    width: 100%;
+    height: 0.85rem;
+  }
+  .reviews-skeleton-line {
     width: 100%;
     height: 0.9rem;
   }
-  .rv-skeleton-card {
-    min-height: 7rem;
+  .reviews-skeleton-card {
+    min-height: 6rem;
   }
   @media (prefers-reduced-motion: reduce) {
-    .rv-skeleton {
+    .reviews-skeleton {
       animation: none;
     }
+    .reviews-chevron {
+      transition: none;
+    }
   }
-  @keyframes rv-pulse {
+  @keyframes reviews-pulse {
     0%,
     100% {
       opacity: 1;
@@ -307,25 +471,30 @@
       opacity: 0.55;
     }
   }
-  .rv-load-more {
+  .reviews-load-more {
     justify-self: center;
   }
-  .rv-signin {
+  .reviews-helper {
+    font-size: 0.88rem;
+    color: var(--color-muted);
+    line-height: 1.5;
+  }
+  .reviews-signin {
     display: grid;
     gap: 0.6rem;
     justify-items: start;
     background: var(--color-cream);
     border: 1px solid var(--color-border-soft);
-    border-radius: 1rem;
-    padding: 1.25rem;
+    border-radius: 0.75rem;
+    padding: 1rem 1.2rem;
   }
-  .rv-dialog-overlay {
+  .reviews-dialog-overlay {
     position: fixed;
     inset: 0;
     z-index: 50;
     background: rgb(7 27 70 / 0.5);
   }
-  .rv-dialog {
+  .reviews-dialog {
     position: fixed;
     z-index: 50;
     inset-inline: 1rem;
@@ -336,7 +505,7 @@
     max-height: min(85dvh, 44rem);
     overflow: auto;
     display: grid;
-    gap: 1rem;
+    gap: 0.9rem;
     background: white;
     color: var(--color-ink);
     border: 1px solid var(--color-border-soft);
@@ -344,22 +513,22 @@
     box-shadow: 0 -18px 60px rgb(3 10 30 / 0.35);
     padding: 1.25rem;
   }
-  .rv-dialog:focus-visible {
+  .reviews-dialog:focus-visible {
     outline: 2px solid var(--color-brand-blue);
     outline-offset: -2px;
   }
-  .rv-dialog-head {
+  .reviews-dialog-head {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 1rem;
   }
-  .rv-dialog-title {
+  .reviews-dialog-title {
     font-family: var(--font-display);
-    font-size: 1.5rem;
-    letter-spacing: 0.02em;
+    font-size: 1.4rem;
+    letter-spacing: 0.015em;
   }
-  .rv-icon-btn {
+  .reviews-icon-btn {
     display: inline-grid;
     place-content: center;
     min-width: 2.75rem;
@@ -370,29 +539,29 @@
     color: var(--color-ink);
     cursor: pointer;
   }
-  .rv-icon-btn:hover {
+  .reviews-icon-btn:hover {
     background: var(--color-cream);
   }
-  .rv-icon-btn svg {
+  .reviews-icon-btn svg {
     width: 1.15rem;
     height: 1.15rem;
   }
-  .rv-field {
+  .reviews-field {
     display: grid;
     gap: 0.5rem;
     margin: 0;
     padding: 0;
     border: 0;
   }
-  .rv-field > label,
-  .rv-field > legend {
+  .reviews-field > label,
+  .reviews-field > legend {
     font-weight: 700;
     font-size: 0.95rem;
     padding: 0;
   }
-  .rv-field textarea {
+  .reviews-field textarea {
     width: 100%;
-    min-height: 7rem;
+    min-height: 6rem;
     font: inherit;
     border: 1px solid var(--color-border-soft);
     border-radius: 0.75rem;
@@ -401,16 +570,16 @@
     padding: 0.6rem 0.9rem;
     resize: vertical;
   }
-  .rv-field textarea:focus-visible {
+  .reviews-field textarea:focus-visible {
     outline: 2px solid var(--color-brand-blue);
     outline-offset: 1px;
     border-color: var(--color-brand-blue);
   }
-  .rv-rating {
+  .reviews-rating {
     display: flex;
     gap: 0.35rem;
   }
-  .rv-rating label {
+  .reviews-rating label {
     display: inline-grid;
     place-content: center;
     min-width: 2.75rem;
@@ -421,36 +590,36 @@
     color: var(--color-muted);
     cursor: pointer;
   }
-  .rv-rating label[data-checked="true"] {
+  .reviews-rating label[data-checked="true"] {
     color: var(--color-food-orange-strong);
     border-color: var(--color-food-orange-strong);
   }
-  .rv-rating label:has(input:focus-visible) {
+  .reviews-rating label:has(input:focus-visible) {
     outline: 2px solid var(--color-brand-blue);
     outline-offset: 2px;
   }
-  .rv-rating input {
+  .reviews-rating input {
     position: absolute;
     width: 1px;
     height: 1px;
     overflow: hidden;
     clip: rect(0 0 0 0);
   }
-  .rv-rating svg {
+  .reviews-rating svg {
     width: 1.4rem;
     height: 1.4rem;
   }
-  .rv-char-count {
+  .reviews-char-count {
     font-size: 0.85rem;
     color: var(--color-muted);
     font-variant-numeric: tabular-nums;
   }
-  .rv-field-error {
+  .reviews-field-error {
     font-size: 0.9rem;
     font-weight: 600;
     color: #b91c1c;
   }
-  .rv-dialog-foot {
+  .reviews-dialog-foot {
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;

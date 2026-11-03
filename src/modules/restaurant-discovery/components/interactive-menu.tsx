@@ -1,7 +1,7 @@
 import { Fragment, useId, useRef, useState } from "react";
 
 import { ObservedPrice } from "@/modules/restaurant-discovery/components/currency-tools";
-import { menuCopy } from "@/modules/restaurant-discovery/components/menu-copy";
+import { menuCopy, menuScanResultsCopy } from "@/modules/restaurant-discovery/components/menu-copy";
 import { WaiterOrderCard } from "@/modules/restaurant-discovery/components/waiter-order-card";
 import type {
   InteractiveMenu,
@@ -12,60 +12,26 @@ import { isAmount, isCurrency, type ExchangeRate } from "@/shared/money";
 
 type MenuItem = InteractiveMenu["items"][number];
 
+type MenuVariant = MenuItem["variants"][number];
+
+type ItemCopy = ReturnType<typeof menuCopy>;
+
 const humanizeSection = (section: string): string =>
   section.replaceAll("-", " ").replaceAll("_", " ");
 
-function MenuItemCard({
+function MenuItemHeader({
   item,
   menu,
-  locale,
-  selectedId,
-  selection,
-  reviewed,
-  onVariant,
-  onSelection,
-  onReview,
-  photoUrl,
-  rates,
+  copy,
+  sourceLanguage,
 }: {
   readonly item: MenuItem;
   readonly menu: InteractiveMenu;
-  readonly locale: string;
-  readonly selectedId: string;
-  readonly selection: MenuSelection | undefined;
-  readonly reviewed: boolean;
-  readonly onVariant: (id: string) => void;
-  readonly onSelection: (selection: MenuSelection) => void;
-  readonly onReview: (reviewed: boolean) => void;
-  readonly photoUrl: ((assetId: string) => string) | undefined;
-  readonly rates: ReadonlyMap<string, ExchangeRate> | undefined;
+  readonly copy: ItemCopy;
+  readonly sourceLanguage: string;
 }) {
-  const copy = menuCopy(locale);
-  const variant = item.variants.find((entry) => entry.id === selectedId);
-  const quantity = selection?.quantity ?? 0;
-  const sourceLanguage = menu.sourceLanguage ?? "und";
-
-  if (variant === undefined) return null;
-
-  const changeQuantity = (next: number): void =>
-    onSelection({
-      variantId: variant.id,
-      quantity: next,
-      instruction: selection?.instruction ?? "",
-      originalLanguageInstruction: selection?.originalLanguageInstruction ?? "",
-    });
-
-  const price = variant.price;
-
-  const knownPrice =
-    price !== null &&
-    price.amount !== null &&
-    price.currency !== null &&
-    isAmount(price.amount) &&
-    isCurrency(price.currency);
-
   return (
-    <article className="menu-order-item">
+    <>
       <h3 lang={sourceLanguage}>{item.originalName}</h3>
       {item.translatedName !== null && (
         <p className="menu-order-translation" lang={menu.targetLanguage}>
@@ -87,6 +53,38 @@ function MenuItemCard({
           <p lang={menu.targetLanguage}>{item.explanatorySummary}</p>
         </details>
       )}
+    </>
+  );
+}
+
+function MenuItemVariantPrice({
+  item,
+  variant,
+  locale,
+  rates,
+  copy,
+  sourceLanguage,
+  onVariant,
+}: {
+  readonly item: MenuItem;
+  readonly variant: MenuVariant;
+  readonly locale: string;
+  readonly rates: ReadonlyMap<string, ExchangeRate> | undefined;
+  readonly copy: ItemCopy;
+  readonly sourceLanguage: string;
+  readonly onVariant: (id: string) => void;
+}) {
+  const price = variant.price;
+
+  const knownPrice =
+    price !== null &&
+    price.amount !== null &&
+    price.currency !== null &&
+    isAmount(price.amount) &&
+    isCurrency(price.currency);
+
+  return (
+    <>
       <label htmlFor={`menu-variant-${item.id}`}>{copy.variant}</label>
       <select
         id={`menu-variant-${item.id}`}
@@ -127,112 +125,257 @@ function MenuItemCard({
           {copy.exploreDish}
         </a>
       )}
-      {item.ingredients !== undefined &&
-        item.ingredients !== null &&
-        item.ingredients.length > 0 && (
-          <details>
-            <summary>{copy.ingredients}</summary>
-            <p>{copy.ingredientNotice}</p>
-            {(["printed", "inferred"] as const).map((evidence) => {
-              const ingredients =
-                item.ingredients?.filter((ingredient) => ingredient.evidence === evidence) ?? [];
+    </>
+  );
+}
 
-              if (ingredients.length === 0) return null;
+function MenuItemIngredients({
+  item,
+  menu,
+  copy,
+  sourceLanguage,
+}: {
+  readonly item: MenuItem;
+  readonly menu: InteractiveMenu;
+  readonly copy: ItemCopy;
+  readonly sourceLanguage: string;
+}) {
+  if (item.ingredients === undefined || item.ingredients === null || item.ingredients.length === 0)
+    return null;
 
-              return (
-                <div key={evidence}>
-                  <h4>
-                    {evidence === "printed" ? copy.printedIngredients : copy.inferredIngredients}
-                  </h4>
-                  <ul>
-                    {ingredients.map((ingredient) => (
-                      <li key={`${evidence}:${ingredient.originalText}`}>
-                        <span lang={sourceLanguage}>{ingredient.originalText}</span>
-                        {ingredient.translatedText !== null && (
-                          <span lang={menu.targetLanguage}> / {ingredient.translatedText}</span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
-          </details>
-        )}
+  return (
+    <details>
+      <summary>{copy.ingredients}</summary>
+      <p>{copy.ingredientNotice}</p>
+      {(["printed", "inferred"] as const).map((evidence) => {
+        const ingredients =
+          item.ingredients?.filter((ingredient) => ingredient.evidence === evidence) ?? [];
+
+        if (ingredients.length === 0) return null;
+
+        return (
+          <div key={evidence}>
+            <h4>{evidence === "printed" ? copy.printedIngredients : copy.inferredIngredients}</h4>
+            <ul>
+              {ingredients.map((ingredient) => (
+                <li key={`${evidence}:${ingredient.originalText}`}>
+                  <span lang={sourceLanguage}>{ingredient.originalText}</span>
+                  {ingredient.translatedText !== null && (
+                    <span lang={menu.targetLanguage}> / {ingredient.translatedText}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+    </details>
+  );
+}
+
+function MenuItemQuantity({
+  item,
+  variant,
+  quantity,
+  copy,
+  onChange,
+}: {
+  readonly item: MenuItem;
+  readonly variant: MenuVariant;
+  readonly quantity: number;
+  readonly copy: ItemCopy;
+  readonly onChange: (next: number) => void;
+}) {
+  return (
+    <fieldset
+      className="menu-order-quantity"
+      aria-label={`${copy.quantity}: ${item.originalName}, ${variant.originalLabel}`}
+    >
+      <button
+        type="button"
+        aria-label={`${copy.remove}: ${item.originalName}`}
+        disabled={quantity === 0}
+        onClick={() => onChange(quantity - 1)}
+      >
+        −
+      </button>
+      <output aria-live="polite" aria-label={copy.quantity}>
+        {quantity}
+      </output>
+      <button
+        type="button"
+        aria-label={`${copy.add}: ${item.originalName}`}
+        disabled={quantity >= 99}
+        onClick={() => onChange(quantity + 1)}
+      >
+        +
+      </button>
+    </fieldset>
+  );
+}
+
+function MenuItemInstructions({
+  selection,
+  reviewed,
+  sourceLanguage,
+  targetLanguage,
+  copy,
+  onSelection,
+  onReview,
+}: {
+  readonly selection: MenuSelection;
+  readonly reviewed: boolean;
+  readonly sourceLanguage: string;
+  readonly targetLanguage: string;
+  readonly copy: ItemCopy;
+  readonly onSelection: (selection: MenuSelection) => void;
+  readonly onReview: (reviewed: boolean) => void;
+}) {
+  return (
+    <details className="menu-order-instructions">
+      <summary>{copy.instructions}</summary>
+      <p id={`instruction-help-${selection.variantId}`}>{copy.instructionHelp}</p>
+      <label htmlFor={`instruction-${selection.variantId}`}>{copy.enteredInstruction}</label>
+      <textarea
+        id={`instruction-${selection.variantId}`}
+        maxLength={500}
+        value={selection.instruction}
+        lang={targetLanguage}
+        aria-describedby={`instruction-help-${selection.variantId}`}
+        onChange={(event) => {
+          onSelection({ ...selection, instruction: event.target.value });
+          onReview(false);
+        }}
+      />
+      <label htmlFor={`waiter-instruction-${selection.variantId}`}>{copy.waiterInstruction}</label>
+      <textarea
+        id={`waiter-instruction-${selection.variantId}`}
+        maxLength={500}
+        value={selection.originalLanguageInstruction}
+        lang={sourceLanguage}
+        onChange={(event) => {
+          onSelection({ ...selection, originalLanguageInstruction: event.target.value });
+          onReview(false);
+        }}
+      />
+      <label className="menu-order-consent">
+        <input
+          type="checkbox"
+          checked={reviewed}
+          onChange={(event) => onReview(event.target.checked)}
+        />
+        {copy.reviewedInstructions}
+      </label>
+    </details>
+  );
+}
+
+function MenuItemPhotos({
+  item,
+  photoUrl,
+  copy,
+}: {
+  readonly item: MenuItem;
+  readonly photoUrl: ((assetId: string) => string) | undefined;
+  readonly copy: ItemCopy;
+}) {
+  if (photoUrl === undefined || item.assetIds.length === 0) return null;
+
+  return (
+    <div className="menu-order-photos">
+      {item.assetIds.map((assetId, index) => (
+        <a key={assetId} href={photoUrl(assetId)} target="_blank" rel="noreferrer">
+          {copy.photo} {index + 1}
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function MenuItemCard({
+  item,
+  menu,
+  locale,
+  selectedId,
+  selection,
+  reviewed,
+  onVariant,
+  onSelection,
+  onReview,
+  onEditDish,
+  photoUrl,
+  rates,
+}: {
+  readonly item: MenuItem;
+  readonly menu: InteractiveMenu;
+  readonly locale: string;
+  readonly selectedId: string;
+  readonly selection: MenuSelection | undefined;
+  readonly reviewed: boolean;
+  readonly onVariant: (id: string) => void;
+  readonly onSelection: (selection: MenuSelection) => void;
+  readonly onReview: (reviewed: boolean) => void;
+  readonly onEditDish?: ((itemKey: string) => void) | undefined;
+  readonly photoUrl: ((assetId: string) => string) | undefined;
+  readonly rates: ReadonlyMap<string, ExchangeRate> | undefined;
+}) {
+  const copy = menuCopy(locale);
+  const resultsCopy = menuScanResultsCopy(locale);
+  const variant = item.variants.find((entry) => entry.id === selectedId);
+  const quantity = selection?.quantity ?? 0;
+  const sourceLanguage = menu.sourceLanguage ?? "und";
+
+  if (variant === undefined) return null;
+
+  const changeQuantity = (next: number): void =>
+    onSelection({
+      variantId: variant.id,
+      quantity: next,
+      instruction: selection?.instruction ?? "",
+      originalLanguageInstruction: selection?.originalLanguageInstruction ?? "",
+    });
+
+  return (
+    <article className="menu-order-item">
+      <MenuItemHeader item={item} menu={menu} copy={copy} sourceLanguage={sourceLanguage} />
+      <MenuItemVariantPrice
+        item={item}
+        variant={variant}
+        locale={locale}
+        rates={rates}
+        copy={copy}
+        sourceLanguage={sourceLanguage}
+        onVariant={onVariant}
+      />
+      <MenuItemIngredients item={item} menu={menu} copy={copy} sourceLanguage={sourceLanguage} />
       {item.uncertainties.length > 0 && (
         <p className="menu-order-check">
           {copy.uncertainty}: {item.uncertainties.join("; ")}
         </p>
       )}
-      <fieldset
-        className="menu-order-quantity"
-        aria-label={`${copy.quantity}: ${item.originalName}, ${variant.originalLabel}`}
-      >
-        <button
-          type="button"
-          aria-label={`${copy.remove}: ${item.originalName}`}
-          disabled={quantity === 0}
-          onClick={() => changeQuantity(quantity - 1)}
-        >
-          −
-        </button>
-        <output aria-live="polite" aria-label={copy.quantity}>
-          {quantity}
-        </output>
-        <button
-          type="button"
-          aria-label={`${copy.add}: ${item.originalName}`}
-          disabled={quantity >= 99}
-          onClick={() => changeQuantity(quantity + 1)}
-        >
-          +
-        </button>
-      </fieldset>
+      <MenuItemQuantity
+        item={item}
+        variant={variant}
+        quantity={quantity}
+        copy={copy}
+        onChange={changeQuantity}
+      />
       {quantity > 0 && selection !== undefined && (
-        <details className="menu-order-instructions">
-          <summary>{copy.instructions}</summary>
-          <p id={`instruction-help-${variant.id}`}>{copy.instructionHelp}</p>
-          <label htmlFor={`instruction-${variant.id}`}>{copy.enteredInstruction}</label>
-          <textarea
-            id={`instruction-${variant.id}`}
-            maxLength={500}
-            value={selection.instruction}
-            lang={menu.targetLanguage}
-            aria-describedby={`instruction-help-${variant.id}`}
-            onChange={(event) => {
-              onSelection({ ...selection, instruction: event.target.value });
-              onReview(false);
-            }}
-          />
-          <label htmlFor={`waiter-instruction-${variant.id}`}>{copy.waiterInstruction}</label>
-          <textarea
-            id={`waiter-instruction-${variant.id}`}
-            maxLength={500}
-            value={selection.originalLanguageInstruction}
-            lang={sourceLanguage}
-            onChange={(event) => {
-              onSelection({ ...selection, originalLanguageInstruction: event.target.value });
-              onReview(false);
-            }}
-          />
-          <label className="menu-order-consent">
-            <input
-              type="checkbox"
-              checked={reviewed}
-              onChange={(event) => onReview(event.target.checked)}
-            />
-            {copy.reviewedInstructions}
-          </label>
-        </details>
+        <MenuItemInstructions
+          selection={selection}
+          reviewed={reviewed}
+          sourceLanguage={sourceLanguage}
+          targetLanguage={menu.targetLanguage}
+          copy={copy}
+          onSelection={onSelection}
+          onReview={onReview}
+        />
       )}
-      {photoUrl !== undefined && item.assetIds.length > 0 && (
-        <div className="menu-order-photos">
-          {item.assetIds.map((assetId, index) => (
-            <a key={assetId} href={photoUrl(assetId)} target="_blank" rel="noreferrer">
-              {copy.photo} {index + 1}
-            </a>
-          ))}
-        </div>
+      <MenuItemPhotos item={item} photoUrl={photoUrl} copy={copy} />
+      {onEditDish !== undefined && (
+        <button type="button" className="menu-results-edit" onClick={() => onEditDish(item.id)}>
+          {resultsCopy.editDish}
+        </button>
       )}
     </article>
   );
@@ -244,12 +387,14 @@ export function InteractiveMenuView({
   photoUrl,
   initialVariant,
   rates,
+  onEditDish,
 }: {
   readonly menu: InteractiveMenu;
   readonly locale: string;
   readonly photoUrl?: (assetId: string) => string;
   readonly initialVariant?: string;
   readonly rates?: ReadonlyMap<string, ExchangeRate>;
+  readonly onEditDish?: ((itemKey: string) => void) | undefined;
 }) {
   const copy = menuCopy(locale);
   const titleId = useId();
@@ -334,6 +479,7 @@ export function InteractiveMenuView({
                 reviewed={reviewed.has(selectedId)}
                 photoUrl={photoUrl}
                 rates={rates}
+                onEditDish={onEditDish}
                 onVariant={(id) =>
                   setActiveVariants((previous) => new Map([...previous, [item.id, id]]))
                 }

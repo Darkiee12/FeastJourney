@@ -1,8 +1,10 @@
 import { Link } from "@tanstack/react-router";
 import { MapPinned } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { SURPRISE_DISH_EVENT } from "@/components/home/globe/food-locations";
 import { GlobeCanvas } from "@/components/home/globe/globe-canvas";
+import { copilotCopyFor } from "@/modules/muse-copilot/copilot-copy";
 import type { Locale, Messages } from "@/shared/i18n";
 
 function UtensilsIcon() {
@@ -45,6 +47,17 @@ function surprise() {
 }
 
 export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
+  const museCopy = copilotCopyFor(lang === "vi" ? "vi" : "en");
+  const [entered, setEntered] = useState(false);
+
+  // Entrance reveal for the Muse action only: 200–350ms opacity/transform,
+  // skipped under reduced motion. Hero CTAs and the globe are untouched.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setEntered(true));
+
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
   return (
     <section
       aria-label={copy.globeLabel}
@@ -95,6 +108,23 @@ export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
             className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full border-2 border-white/40 bg-transparent px-6 text-base font-bold text-white transition hover:border-white/65 hover:bg-white/10 sm:min-h-13 sm:px-8 sm:text-lg"
           >
             {copy.navRestaurants}
+          </Link>
+        </div>
+
+        {/* Ask Muse: deliberately quieter than the primary CTAs — a compact
+            gradient pill with a soft mango glow linking to /muse. Sits below
+            the CTA row so it never dethrones the primary action or crowds
+            the globe. */}
+        <div className="mt-4 flex justify-center">
+          <Link
+            to="/muse"
+            search={{ lang }}
+            className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-mango/40 bg-gradient-to-r from-space-deep/80 via-food-orange-dark/40 to-space-deep/80 px-5 text-sm font-bold text-mango shadow-[0_0_28px_rgba(230,180,90,0.22)] backdrop-blur transition hover:border-mango/70 hover:text-white hover:shadow-[0_0_36px_rgba(230,180,90,0.38)] active:scale-[0.97] motion-safe:transition-all motion-safe:duration-300 motion-reduce:transition-none motion-reduce:opacity-100 motion-reduce:translate-y-0 ${
+              entered ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1"
+            }`}
+          >
+            <SparkleIcon />
+            {museCopy.askMuseAction}
           </Link>
         </div>
       </div>

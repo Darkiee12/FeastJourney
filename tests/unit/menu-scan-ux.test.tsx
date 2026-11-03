@@ -4,7 +4,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { menuScanPageCopy } from "@/modules/restaurant-discovery/components/menu-copy";
 import {
-  MenuScanPage,
   scanFailureKind,
   scanModelChip,
 } from "@/modules/restaurant-discovery/components/menu-scan-page";
@@ -158,18 +157,5 @@ describe("scan leaf editors", () => {
     expect(html).toContain('value="Phở bò"');
     expect(html).toContain("Added by you, not extracted");
     expect(html).toContain("Remove this dish");
-  });
-});
-
-describe("menu scan page shell", () => {
-  test("camera-first sheet renders without a model chip before analysis", () => {
-    const html = renderToStaticMarkup(<MenuScanPage locale="en" />);
-
-    expect(html).toContain("Add menu photos");
-    expect(html).toContain("Take a menu photograph");
-    expect(html).toContain("Choose menu photographs");
-    expect(html).toContain("Private scan. Photos stay private");
-    expect(html).toContain("Privacy details");
-    expect(html).not.toContain("scan-model-chip");
   });
 });

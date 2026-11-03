@@ -5,6 +5,10 @@ import { Dialog } from "radix-ui";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { z } from "zod";
 
+import {
+  restaurantCopy,
+  type RestaurantCopy,
+} from "@/modules/restaurant-discovery/components/restaurant-copy";
 import { CUSTOMER_REVIEW_BODY_MAX as CUSTOMER_REVIEW_BODY_MAX_LENGTH } from "@/modules/restaurant-discovery/restaurant-reviews.constants";
 import {
   submitRestaurantCustomerReviewFn,
@@ -67,14 +71,14 @@ const failureTag = (error: Error): string | null => {
   return parsed.success ? parsed.data._tag : null;
 };
 
-const failureMessage = (error: Error): string => {
+const failureMessage = (error: Error, copy: RestaurantCopy): string => {
   const parsed = clientFailureSchema.safeParse(error);
 
   if (parsed.success && parsed.data.message !== "") {
     return parsed.data.message;
   }
 
-  return "Could not save your review. Please retry.";
+  return copy.reviewsFormSaveFailed;
 };
 
 /**
@@ -169,8 +173,9 @@ export const clearReviewWriteIntent = (venueId: string): void => {
 
 /**
  * Accessible star-rating dialog for creating or editing one customer review.
- * Drafts survive server errors; a saved review shows the pending-moderation
- * state because new and edited reviews always re-enter the moderation queue.
+ * Simple stars plus concise text with a friendly moderation helper; a saved
+ * review shows the pending-moderation state with Done because new and edited
+ * reviews always re-enter the moderation queue.
  */
 export function RestaurantReviewFormDialog({
   open,
@@ -191,6 +196,7 @@ export function RestaurantReviewFormDialog({
 }) {
   const queryClient = useQueryClient();
   const openerRef = useRef<Element | null>(null);
+  const copy: RestaurantCopy = restaurantCopy(locale);
 
   const [rating, setRating] = useState<number | null>(null);
   const [body, setBody] = useState("");
@@ -280,7 +286,7 @@ export function RestaurantReviewFormDialog({
         return;
       }
 
-      setServerMessage(failureMessage(error));
+      setServerMessage(failureMessage(error, copy));
     },
   });
 
@@ -313,7 +319,7 @@ export function RestaurantReviewFormDialog({
   };
 
   const errors = touched ? validateCustomerReviewForm(rating, body) : {};
-  const title = editing ? "Edit your review" : "Write a review";
+  const title = editing ? copy.reviewsFormEditTitle : copy.reviewsFormWriteTitle;
   // Relative venue path only: the sign-in route's safeReturnTo allowlist
   // rejects absolute and protocol-relative destinations, so this can only
   // ever land back on this site. The lang query preserves the locale across
@@ -321,51 +327,45 @@ export function RestaurantReviewFormDialog({
   // session storage (see PendingReviewWriteIntent).
   const returnTo = `/restaurants/${venueId}?lang=${locale}`;
 
-  let submitLabel = "Submit review";
-
-  if (editing) {
-    submitLabel = "Save changes";
-  }
+  let submitLabel = editing ? copy.reviewsFormSave : copy.reviewsFormSubmit;
 
   if (mutation.isPending) {
-    submitLabel = "Saving…";
+    submitLabel = copy.reviewsFormSaving;
   }
 
   let dialogBody: ReactNode;
 
   if (succeeded) {
     dialogBody = (
-      <output className="rv-notice">
-        <p>Thanks — your review was received and is awaiting moderation.</p>
-        <p>It will appear here once published; the shown average only counts published reviews.</p>
-        <div className="rv-dialog-foot">
-          <button type="button" className="rv-primary" onClick={() => close(false)}>
-            Done
+      <output className="reviews-notice">
+        <p>{editing ? copy.reviewsEdited : copy.reviewsSubmitted}</p>
+        <p>{copy.reviewsFormHelper}</p>
+        <div className="reviews-dialog-foot">
+          <button type="button" className="reviews-primary" onClick={() => close(false)}>
+            {copy.reviewsFormDone}
           </button>
         </div>
       </output>
     );
   } else if (!signedIn || showSignIn) {
     const signInHint =
-      session.status === "unavailable"
-        ? "Sign-in status is unavailable right now, so reviews are paused. Discovery still works — try again shortly."
-        : "Sign in to write a review. Your place in this restaurant is kept.";
+      session.status === "unavailable" ? copy.reviewsSignInPaused : copy.reviewsFormSignInHint;
 
     const offerSignIn = session.status === "signed-out" || showSignIn;
 
     dialogBody = (
-      <div className="rv-signin">
+      <div className="reviews-signin">
         <p>{signInHint}</p>
         {offerSignIn ? (
           <Link
             to="/sign-in"
             search={{ lang: locale, returnTo }}
-            className="rv-primary"
+            className="reviews-primary"
             onClick={() => {
               writeReviewWriteIntent(venueId, { rating, body });
             }}
           >
-            Sign in to continue
+            {copy.reviewsSignInContinue}
           </Link>
         ) : null}
       </div>
@@ -373,9 +373,10 @@ export function RestaurantReviewFormDialog({
   } else {
     dialogBody = (
       <>
-        <fieldset className="rv-field">
-          <legend>Your rating</legend>
-          <div className="rv-rating" role="radiogroup" aria-label="Your rating">
+        <p className="reviews-helper">{copy.reviewsFormHelper}</p>
+        <fieldset className="reviews-field">
+          <legend>{copy.reviewsFormRating}</legend>
+          <div className="reviews-rating" role="radiogroup" aria-label={copy.reviewsFormRating}>
             {[1, 2, 3, 4, 5].map((star) => (
               <label key={star} data-checked={rating !== null && star <= rating}>
                 <input
@@ -397,14 +398,14 @@ export function RestaurantReviewFormDialog({
             ))}
           </div>
           {errors.rating !== undefined ? (
-            <p role="alert" className="rv-field-error">
+            <p role="alert" className="reviews-field-error">
               {errors.rating}
             </p>
           ) : null}
         </fieldset>
 
-        <div className="rv-field">
-          <label htmlFor="customer-review-body">Your review</label>
+        <div className="reviews-field">
+          <label htmlFor="customer-review-body">{copy.reviewsFormBody}</label>
           <textarea
             id="customer-review-body"
             value={body}
@@ -412,39 +413,41 @@ export function RestaurantReviewFormDialog({
             disabled={mutation.isPending}
             aria-invalid={errors.body !== undefined}
             aria-describedby="customer-review-count"
-            placeholder="What did you enjoy? What should others know?"
+            placeholder={copy.reviewsFormPlaceholder}
             onChange={(event) => {
               setBody(event.target.value);
             }}
           />
-          <p id="customer-review-count" className="rv-char-count" aria-live="polite">
-            {body.trim().length} / {CUSTOMER_REVIEW_BODY_MAX_LENGTH} characters
+          <p id="customer-review-count" className="reviews-char-count" aria-live="polite">
+            {copy.reviewsFormCharCount
+              .replace("{count}", String(body.trim().length))
+              .replace("{max}", String(CUSTOMER_REVIEW_BODY_MAX_LENGTH))}
           </p>
           {errors.body !== undefined ? (
-            <p role="alert" className="rv-field-error">
+            <p role="alert" className="reviews-field-error">
               {errors.body}
             </p>
           ) : null}
         </div>
 
         {serverMessage !== null ? (
-          <p role="alert" className="rv-error">
+          <p role="alert" className="reviews-error">
             {serverMessage}
           </p>
         ) : null}
 
-        <div className="rv-dialog-foot">
+        <div className="reviews-dialog-foot">
           <button
             type="button"
-            className="rv-ghost"
+            className="reviews-ghost"
             disabled={mutation.isPending}
             onClick={() => close(false)}
           >
-            Cancel
+            {copy.reviewsFormCancel}
           </button>
           <button
             type="button"
-            className="rv-primary"
+            className="reviews-primary"
             disabled={mutation.isPending}
             aria-busy={mutation.isPending}
             onClick={submit}
@@ -459,21 +462,21 @@ export function RestaurantReviewFormDialog({
   return (
     <Dialog.Root open={open} onOpenChange={close} modal>
       <Dialog.Portal>
-        <Dialog.Overlay className="rv-dialog-overlay" />
+        <Dialog.Overlay className="reviews-dialog-overlay" />
         <Dialog.Content
-          className="rv-dialog"
+          className="reviews-dialog"
           aria-describedby={undefined}
           // Custom opener restore (effect above) owns focus return: Radix
           // would otherwise restore to whatever it tracked, not the opener.
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
-          <div className="rv-dialog-head">
-            <Dialog.Title className="rv-dialog-title">{title}</Dialog.Title>
+          <div className="reviews-dialog-head">
+            <Dialog.Title className="reviews-dialog-title">{title}</Dialog.Title>
             <Dialog.Close asChild>
               <button
                 type="button"
                 aria-label={`Close ${title}`}
-                className="rv-icon-btn"
+                className="reviews-icon-btn"
                 disabled={mutation.isPending}
               >
                 <X aria-hidden="true" />

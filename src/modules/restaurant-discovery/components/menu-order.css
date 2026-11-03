@@ -649,3 +649,137 @@
     transition: none;
   }
 }
+
+/* Post-analysis results screen (ScanResults): friendly header, photo
+ * verification strip, subdued corrections, collapsed technical metadata.
+ * Reuses .menu-order-item/.menu-order-primary geometry; only layout new. */
+
+.scan-results {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+
+.scan-results-head h1 {
+  margin-block: 0 0.25rem;
+}
+
+.scan-results-head p {
+  margin-block: 0.25rem;
+  line-height: 1.5;
+}
+
+.scan-results-expiry,
+.scan-results-diet,
+.scan-results-price-note {
+  max-width: 65ch;
+  line-height: 1.6;
+}
+
+.scan-results-price-note {
+  border-inline-start: 0.25rem solid var(--color-food-orange-strong);
+  padding-inline-start: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.scan-results-photos {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: white;
+}
+
+.scan-results-photos h2 {
+  margin-block: 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 750;
+}
+
+.scan-results-photos p {
+  margin-block: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.scan-results-photos ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scan-results-photos a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  color: var(--color-brand-blue-hover);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+/* Subdued per-dish correction affordance: link-like, never shouts. */
+.menu-results-edit {
+  min-height: 2.75rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-brand-blue-hover);
+  font: inherit;
+  font-size: 0.875rem;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+  justify-self: start;
+}
+
+.scan-results-corrections,
+.scan-results-meta {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.5rem;
+  padding: 0.25rem 1rem 1rem;
+  background: white;
+}
+
+.scan-results-corrections > summary,
+.scan-results-meta > summary {
+  min-height: 2.75rem;
+  padding-block: 0.75rem;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.scan-results-meta dl {
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 0.5rem 0;
+  font-size: 0.875rem;
+}
+
+.scan-results-meta dl > div {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.scan-results-meta dt {
+  font-weight: 650;
+}
+
+.scan-results-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.scan-results-meta dd ul {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+}
+
+.scan-results-error {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+}

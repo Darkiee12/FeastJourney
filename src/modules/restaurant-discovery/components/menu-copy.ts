@@ -103,6 +103,9 @@ const english = {
     "No reviewed Hinglish text for these dishes yet — showing English. Original names are preserved below.",
   rememberMenuLanguage: "Remember language",
   helpAddMenu: "Help add this menu",
+  tentativeMatch: "Tentative match — confirm with the venue",
+  compareNearbyPrices: "Compare nearby prices",
+  researchPublicPrices: "Research public prices",
 };
 
 const vietnamese: typeof english = {
@@ -209,6 +212,9 @@ const vietnamese: typeof english = {
     "Chưa có bản Hinglish đã duyệt cho các món này — đang hiện tiếng Anh. Tên gốc được giữ nguyên bên dưới.",
   rememberMenuLanguage: "Nhớ ngôn ngữ",
   helpAddMenu: "Giúp thêm thực đơn này",
+  tentativeMatch: "Món khớp gợi ý — hãy xác nhận với quán",
+  compareNearbyPrices: "So sánh giá lân cận",
+  researchPublicPrices: "Tra cứu giá công khai",
 };
 
 const menuTranslations: ReadonlyMap<string, typeof english> = new Map([
@@ -257,6 +263,39 @@ const scanPageEnglish = {
     "Check the highlighted fields and photo limits, then correct them before retrying.",
   failureConflict: "The menu changed. Reload its status before trying again.",
   failureAuth: "Sign in again, then retry.",
+  researchTitle: "Compare nearby prices",
+  researchHint:
+    "Pick a scanned dish, add the city and country, then research publicly listed prices. Only dish names and text are used — photos never leave this scan.",
+  researchDish: "Scanned dish",
+  researchCity: "City",
+  researchCountry: "Country",
+  researchCityPlaceholder: "e.g. Hanoi",
+  researchCountryPlaceholder: "e.g. Vietnam",
+  researchCurrency: "Price currency (ISO code)",
+  researchTrigger: "Research public prices",
+  researchLoading: "Researching publicly listed prices…",
+  researchRetry: "Retry research",
+  researchResultsTitle: "Publicly listed prices",
+  researchNotVerified:
+    "Not verified. These listings come from public web sources, not reviewed FeastJourney observations, and are never merged into reviewed prices.",
+  researchMemoryNote: "Findings stay on this page only, kept in memory for future curator review.",
+  researchUnavailable:
+    "Public price research is unavailable right now. Reviewed menu prices above are unaffected.",
+  researchNeedsDish: "Select a scanned dish to research.",
+  researchNeedsPlace: "Enter both a city and a country to research.",
+  researchNeedsCurrency: "Enter a valid ISO currency code (e.g. VND).",
+  researchEmpty: "No publicly listed prices were found for this dish and place.",
+  researchComparableNote:
+    "Not enough comparable observations for a price range — listings below are shown as-is.",
+  researchRange: "Comparable range",
+  researchMedian: "Median",
+  researchCount: "comparable listings",
+  researchMismatchPortion: "Different portion — not directly comparable",
+  researchMismatchChannel: "Different sales channel — not directly comparable",
+  researchMismatchCurrency: "Different currency — converted for display only",
+  researchEvidenceUnavailable: "Price unavailable",
+  researchComparability:
+    "Public listings may mix portions or sales channels — takeaway vs dine-in and large vs small are never directly comparable. Confirm portion and channel per listing before comparing.",
 };
 
 const scanPageVietnamese: typeof scanPageEnglish = {
@@ -278,8 +317,104 @@ const scanPageVietnamese: typeof scanPageEnglish = {
     "Kiểm tra các trường được đánh dấu và giới hạn ảnh, rồi sửa trước khi thử lại.",
   failureConflict: "Thực đơn đã thay đổi. Tải lại trạng thái trước khi thử lại.",
   failureAuth: "Đăng nhập lại, rồi thử lại.",
+  researchTitle: "So sánh giá lân cận",
+  researchHint:
+    "Chọn một món đã quét, nhập thành phố và quốc gia, rồi tra cứu giá niêm yết công khai. Chỉ dùng tên món và chữ — ảnh không bao giờ rời khỏi bản quét này.",
+  researchDish: "Món đã quét",
+  researchCity: "Thành phố",
+  researchCountry: "Quốc gia",
+  researchCityPlaceholder: "ví dụ: Hà Nội",
+  researchCountryPlaceholder: "ví dụ: Việt Nam",
+  researchCurrency: "Tiền tệ giá (mã ISO)",
+  researchTrigger: "Tra cứu giá công khai",
+  researchLoading: "Đang tra cứu giá niêm yết công khai…",
+  researchRetry: "Thử tra cứu lại",
+  researchResultsTitle: "Giá niêm yết công khai",
+  researchNotVerified:
+    "Chưa xác minh. Các giá này đến từ nguồn web công khai, không phải quan sát đã duyệt của FeastJourney, và không bao giờ được gộp vào giá đã duyệt.",
+  researchMemoryNote:
+    "Kết quả chỉ nằm trên trang này, được giữ trong bộ nhớ để người duyệt xem xét sau.",
+  researchUnavailable:
+    "Tra cứu giá công khai hiện không khả dụng. Giá thực đơn đã duyệt ở trên không bị ảnh hưởng.",
+  researchNeedsDish: "Chọn một món đã quét để tra cứu.",
+  researchNeedsPlace: "Nhập cả thành phố và quốc gia để tra cứu.",
+  researchNeedsCurrency: "Nhập mã tiền tệ ISO hợp lệ (ví dụ: VND).",
+  researchEmpty: "Không tìm thấy giá niêm yết công khai cho món và địa điểm này.",
+  researchComparableNote:
+    "Chưa đủ quan sát tương đồng để đưa ra khoảng giá — các giá dưới đây hiển thị nguyên trạng.",
+  researchRange: "Khoảng giá tương đồng",
+  researchMedian: "Trung vị",
+  researchCount: "giá tương đồng",
+  researchMismatchPortion: "Khẩu phần khác — không so sánh trực tiếp được",
+  researchMismatchChannel: "Kênh bán khác — không so sánh trực tiếp được",
+  researchMismatchCurrency: "Tiền tệ khác — chỉ quy đổi để hiển thị",
+  researchEvidenceUnavailable: "Chưa rõ giá",
+  researchComparability:
+    "Giá công khai có thể lẫn lộn khẩu phần hoặc kênh bán — mang đi so với ăn tại chỗ, cỡ lớn so với cỡ nhỏ không bao giờ so sánh trực tiếp được. Hãy xác nhận khẩu phần và kênh bán của từng giá trước khi so sánh.",
 };
 
 /** New scan-page UI states only; existing menu copy above is untouched. */
 export const menuScanPageCopy = (locale: string): typeof scanPageEnglish =>
   locale === "vi" ? scanPageVietnamese : scanPageEnglish;
+
+const scanResultsEnglish = {
+  ready: "Your menu is ready ✨",
+  subtitle: "Choose what you'd like to order.",
+  atVenue: "At {name}",
+  loading: "Reading your menu…",
+  notReady: "This menu is still being read. Reload to check again.",
+  failed: "This menu could not be loaded. Check your connection and retry.",
+  retry: "Retry",
+  originalMenu: "Original menu",
+  originalMenuHelp: "Check translation against the printed photos.",
+  originalPage: "Page {n}",
+  editDish: "Edit a dish",
+  corrections: "Check or fix a dish",
+  correctionsHelp: "Fixes stay private and unverified. Save a revision to keep them.",
+  saveFixes: "Save fixes",
+  saved: "Fixes saved.",
+  unsavedChanges: "You have unsaved fixes.",
+  priceUnclear: "Some prices are not clear — confirm the total with the waiter.",
+  expiresTomorrow: "Private scan. Expires tomorrow.",
+  expiresLabel: "Private scan expires",
+  techDetails: "Scan details",
+  metaScan: "Scan",
+  metaRevision: "Revision",
+  metaModel: "Model",
+  metaPhotos: "Photos",
+  dietNote:
+    "Ingredient notes are interpretations, not allergy assurances. Confirm dietary needs with the waiter.",
+};
+
+const scanResultsVietnamese: typeof scanResultsEnglish = {
+  ready: "Thực đơn của bạn đã sẵn sàng ✨",
+  subtitle: "Chọn món bạn muốn gọi.",
+  atVenue: "Tại {name}",
+  loading: "Đang đọc thực đơn…",
+  notReady: "Thực đơn vẫn đang được đọc. Tải lại để kiểm tra.",
+  failed: "Không tải được thực đơn. Kiểm tra kết nối và thử lại.",
+  retry: "Thử lại",
+  originalMenu: "Thực đơn gốc",
+  originalMenuHelp: "Đối chiếu bản dịch với ảnh đã chụp.",
+  originalPage: "Trang {n}",
+  editDish: "Sửa món",
+  corrections: "Kiểm tra hoặc sửa món",
+  correctionsHelp: "Bản sửa vẫn riêng tư và chưa xác minh. Lưu phiên bản để giữ thay đổi.",
+  saveFixes: "Lưu bản sửa",
+  saved: "Đã lưu bản sửa.",
+  unsavedChanges: "Bạn có bản sửa chưa lưu.",
+  priceUnclear: "Một số giá chưa rõ — hãy xác nhận tổng tiền với nhân viên.",
+  expiresTomorrow: "Bản quét riêng tư. Hết hạn vào ngày mai.",
+  expiresLabel: "Bản quét riêng tư hết hạn",
+  techDetails: "Chi tiết bản quét",
+  metaScan: "Bản quét",
+  metaRevision: "Phiên bản",
+  metaModel: "Mô hình",
+  metaPhotos: "Ảnh",
+  dietNote:
+    "Ghi chú thành phần chỉ là diễn giải, không bảo đảm dị ứng. Hãy xác nhận nhu cầu ăn uống với nhân viên.",
+};
+
+/** Post-analysis results screen only; existing menu and scan-page copy above is untouched. */
+export const menuScanResultsCopy = (locale: string): typeof scanResultsEnglish =>
+  locale === "vi" ? scanResultsVietnamese : scanResultsEnglish;
