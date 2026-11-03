@@ -1,5 +1,16 @@
 @import "tailwindcss" source("./");
 @import "tw-animate-css";
+@import "maplibre-gl/dist/maplibre-gl.css";
+@import "./modules/restaurant-discovery/components/menu-order.css";
+@import "./modules/restaurant-discovery/components/restaurant-search.css";
+@import "./modules/restaurant-discovery/components/restaurant-filters.css";
+@import "./modules/restaurant-discovery/components/mapapp.css";
+@import "./modules/restaurant-discovery/components/venue-overview.css";
+@import "./modules/restaurant-discovery/components/restaurant-menu.css";
+@import "./modules/restaurant-discovery/components/restaurant-reviews.css";
+@import "./modules/restaurant-discovery/components/restaurant-review-moderation.css";
+@import "./modules/restaurant-discovery/components/menu-scan-page.css";
+@import "./modules/restaurant-discovery/components/restaurant-photo-manager.css";
 
 @theme {
   --color-brand-blue: #2563eb;
@@ -321,4 +332,37 @@ body[data-scroll-locked]:has([role="listbox"], [role="menu"]):not(:has([role="di
   overflow-x: clip !important;
   overflow-y: visible !important;
   margin-right: 0 !important;
+}
+
+/* Fullscreen restaurant map-app shell (PR13): the /restaurants route breaks
+   out of the centered page column (like .home) and fills the viewport
+   below the site header with no document scrolling. MapLibre control
+   tweaks stay namespaced under .mapapp-mapwrap. */
+@layer components {
+  /* Full-screen map application layout. The route breaks out of the
+     centered page column (like .home) and fills the remaining viewport
+     below the site header with no document scrolling. */
+  main:has(> .mapapp) {
+    max-width: none;
+    margin-inline: 0;
+    padding: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  /* App mode: pin the shell to the viewport so the map owns it with no
+     document scrolling. dvh tracks mobile browser chrome; the vh line
+     is a fallback for older browsers. */
+  .flex:has(> main > .mapapp) {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+  .flex:has(> main > .mapapp) > .site-footer {
+    display: none;
+  }
+  .mapapp-mapwrap .maplibregl-ctrl-top-right {
+    top: 0.75rem;
+  }
 }

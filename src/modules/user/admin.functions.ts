@@ -124,6 +124,7 @@ export type AdminCapabilities = {
   readonly dishes: boolean;
   readonly imports: boolean;
   readonly reviews: boolean;
+  readonly restaurants: boolean;
   readonly members: boolean;
   readonly roles: boolean;
 };
@@ -135,6 +136,7 @@ export const NO_ADMIN_CAPABILITIES: AdminCapabilities = {
   members: false,
   overview: false,
   reviews: false,
+  restaurants: false,
   roles: false,
 };
 
@@ -180,21 +182,23 @@ export const adminCapabilitiesFn = createServerFn({ method: "GET" }).handler(asy
         { concurrency: 2 },
       ).pipe(effects.Effect.map(([listed, surfaced]) => listed && surfaced));
 
-      const [admin, overview, dishes, imports, reviews, members, roles] = yield* effects.Effect.all(
-        [
-          sectionAllowed("admin", ["access"]),
-          sectionAllowed("food", ["read"]),
-          sectionAllowed("food", ["read"]),
-          sectionAllowed("food", ["import"]),
-          sectionAllowed("moderation", ["read"]),
-          membersAllowed,
-          sectionAllowed("role", ["read"]),
-        ],
-        { concurrency: "unbounded" },
-      );
+      const [admin, overview, dishes, imports, reviews, members, roles, restaurants] =
+        yield* effects.Effect.all(
+          [
+            sectionAllowed("admin", ["access"]),
+            sectionAllowed("food", ["read"]),
+            sectionAllowed("food", ["read"]),
+            sectionAllowed("food", ["import"]),
+            sectionAllowed("moderation", ["read"]),
+            membersAllowed,
+            sectionAllowed("role", ["read"]),
+            sectionAllowed("restaurant", ["manage"]),
+          ],
+          { concurrency: "unbounded" },
+        );
 
       return {
-        capabilities: { admin, dishes, imports, members, overview, reviews, roles },
+        capabilities: { admin, dishes, imports, members, overview, reviews, roles, restaurants },
       };
     }),
     "fn/admin/capabilities",

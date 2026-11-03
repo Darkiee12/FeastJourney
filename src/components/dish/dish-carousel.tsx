@@ -1,21 +1,21 @@
-import { Link } from "@tanstack/react-router";
-import { ArrowUpRightIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type TouchEvent as ReactTouchEvent,
 } from "react";
 
+import { DishActions } from "@/components/dish/dish-actions";
 import { DishMedia } from "@/components/dish/dish-media";
 import { usePrefersReducedMotion } from "@/components/home/globe/use-prefers-reduced-motion";
 import type { DishCardImage, DishSummary } from "@/modules/food-discovery/server/domain/dish";
 import type { PublishedDishImage } from "@/modules/food-discovery/server/operations/dish-media-service";
 import type { CarouselCard } from "@/modules/food-discovery/server/operations/dish-service";
 import {
-  SaveDishButton,
   statusForDish,
   type FavoriteStatusQuery,
 } from "@/modules/user/components/save-dish-button";
@@ -32,6 +32,33 @@ export type DishCarouselItem = CarouselCard | DishSummary;
 
 /** Default autoplay cadence; discovery passes `autoplay` without a value. */
 export const DISH_CAROUSEL_AUTOPLAY_MS = 6000;
+
+/**
+ * Stable media/stage geometry tokens (PR13 media slice). Mobile frames the
+ * photo at a bounded height so intrinsic image size can never resize the
+ * slide; desktop pins the whole slide to a stable stage height (capped
+ * against short viewports at the call site) while long text scrolls
+ * inside. Applied as custom properties on the carousel section; every
+ * `var()` use carries the literal as fallback so geometry holds even if
+ * the section style is lost.
+ */
+export const DISH_FEATURE_MEDIA_MOBILE = "clamp(180px, 48vw, 240px)";
+export const DISH_FEATURE_STAGE_DESKTOP = "clamp(330px, 34vw, 410px)";
+
+/**
+ * Custom-property geometry for the carousel section. React.CSSProperties
+ * carries no index for `--*` tokens; this structural extension keeps the
+ * style prop fully typed with no assertion at any call site.
+ */
+export interface DishCarouselGeometryStyle extends CSSProperties {
+  readonly "--dish-feature-media-mobile": string;
+  readonly "--dish-feature-stage-desktop": string;
+}
+
+export const DISH_CAROUSEL_GEOMETRY: DishCarouselGeometryStyle = {
+  "--dish-feature-media-mobile": DISH_FEATURE_MEDIA_MOBILE,
+  "--dish-feature-stage-desktop": DISH_FEATURE_STAGE_DESKTOP,
+};
 
 const SWIPE_THRESHOLD_PX = 48;
 const INGREDIENT_PREVIEW_COUNT = 6;
@@ -168,17 +195,31 @@ export interface DishCarouselProps {
    * and keyboard handling are identical in both.
    */
   readonly layout?: "full" | "compact" | undefined;
+  /**
+   * Optional per-render reason/explanation node (the active dish's Muse
+   * reason). Rendered as a full-width top strip INSIDE every card —
+   * above the image and details, sharing the card border — with a
+   * reserved height (fixed on desktop, three-line clamp on mobile), so
+   * reason length never resizes the slide or stage across slide changes.
+   * Omit when unavailable: no empty strip is reserved, so deterministic
+   * and degraded results render no Muse container at all.
+   */
+  readonly reason?: ReactNode | undefined;
 }
 
 /**
  * Shared featured-slide dish carousel: one large image+info slide at a
- * time (stacked on mobile, side-by-side on desktop), prev/next + windowed
- * dots + compact dish counter, arrow-key and touch-swipe navigation,
- * autoplay that pauses on hover/focus/off-screen/hidden-tab and never runs
- * under reduced motion, and inert+hidden inactive slides so keyboard focus
- * never lands off-screen. Richer "Slide X of Y" phrasing lives only in the
- * sr-only live region and slide labels. Recommendation-specific content
- * (AI note, summary, warnings) stays with the caller, outside this component.
+ * time (bounded-height frame on mobile, side-by-side on desktop with a
+ * stable stage height), prev/next arrows, arrow-key and touch-swipe
+ * navigation, autoplay that pauses on hidden tabs and never runs under
+ * reduced motion, and inert+hidden inactive slides so keyboard focus
+ * never lands off-screen. Media frames reserve geometry up front and
+ * fill with object-cover, so intrinsic image size, missing photos, and
+ * skeletons share the same footprint. Actions ride one shared
+ * `DishActions` row (Explore, Save, Find restaurants) with identical
+ * order, icons, and targets in both layouts. Recommendation-specific
+ * content (AI note, summary, warnings) stays with the caller, outside
+ * this component, except for the reserved top-strip `reason` slot.
  */
 export function DishCarousel({
   activeIndex,
@@ -192,6 +233,7 @@ export function DishCarousel({
   layout = "full",
   onIndexChange,
   onSaveSheetOpenChange,
+  reason,
   resetKey,
   session,
 }: DishCarouselProps): ReactNode {
@@ -330,7 +372,7 @@ export function DishCarousel({
     const activeDish = items[safeIndex];
 
     return (
-      <section aria-roledescription="carousel" aria-label={label}>
+      <section aria-roledescription="carousel" aria-label={label} style={DISH_CAROUSEL_GEOMETRY}>
         <output aria-live="polite" className="sr-only">
           {announcement}
         </output>
@@ -351,7 +393,7 @@ export function DishCarousel({
                 aria-label={copy.carouselPrev}
                 className="inline-flex min-h-10 min-w-10 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-2 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
               >
-                ←
+                <ChevronLeftIcon aria-hidden="true" className="size-4 flex-none" />
               </button>
               <button
                 type="button"
@@ -362,7 +404,7 @@ export function DishCarousel({
                 aria-label={copy.carouselNext}
                 className="inline-flex min-h-10 min-w-10 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-2 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
               >
-                →
+                <ChevronRightIcon aria-hidden="true" className="size-4 flex-none" />
               </button>
             </>
           ) : null}
@@ -399,9 +441,14 @@ export function DishCarousel({
                   inert={shown ? undefined : true}
                   className="w-full flex-none overflow-hidden rounded-2xl border border-border-soft bg-white p-2.5 shadow-[0_12px_28px_rgba(194,65,12,0.08)]"
                 >
+                  {reason !== undefined ? (
+                    <div className="mb-2 max-h-44 min-h-[5.5rem] overflow-y-auto rounded-xl bg-cream/60 px-3 py-2.5">
+                      {reason}
+                    </div>
+                  ) : null}
                   <div className="flex gap-3">
                     <div
-                      className="relative min-h-28 w-28 flex-none self-stretch overflow-hidden rounded-xl bg-cream min-[400px]:w-32 max-[359px]:w-24"
+                      className="relative h-28 w-28 flex-none overflow-hidden rounded-xl bg-cream min-[400px]:h-32 min-[400px]:w-32 max-[359px]:h-24 max-[359px]:w-24"
                       title={dish.image?.attribution ?? undefined}
                     >
                       <DishMedia
@@ -414,32 +461,21 @@ export function DishCarousel({
                       />
                     </div>
                     <div className="flex min-w-0 flex-1 flex-col gap-1 py-0.5">
-                      <div className="flex min-w-0 flex-wrap items-start justify-end gap-2">
+                      <div className="flex min-w-0 flex-nowrap items-start justify-end gap-2">
                         <h3 className="font-display min-w-0 flex-1 basis-24 text-[1.35rem] leading-tight tracking-wide text-balance break-words">
                           {title}
                         </h3>
-                        <div className="flex flex-none items-center gap-1.5">
-                          <Link
-                            to="/dishes/$dishId"
-                            params={{ dishId: dish.slug }}
-                            search={{ lang }}
-                            tabIndex={shown ? undefined : -1}
-                            aria-label={copy.recExploreShort}
-                            title={copy.recExploreShort}
-                            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full bg-food-orange-strong text-white transition hover:bg-food-orange-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
-                          >
-                            <ArrowUpRightIcon aria-hidden="true" className="size-4 flex-none" />
-                          </Link>
-                          <SaveDishButton
-                            compact
-                            dishId={dish.id}
-                            onSaveSheetOpenChange={onSaveSheetOpenChange}
-                            lang={lang}
-                            returnTo="/"
-                            session={session}
-                            status={statusForDish(favoriteStatus, dish.id)}
-                          />
-                        </div>
+                        <DishActions
+                          copy={copy}
+                          dishId={dish.id}
+                          dishSlug={dish.slug}
+                          lang={lang}
+                          onSaveSheetOpenChange={onSaveSheetOpenChange}
+                          returnTo="/"
+                          session={session}
+                          status={statusForDish(favoriteStatus, dish.id)}
+                          tabIndex={shown ? undefined : -1}
+                        />
                       </div>
                       {dish.nativeName !== undefined ? (
                         <p
@@ -471,7 +507,7 @@ export function DishCarousel({
   }
 
   return (
-    <section aria-roledescription="carousel" aria-label={label}>
+    <section aria-roledescription="carousel" aria-label={label} style={DISH_CAROUSEL_GEOMETRY}>
       <output aria-live="polite" className="sr-only">
         {announcement}
       </output>
@@ -503,10 +539,15 @@ export function DishCarousel({
                 aria-label={`${copy.carouselSlide} ${slide + 1} ${copy.carouselOf} ${total}`}
                 aria-hidden={shown ? undefined : true}
                 inert={shown ? undefined : true}
-                className="grid w-full flex-none gap-0 overflow-hidden rounded-3xl border border-border-soft bg-white shadow-[0_12px_28px_rgba(194,65,12,0.08)] md:grid-cols-[45%_55%]"
+                className="grid w-full flex-none gap-0 overflow-hidden rounded-3xl border border-border-soft bg-white shadow-[0_12px_28px_rgba(194,65,12,0.08)] md:h-[var(--dish-feature-stage-desktop,clamp(330px,34vw,410px))] md:max-h-[calc(100svh-8rem)] md:grid-cols-[45%_55%] md:grid-rows-[auto_minmax(0,1fr)]"
               >
+                {reason !== undefined ? (
+                  <div className="max-h-44 overflow-y-auto border-b border-border-soft bg-cream/60 px-6 py-3 sm:px-8 md:col-span-2 md:h-32 md:max-h-none">
+                    {reason}
+                  </div>
+                ) : null}
                 <div
-                  className="relative aspect-[4/3] w-full overflow-hidden bg-gradient-to-br from-food-orange-strong via-food-orange to-mango md:aspect-auto md:min-h-[22rem]"
+                  className="relative h-[var(--dish-feature-media-mobile,clamp(180px,48vw,240px))] w-full overflow-hidden bg-gradient-to-br from-food-orange-strong via-food-orange to-mango md:h-full md:min-h-0"
                   title={dish.image?.attribution ?? undefined}
                 >
                   <DishMedia
@@ -518,7 +559,7 @@ export function DishCarousel({
                     className="absolute inset-0 h-full w-full"
                   />
                 </div>
-                <div className="flex min-w-0 flex-1 flex-col gap-2 p-6 sm:p-8">
+                <div className="flex min-w-0 flex-1 flex-col gap-2 p-6 sm:p-8 md:min-h-0 md:overflow-hidden">
                   {dish.regionNames.length > 0 ? (
                     <p className="text-xs font-bold tracking-[0.18em] text-food-orange-strong uppercase">
                       {dish.regionNames.slice(0, 2).join(" · ")}
@@ -532,45 +573,41 @@ export function DishCarousel({
                       {dish.nativeName}
                     </p>
                   ) : null}
-                  {description !== null ? (
-                    <p
-                      lang={descriptionLanguage}
-                      className="mt-1 line-clamp-4 text-[0.95rem] leading-relaxed text-ink"
-                    >
-                      {description}
-                    </p>
-                  ) : (
-                    <p className="mt-1 text-sm text-muted italic">{copy.carouselNoDescription}</p>
-                  )}
-                  {ingredientNames.length > 0 ? (
-                    <div className="mt-1">
-                      <p className="text-xs font-bold tracking-[0.18em] text-muted uppercase">
-                        {copy.carouselIngredients}
+                  <div className="mt-1 min-h-0 md:flex-1 md:overflow-y-auto md:overscroll-contain">
+                    {description !== null ? (
+                      <p
+                        lang={descriptionLanguage}
+                        className="line-clamp-4 text-[0.95rem] leading-relaxed text-ink"
+                      >
+                        {description}
                       </p>
-                      <p className="mt-1 text-sm font-semibold text-ink">
-                        {ingredientNames.join(" · ")}
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="mt-1 text-sm text-muted italic">{copy.carouselNoIngredients}</p>
-                  )}
-                  <div className="mt-auto flex flex-wrap items-center gap-3 pt-4">
-                    <Link
-                      to="/dishes/$dishId"
-                      params={{ dishId: dish.slug }}
-                      search={{ lang }}
-                      tabIndex={shown ? undefined : -1}
-                      className="inline-flex min-h-11 items-center rounded-full bg-food-orange-strong px-6 text-sm font-bold text-white transition hover:bg-food-orange-dark"
-                    >
-                      {copy.carouselExploreDish} →
-                    </Link>
-                    <SaveDishButton
+                    ) : (
+                      <p className="text-sm text-muted italic">{copy.carouselNoDescription}</p>
+                    )}
+                    {ingredientNames.length > 0 ? (
+                      <div className="mt-1">
+                        <p className="text-xs font-bold tracking-[0.18em] text-muted uppercase">
+                          {copy.carouselIngredients}
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-ink">
+                          {ingredientNames.join(" · ")}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-sm text-muted italic">{copy.carouselNoIngredients}</p>
+                    )}
+                  </div>
+                  <div className="mt-auto flex-none pt-4">
+                    <DishActions
+                      copy={copy}
                       dishId={dish.id}
+                      dishSlug={dish.slug}
                       lang={lang}
                       onSaveSheetOpenChange={onSaveSheetOpenChange}
                       returnTo="/"
                       session={session}
                       status={statusForDish(favoriteStatus, dish.id)}
+                      tabIndex={shown ? undefined : -1}
                     />
                   </div>
                 </div>
@@ -590,7 +627,7 @@ export function DishCarousel({
             aria-label={copy.carouselPrev}
             className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-3 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
           >
-            ←
+            <ChevronLeftIcon aria-hidden="true" className="size-4 flex-none" />
           </button>
           <button
             type="button"
@@ -601,7 +638,7 @@ export function DishCarousel({
             aria-label={copy.carouselNext}
             className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-3 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
           >
-            →
+            <ChevronRightIcon aria-hidden="true" className="size-4 flex-none" />
           </button>
           {/* No dots, counter, progress bar, or pause control by design:
               two arrows are the entire visible navigation. Screen-reader
@@ -614,13 +651,13 @@ export function DishCarousel({
 
 /**
  * Compact loading skeleton mirroring the compact drawer card footprint:
- * fixed thumbnail block plus text lines and action pills at the same
+ * fixed thumbnail block plus text lines and action circles at the same
  * padding, so content resolves without layout shift. Announced once via
  * the caller's loading region, not here.
  */
 export function DishCarouselCompactSkeleton(): ReactNode {
   return (
-    <div aria-hidden="true">
+    <div aria-hidden="true" style={DISH_CAROUSEL_GEOMETRY}>
       <div className="mb-2 flex items-center gap-2">
         <div className="h-2.5 min-w-0 flex-1 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
         <div className="h-10 w-10 flex-none animate-pulse rounded-full bg-border-soft motion-reduce:animate-none" />
@@ -628,10 +665,11 @@ export function DishCarouselCompactSkeleton(): ReactNode {
       </div>
       <div className="w-full overflow-hidden rounded-2xl border border-border-soft bg-white p-3">
         <div className="flex gap-3">
-          <div className="min-h-28 w-28 flex-none animate-pulse rounded-xl bg-border-soft motion-reduce:animate-none min-[400px]:w-32" />
+          <div className="h-28 w-28 flex-none animate-pulse rounded-xl bg-border-soft motion-reduce:animate-none min-[400px]:h-32 min-[400px]:w-32 max-[359px]:h-24 max-[359px]:w-24" />
           <div className="flex min-w-0 flex-1 flex-col gap-2 py-0.5" aria-hidden="true">
-            <div className="flex min-w-0 items-start gap-2">
+            <div className="flex min-w-0 flex-nowrap items-start gap-2">
               <div className="h-6 min-w-0 flex-1 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
+              <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
               <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
               <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
             </div>
@@ -645,26 +683,32 @@ export function DishCarouselCompactSkeleton(): ReactNode {
 }
 
 /**
- * Loading skeleton mirroring the featured-slide layout: fixed-aspect media
- * block plus text lines at the same padding, so content resolves without
- * layout shift. Announced once via the caller's loading region, not here.
+ * Loading skeleton mirroring the featured-slide layout: bounded-height
+ * media frame plus text lines at the same padding, so content resolves
+ * without layout shift. Announced once via the caller's loading region,
+ * not here.
  */
 export function DishCarouselSkeleton(): ReactNode {
   return (
     <div
       aria-hidden="true"
-      className="grid w-full gap-0 overflow-hidden rounded-3xl border border-border-soft bg-white md:grid-cols-[45%_55%]"
+      style={DISH_CAROUSEL_GEOMETRY}
+      className="grid w-full gap-0 overflow-hidden rounded-3xl border border-border-soft bg-white md:h-[var(--dish-feature-stage-desktop,clamp(330px,34vw,410px))] md:grid-cols-[45%_55%]"
     >
-      <div className="aspect-[4/3] w-full animate-pulse bg-border-soft motion-reduce:animate-none md:aspect-auto md:min-h-[22rem]" />
-      <div className="flex min-w-0 flex-1 flex-col gap-2 p-6 sm:p-8" aria-hidden="true">
+      <div className="h-[var(--dish-feature-media-mobile,clamp(180px,48vw,240px))] w-full animate-pulse bg-border-soft motion-reduce:animate-none md:h-full md:min-h-0" />
+      <div
+        className="flex min-w-0 flex-1 flex-col gap-2 p-6 sm:p-8 md:min-h-0 md:overflow-hidden"
+        aria-hidden="true"
+      >
         <div className="h-3 w-1/3 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
         <div className="h-10 w-3/4 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
         <div className="h-4 w-full animate-pulse rounded bg-cream motion-reduce:animate-none" />
         <div className="h-4 w-full animate-pulse rounded bg-cream motion-reduce:animate-none" />
         <div className="h-4 w-2/3 animate-pulse rounded bg-cream motion-reduce:animate-none" />
-        <div className="mt-auto flex gap-3 pt-4">
-          <div className="h-11 w-36 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
-          <div className="h-11 w-28 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+        <div className="mt-auto flex flex-none items-center gap-1.5 pt-4">
+          <div className="h-11 w-11 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+          <div className="h-11 w-11 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+          <div className="h-11 w-11 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
         </div>
       </div>
     </div>

@@ -958,6 +958,8 @@ const journeySnapshotSchema = z.object({
     .default(null),
   showResults: z.boolean().default(false),
   surpriseSeed: z.number().int().min(0).default(0),
+  /** Presentation state: selected carousel slide, restored on tab-back. */
+  railIndex: z.number().int().min(0).max(9).default(0),
 });
 
 export type JourneySnapshot = z.infer<typeof journeySnapshotSchema>;
@@ -1018,6 +1020,8 @@ export interface JourneyWriteModel {
   readonly submitted: RecommendPayload | null;
   readonly showResults: boolean;
   readonly surpriseSeed: number;
+  /** Presentation state: selected carousel slide (not quiz answers). */
+  readonly railIndex?: number | undefined;
 }
 
 /**
@@ -1050,6 +1054,7 @@ export const toCoarseSnapshot = (model: JourneyWriteModel): JourneySnapshot => {
       submitted: null,
       showResults: false,
       surpriseSeed: model.surpriseSeed,
+      railIndex: 0,
     };
   }
 
@@ -1065,6 +1070,7 @@ export const toCoarseSnapshot = (model: JourneyWriteModel): JourneySnapshot => {
       submitted: null,
       showResults: model.showResults,
       surpriseSeed: model.surpriseSeed,
+      railIndex: model.railIndex ?? 0,
     };
   }
 
@@ -1092,6 +1098,7 @@ export const toCoarseSnapshot = (model: JourneyWriteModel): JourneySnapshot => {
         : { ...submittedBase, location: submittedLocation },
     showResults: model.showResults,
     surpriseSeed: model.surpriseSeed,
+    railIndex: model.railIndex ?? 0,
   };
 };
 
@@ -1216,3 +1223,118 @@ export const persistPrefs = (input: {
 
   window.localStorage.setItem(PREFS_KEY, serializePrefs(prefs));
 };
+
+/**
+ * POST-but-read-oriented ranking cache: the recommendation POST has no
+ * side effects, so identical requests share one QueryClient entry instead
+ * of re-firing on every remount. Back-from-dish-detail restores the same
+ * list, selected slide (railIndex in the journey snapshot), and prefs with
+ * ZERO new Muse calls while the entry is fresh.
+ */
+
+/** QueryClient key root for ranked recommendation results. */
+export const DISH_RECOMMENDATIONS_KEY = "dish-recommendations";
+
+/** Contract version: bump when the ranking request shape changes. */
+export const RECOMMENDATION_CACHE_VERSION = 1;
+
+/** Fresh window: back-navigation within 5 minutes never refires. */
+export const RECOMMENDATION_CACHE_STALE_MS = 5 * 60_000;
+
+/** Bounded retention: entries older than 10 minutes are garbage-collected. */
+export const RECOMMENDATION_CACHE_GC_MS = 10 * 60_000;
+
+/**
+ * Canonical preference normalization for the cache key: lowercase,
+ * trimmed, deduplicated, and sorted, so "Pork, pork" and "pork" share one
+ * entry. Cosmetic typing differences never cause a second model call.
+ */
+export const normalizeCacheTerms = (terms: ReadonlyArray<string>): Array<string> => {
+  const seen = new Set<string>();
+
+  for (const term of terms) {
+    const normalized = term.trim().toLowerCase();
+
+    if (normalized !== "") {
+      seen.add(normalized);
+    }
+  }
+
+  return [...seen].toSorted();
+};
+
+/**
+ * Coarse geographic scope key. City identity is the canonical place id;
+ * country scopes are ISO codes; precise fixes round to 2 decimals (~1.1 km
+ * cells) so minor GPS jitter reuses the entry while a materially different
+ * location keys differently. No raw coordinates enter the key, and no
+ * precise location is ever persisted — this key lives in memory only.
+ */
+export const geographicScopeKeyFor = (payload: RecommendPayload): string => {
+  const location = payload.location;
+
+  if (location === undefined) {
+    return payload.country === undefined ? "world" : `country:${payload.country.toUpperCase()}`;
+  }
+
+  if (location.kind === "city") {
+    return `city:${location.placeId}`;
+  }
+
+  if (location.kind === "precise") {
+    return `nearby:${location.latitude.toFixed(2)},${location.longitude.toFixed(2)}`;
+  }
+
+  if (location.kind === "worldwide") {
+    return "world";
+  }
+
+  return `country:${location.country.toUpperCase()}`;
+};
+
+export interface RecommendationCacheKeyInput {
+  /** Per-user isolation: member id when signed in, "guest" otherwise. */
+  readonly userIdOrGuest: string;
+  readonly locale: string;
+  readonly meal: MealOccasion;
+  readonly mood: RecommendationMood;
+  readonly excludedIngredients: ReadonlyArray<string>;
+  readonly cuisine?: string | undefined;
+  readonly scopeKey: string;
+  readonly surpriseSeed: number;
+}
+
+/**
+ * Stable QueryClient key for one ranking request. Includes actor identity
+ * (per-user isolation), locale (locale change fetches once under the new
+ * key — never double-fires), normalized prefs, coarse geo scope, surprise
+ * seed, and the contract version (shape changes invalidate old entries).
+ */
+export const recommendationCacheKey = (
+  input: RecommendationCacheKeyInput,
+): ReadonlyArray<string | number | ReadonlyArray<string>> => [
+  DISH_RECOMMENDATIONS_KEY,
+  RECOMMENDATION_CACHE_VERSION,
+  input.userIdOrGuest,
+  input.locale,
+  input.meal,
+  input.mood,
+  normalizeCacheTerms(input.excludedIngredients),
+  input.cuisine ?? "",
+  input.scopeKey,
+  input.surpriseSeed,
+];
+
+/** Build the cache-key input for one submitted transport payload. */
+export const cacheKeyInputFor = (
+  payload: RecommendPayload,
+  userIdOrGuest: string,
+): RecommendationCacheKeyInput => ({
+  userIdOrGuest,
+  locale: payload.locale,
+  meal: payload.meal,
+  mood: payload.mood,
+  excludedIngredients: payload.excludedIngredients,
+  scopeKey: geographicScopeKeyFor(payload),
+  surpriseSeed: payload.surpriseSeed,
+});

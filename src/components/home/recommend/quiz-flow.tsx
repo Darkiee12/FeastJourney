@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
+import { Match } from "effect";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -16,7 +17,9 @@ import { useIsMaxMd } from "@/components/home/recommend/quiz-drawer";
 import {
   buildRecommendPayload,
   buildSurprisePayload,
+  cacheKeyInputFor,
   clearJourneySnapshot,
+  DISH_RECOMMENDATIONS_KEY,
   draftCountryMirror,
   draftLocation,
   EMPTY_DRAFT,
@@ -30,6 +33,9 @@ import {
   readInitialDraft,
   readJourneySnapshot,
   readStoredPrefs,
+  RECOMMENDATION_CACHE_GC_MS,
+  RECOMMENDATION_CACHE_STALE_MS,
+  recommendationCacheKey,
   regionOriginFor,
   removeSavedPrefs,
   resolvePersistedExclusions,
@@ -55,9 +61,11 @@ import {
 } from "@/components/home/recommend/quiz-stages";
 import {
   AiExplanationCard,
+  cleanReasonForDisplay,
   QuizError,
   rankingVariantFor,
   ResultWarnings,
+  SelectedDishReason,
 } from "@/components/home/recommend/quiz-status";
 import { RecommendationRail } from "@/components/home/recommend/recommendation-rail";
 import {
@@ -266,18 +274,50 @@ export function RecommendSection() {
       : (countryOptions.find((option) => option.code === detectedCountry)?.label ??
         detectedCountry);
 
-  const recommend = useMutation({
-    mutationKey: [
-      "quiz",
-      "recommend",
-      lang,
-      session.status === "signed-in" ? session.user.id : "guest",
-    ],
-    mutationFn: (payload: RecommendPayload) => recommendDishesFn({ data: payload }),
-  });
-
   const userId = session.status === "signed-in" ? session.user.id : null;
   const queryClient = useQueryClient();
+  const userIdOrGuest = userId ?? "guest";
+
+  /**
+   * POST-but-read-oriented ranking cache: the recommendation POST has no
+   * side effects, so one QueryClient entry per canonical request replaces
+   * the old remount-mutate. Back-from-dish-detail restores the same list
+   * with ZERO new Muse calls while fresh (5 min stale, 10 min bounded GC,
+   * no refetch on window focus, no remount duplicate). Explicit Refresh /
+   * Try-again refetch; prefs, identity, locale, scope, or seed changes key
+   * differently and fetch exactly once. Per-user isolation via the actor id
+   * in the key.
+   */
+  const submittedKey =
+    submitted !== null && showResults
+      ? recommendationCacheKey(cacheKeyInputFor(toTransportPayload(submitted), userIdOrGuest))
+      : null;
+
+  const resultsQuery = useQuery({
+    queryKey: submittedKey ?? [DISH_RECOMMENDATIONS_KEY, "idle", lang, userIdOrGuest],
+    queryFn: () => {
+      if (submitted === null) {
+        throw new Error("Recommendation query ran without a submitted payload");
+      }
+
+      return recommendDishesFn({ data: toTransportPayload(submitted) });
+    },
+    enabled: submittedKey !== null,
+    staleTime: RECOMMENDATION_CACHE_STALE_MS,
+    gcTime: RECOMMENDATION_CACHE_GC_MS,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  });
+
+  // Adapter preserving the outcome shape the render paths read: data is
+  // visible only while results are shown, so disabling the query on
+  // back-to-quiz can never flash a stale list.
+  const recommend = {
+    data: showResults ? (resultsQuery.data ?? null) : null,
+    isPending: submittedKey !== null && (resultsQuery.isPending || resultsQuery.isFetching),
+    isError: submittedKey !== null && resultsQuery.isError,
+    refetch: resultsQuery.refetch,
+  };
 
   /** Guest-storage mirror of persisted exclusions; guest submits write through here. Signed-in submits write the account instead and leave this copy independent for explicit import. */
   const [guestExclusions, setGuestExclusions] = useState<ReadonlyArray<string>>(
@@ -384,38 +424,13 @@ export function RecommendSection() {
     saveAccountPrefs(parseCommaList(draft.excludedRaw));
   };
 
-  const restoredRef = useRef(false);
   const previousLangRef = useRef(lang);
-
-  // Persist the in-progress journey in memory so dish detail visits (back
-  // navigation remounts this route) restore form, step, and results context.
-  // Coordinates never enter the cache: toCoarseSnapshot strips precise fixes
-  // and precise results before writing.
-  useEffect(() => {
-    writeJourneySnapshot(
-      toCoarseSnapshot({ meal, mood, draft, stepIndex, submitted, showResults, surpriseSeed }),
-    );
-  }, [meal, mood, draft, stepIndex, submitted, showResults, surpriseSeed]);
-
-  // On remount with a restored results flag, re-run the submitted search once
-  // so results reflect fresh catalog data instead of stale snapshots.
-  useEffect(() => {
-    if (restoredRef.current) {
-      return;
-    }
-
-    restoredRef.current = true;
-
-    if (journey?.showResults === true && journey.submitted !== null) {
-      recommend.mutate(toTransportPayload(journey.submitted));
-    }
-    // Mount-only restore: the mutation object is stable for this purpose.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Switching language while results are visible re-runs the submitted
   // search in the new locale instead of showing stale-language dishes. The
-  // lang guard keeps unrelated state updates from re-firing the search.
+  // relocalized payload keys a NEW cache entry, so exactly one fetch fires
+  // (never a remount-style duplicate); the lang guard keeps unrelated state
+  // updates from re-firing the search.
   useEffect(() => {
     if (previousLangRef.current === lang) {
       return;
@@ -425,9 +440,7 @@ export function RecommendSection() {
     setStepError(null);
 
     if (submitted !== null && showResults) {
-      const relocalized: RecommendPayload = { ...submitted, locale: lang };
-      setSubmitted(relocalized);
-      recommend.mutate(toTransportPayload(relocalized));
+      setSubmitted({ ...submitted, locale: lang });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lang, submitted, showResults]);
@@ -522,7 +535,9 @@ export function RecommendSection() {
 
   /**
    * Account transitions: a new sign-in re-arms the prefill and the import
-   * banner; a sign-out clears only the in-memory account prefs. Account
+   * banner; a sign-out clears the in-memory account prefs AND the member's
+   * cached recommendation entries (per-user isolation: the member key can
+   * never serve the guest, and prefs/identity changes invalidate). Account
    * values are never written to guest storage, and guest storage is never
    * cleared — the in-progress draft is preserved untouched.
    */
@@ -540,6 +555,7 @@ export function RecommendSection() {
 
     if (previous !== null && userId === null) {
       queryClient.removeQueries({ queryKey: ["user", "food-preferences"] });
+      queryClient.removeQueries({ queryKey: [DISH_RECOMMENDATIONS_KEY] });
     }
   }, [userId, queryClient]);
 
@@ -608,7 +624,8 @@ export function RecommendSection() {
     setSubmitted(payload);
     setStepError(null);
     setShowResults(true);
-    recommend.mutate(transport);
+    // The results query fetches on the new key (or serves the cache when
+    // this exact request already ran) — no manual mutate, no duplicate.
   };
 
   const currentPayload = (seed: number): RecommendPayload =>
@@ -764,7 +781,7 @@ export function RecommendSection() {
     setSubmitted(payload);
     setStepError(null);
     setShowResults(true);
-    recommend.mutate(toTransportPayload(payload));
+    // New seed keys a new cache entry: exactly one fetch per surprise tap.
   };
 
   /** Wipe saved preferences and reset the whole form; storage first. */
@@ -776,7 +793,6 @@ export function RecommendSection() {
     setGuestExclusions([]);
     clearJourneySnapshot();
 
-    recommend.reset();
     setDraft(EMPTY_DRAFT);
     setMeal("anything");
     setMood("any");
@@ -815,21 +831,20 @@ export function RecommendSection() {
     }
   };
 
+  /** Explicit refresh / Try-again: exactly one new request, on demand only. */
   const retry = (): void => {
     if (submitted === null) {
       return;
     }
 
-    recommend.mutate(toTransportPayload(submitted));
+    void recommend.refetch();
   };
 
   const backToQuiz = (): void => {
-    recommend.reset();
     setShowResults(false);
   };
 
   const editStep = (step: number): void => {
-    recommend.reset();
     setShowResults(false);
     setStepError(null);
     setStepIndex(step);
@@ -838,7 +853,6 @@ export function RecommendSection() {
   const startOver = (): void => {
     clearJourneySnapshot();
 
-    recommend.reset();
     setDraft(EMPTY_DRAFT);
     setMeal("anything");
     setMood("any");
@@ -909,13 +923,34 @@ export function RecommendSection() {
   // Shared carousel + rail index. Reset on a new result set via the
   // render-adjust pattern (no set-state-in-effect): the carousel also
   // receives resetKey, but the parent owns the index so it resets here.
-  const [railIndex, setRailIndex] = useState(0);
+  // Initial value restores the tab-back slide from the journey snapshot.
+  const [railIndex, setRailIndex] = useState(journey?.railIndex ?? 0);
   const [railKey, setRailKey] = useState(outcomeKey);
 
   if (railKey !== outcomeKey) {
     setRailKey(outcomeKey);
     setRailIndex(0);
   }
+
+  // Persist the in-progress journey in memory so dish detail visits (back
+  // navigation remounts this route) restore form, step, results, and the
+  // selected slide. Coordinates never enter the cache: toCoarseSnapshot
+  // strips precise fixes and precise results before writing. Quiz answers
+  // (draft/meal/mood) stay separate from presentation state (railIndex).
+  useEffect(() => {
+    writeJourneySnapshot(
+      toCoarseSnapshot({
+        meal,
+        mood,
+        draft,
+        stepIndex,
+        submitted,
+        showResults,
+        surpriseSeed,
+        railIndex,
+      }),
+    );
+  }, [meal, mood, draft, stepIndex, submitted, showResults, surpriseSeed, railIndex]);
 
   const provenanceLabels = useMemo(
     () => ({ approximate: copy.recApproximate, saved: copy.recSavedFromVisit }),
@@ -1223,6 +1258,13 @@ export function RecommendSection() {
             <p className="mt-3 max-w-[60ch] text-lg text-muted">
               {showResults && outcome !== null ? copy.recResultsIntro : copy.recIntro}
             </p>
+            {showResults &&
+            outcome !== null &&
+            (outcome.mode === "ai" || outcome.mode === "deterministic") ? (
+              <p className="mt-2 max-w-[60ch] text-base font-bold text-ink">
+                {copy.recResultsCount.replace("{count}", String(outcome.dishes.length))}
+              </p>
+            ) : null}
             {detectedName !== null ? (
               <p className="mt-3 max-w-[60ch] text-base font-bold text-ink">
                 {formatTemplate(copy.recWhereExploring, detectedName)}
@@ -1412,6 +1454,43 @@ export function RecommendSection() {
   );
 
   function renderOutcome(copyMessages: Messages, compact = false) {
+    // Active slide for the in-card Muse explanation. Restaurant discovery
+    // lives in the carousel's own Find action (shared DishActions,
+    // canonical dish identity) — no duplicate CTA here.
+    const activeDish = carouselItems[railIndex] ?? null;
+
+    /**
+     * Backend-confirmed live-Muse gate for the per-dish explanation: the
+     * wire mode alone is not the brand source — the structured ranking must
+     * be LiveMuse (matched exhaustively, never warning-sniffed). Gated here
+     * AND inside SelectedDishReason, so deterministic, degraded, and
+     * stale/cross-identity payloads never present model text.
+     */
+    const liveMuse =
+      outcome !== null &&
+      outcome.mode === "ai" &&
+      Match.value(outcome.ranking).pipe(
+        Match.tag("LiveMuse", () => true),
+        Match.orElse(() => false),
+      );
+
+    const activeReason = liveMuse ? cleanReasonForDisplay(activeDish?.aiReason) : null;
+
+    // In-card Muse strip: the active slide's validated reason travels into
+    // the shared carousel through its `reason` slot (full-width top strip
+    // inside the card border). Slide changes re-render with the new active
+    // dish, so the explanation always matches the visible slide.
+    // Deterministic and degraded outcomes pass no reason, so no Muse
+    // container renders and no extra model call fires.
+    const activeReasonNode =
+      activeReason === null ? undefined : (
+        <SelectedDishReason
+          aiReason={activeDish?.aiReason}
+          copy={copyMessages}
+          liveMuse={liveMuse}
+        />
+      );
+
     if (recommend.isPending) {
       return <ResultsLoadingSkeleton compact={compact} copy={copyMessages} />;
     }
@@ -1552,6 +1631,7 @@ export function RecommendSection() {
             layout="compact"
             onIndexChange={setRailIndex}
             onSaveSheetOpenChange={setSaveSheetOpen}
+            reason={activeReasonNode}
             resetKey={outcomeKey}
             session={session}
           />
@@ -1626,6 +1706,7 @@ export function RecommendSection() {
           lang={lang}
           onIndexChange={setRailIndex}
           onSaveSheetOpenChange={setSaveSheetOpen}
+          reason={activeReasonNode}
           resetKey={outcomeKey}
           session={session}
         />

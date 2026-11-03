@@ -1,0 +1,2 @@
+INSERT INTO feastjourney.restaurant_price_observations(venue_id,variant_id,source_id,source_line_key,price_kind,amount,currency,sales_channel,tax_treatment,observed_at,review_after,raw_text)
+VALUES(:venue::uuid,:variant::uuid,:source::uuid,:line::text,:kind::text,:amount::numeric,:currency::text,:channel::text,:tax::text,:observed::timestamptz,:until::timestamptz,:raw_text::nullable(text)) RETURNING id;

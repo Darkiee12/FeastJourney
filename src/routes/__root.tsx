@@ -266,6 +266,20 @@ function AppLayout() {
                   >
                     {copy.ctaRecommend}
                   </Link>
+                  <Link
+                    to="/restaurants"
+                    search={{ lang }}
+                    className="hidden min-h-11 flex-none items-center rounded-full px-3 text-sm font-semibold whitespace-nowrap text-white/85 no-underline hover:bg-white/10 hover:text-white min-[480px]:inline-flex"
+                  >
+                    {copy.navRestaurants}
+                  </Link>
+                  <Link
+                    to="/scan"
+                    search={{ lang }}
+                    className="hidden min-h-11 flex-none items-center rounded-full px-3 text-sm font-semibold whitespace-nowrap text-white/85 no-underline hover:bg-white/10 hover:text-white min-[480px]:inline-flex"
+                  >
+                    {copy.navScanMenu}
+                  </Link>
                   <DropdownMenu modal={false}>
                     <DropdownMenuTrigger className="inline-flex min-h-11 flex-none items-center rounded-full px-3 text-sm font-semibold text-white/85 hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-white min-[480px]:hidden">
                       Menu
@@ -289,6 +303,16 @@ function AppLayout() {
                       <DropdownMenuItem asChild>
                         <Link to="/" search={{ lang }} hash="recommend" resetScroll={false}>
                           {copy.ctaRecommend}
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link to="/restaurants" search={{ lang }}>
+                          {copy.navRestaurants}
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link to="/scan" search={{ lang }}>
+                          {copy.navScanMenu}
                         </Link>
                       </DropdownMenuItem>
                     </DropdownMenuContent>

@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { RefreshCwIcon } from "lucide-react";
+import { ChevronDownIcon, Globe2Icon, MapPinIcon, RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 
 import { DishCarousel } from "@/components/dish/dish-carousel";
@@ -12,7 +12,9 @@ import {
 import {
   DiscoveryLocation,
   discoveryCityLabelFor,
+  discoveryHeaderCopyFor,
   discoveryHeadingFor,
+  discoveryIndicatorFor,
   discoveryLocationCopyFor,
   discoveryServedScopeFor,
   discoverySubtitleFor,
@@ -31,6 +33,9 @@ import type { Locale, Messages } from "@/shared/i18n";
 const rootRoute = getRouteApi("__root__");
 
 const CAROUSEL_LIMIT = 5;
+
+/** Non-breaking space keeping the reserved status slot at full height when empty. */
+const DISCOVERY_STATUS_PLACEHOLDER = " ";
 
 function countryNameFor(
   countries:
@@ -345,10 +350,49 @@ export function DiscoverySection({
 
   const cityActive = city !== null || servedCity !== null;
 
-  const showBackToRegion =
-    (served?.precise === true || worldwide || city !== null) && effectiveCountry !== null;
+  // Meaningful location indicator from the served geographic scope
+  // (city > country > worldwide). While a scope change is still loading, the
+  // indicator names the requested scope so the skeleton below is never
+  // mislabeled; a city request that fell back to its ancestor country names
+  // that country, never an invented city, and country dishes are never
+  // called "nearby". Unresolved scope reads as the choose-location prompt,
+  // never as worldwide.
+  const headerCopy = discoveryHeaderCopyFor(lang);
 
-  const countryRadio = cityActive ? null : (servedCountryCode ?? effectiveCountry);
+  let indicatorScope: DiscoveryServedScope | null = servedScope;
+
+  if (scopeChanged || servedScope === null) {
+    indicatorScope = null;
+
+    if (worldwide) {
+      indicatorScope = "worldwide";
+    } else if (preciseFix !== null) {
+      indicatorScope = "nearby";
+    } else if (city !== null) {
+      indicatorScope = "city";
+    } else if (effectiveCountry !== null) {
+      indicatorScope = "regional";
+    }
+  }
+
+  const indicatorBase =
+    scopeChanged || servedScope === null ? requestedRegionName : servedRegionName;
+
+  const indicatorRegion =
+    indicatorBase ?? (preciseFix !== null ? discoveryLocationCopyFor(lang).headingNearby : null);
+
+  const indicator = discoveryIndicatorFor({
+    lang,
+    regionName: indicatorRegion,
+    scope: indicatorScope,
+  });
+
+  // Reserved loading-status slot: first load reads "Finding dishes…",
+  // background refetches read "Updating dishes…", and the slot stays
+  // rendered (empty) when ready so the carousel never shifts. A background
+  // failure keeps the previous cards with a retry instead of swapping in an
+  // error panel; only a failure with nothing served uses the error panel.
+  const staleOnError = failed && total > 0 && !loading;
 
   const fallbackState = resolveDiscoveryFallbackState({
     failed,
@@ -359,6 +403,23 @@ export function DiscoverySection({
     total,
     worldwide: scopeKey === "world" || servedScopeName === "worldwide",
   });
+
+  let statusText = "";
+
+  if (loading) {
+    statusText = headerCopy.findingDishes;
+  } else if (refetching) {
+    statusText = headerCopy.updatingDishes;
+  } else if (staleOnError) {
+    statusText = headerCopy.dishesFailed;
+  }
+
+  const showReady = fallbackState === "ready" || staleOnError;
+
+  const showBackToRegion =
+    (served?.precise === true || worldwide || city !== null) && effectiveCountry !== null;
+
+  const countryRadio = cityActive ? null : (servedCountryCode ?? effectiveCountry);
 
   const countryOptions = (countriesQuery.data ?? []).flatMap((entry) =>
     entry.iso3166 === null
@@ -434,34 +495,27 @@ export function DiscoverySection({
 
         <p className="mb-8 max-w-[60ch] text-lg text-muted">{subtitle}</p>
 
-        <div className="mb-8">
+        <div className="mb-8 flex flex-wrap items-center gap-x-3 gap-y-2">
           {inSheet && mobile !== null ? (
             <button
               type="button"
               onClick={mobile.openLocationPicker}
+              aria-label={`${indicator.label} · ${discoveryLocationCopyFor(lang).changeLocation}`}
               className="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink"
             >
-              <span className="min-w-0 flex-1 truncate text-left">
-                {servedRegionName ??
-                  requestedRegionName ??
-                  (preciseFix !== null
-                    ? discoveryLocationCopyFor(lang).headingNearby
-                    : copy.discoverAroundWorld)}
-              </span>
-              <span aria-hidden="true">·</span>
-              <span>{lang === "vi" ? "Đổi vị trí" : "Change location"}</span>
+              {indicator.icon === "globe" ? (
+                <Globe2Icon aria-hidden="true" className="size-4 flex-none" />
+              ) : (
+                <MapPinIcon aria-hidden="true" className="size-4 flex-none" />
+              )}
+              <span className="min-w-0 flex-1 truncate text-left">{indicator.label}</span>
+              <ChevronDownIcon aria-hidden="true" className="size-4 flex-none opacity-60" />
             </button>
           ) : (
             <DiscoveryLocation
               countries={countryOptions}
               countriesLoading={countriesQuery.isPending}
-              currentLabel={
-                servedRegionName ??
-                requestedRegionName ??
-                (preciseFix !== null
-                  ? discoveryLocationCopyFor(lang).headingNearby
-                  : copy.discoverAroundWorld)
-              }
+              currentLabel={indicator.label}
               disabled={false}
               lang={lang}
               locating={precise.status === "locating"}
@@ -478,17 +532,28 @@ export function DiscoverySection({
               onUsePrecise={usePrecise}
             />
           )}
+          {/* Reserved status slot: always rendered with a minimum height so
+              loading transitions never move the carousel below. */}
+          <output aria-live="polite" className="block min-h-5 text-sm font-semibold text-muted">
+            {statusText === "" ? DISCOVERY_STATUS_PLACEHOLDER : statusText}
+          </output>
+          {staleOnError ? (
+            <button
+              type="button"
+              onClick={() => {
+                void carouselQuery.refetch();
+              }}
+              className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold text-ink transition hover:border-ink"
+            >
+              {headerCopy.retryDishes}
+            </button>
+          ) : null}
         </div>
 
         {fallbackState === "loading" ? <DiscoveryLoadingState copy={copy} /> : null}
 
-        {fallbackState === "ready" ? (
+        {showReady ? (
           <div>
-            {refetching ? (
-              <output className="mb-2 block text-sm font-semibold text-muted">
-                {copy.discoverLocalLoading}
-              </output>
-            ) : null}
             <DishCarousel
               autoplay
               copy={copy}

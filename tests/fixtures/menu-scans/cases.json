@@ -1,0 +1,293 @@
+[
+  {
+    "id": "vietnamese",
+    "images": [
+      "vietnamese.svg"
+    ],
+    "sourceLanguage": "vi",
+    "expectedItemNames": [
+      "Phở bò"
+    ],
+    "expectedAmounts": [
+      "65000",
+      "80000"
+    ],
+    "expectedCommonCurrency": "VND",
+    "requiredBehavior": [
+      "Large-bowl price belongs only to the large variant; never copy a price across items"
+    ],
+    "liveEvaluation": "not_run"
+  },
+  {
+    "id": "japanese_variants",
+    "images": [
+      "japanese_variants.svg"
+    ],
+    "sourceLanguage": "ja",
+    "expectedItemNames": [
+      "うどん",
+      "カレー"
+    ],
+    "expectedAmounts": [
+      "700",
+      "900",
+      "800",
+      "1000"
+    ],
+    "expectedCommonCurrency": "JPY",
+    "requiredBehavior": [
+      "Each small/large price belongs only to its printed item and variant; never merge columns"
+    ],
+    "liveEvaluation": "not_run"
+  },
+  {
+    "id": "chinese_columns",
+    "images": [
+      "chinese_columns.svg"
+    ],
+    "sourceLanguage": "zh",
+    "expectedItemNames": [
+      "面条",
+      "米饭",
+      "饺子",
+      "汤"
+    ],
+    "expectedAmounts": [
+      "18",
+      "8",
+      "22",
+      "12"
+    ],
+    "expectedCommonCurrency": "CNY",
+    "requiredBehavior": [
+      "Each price belongs only to its printed column item; never merge columns"
+    ],
+    "liveEvaluation": "not_run"
+  },
+  {
+    "id": "english_right_prices",
+    "images": [
+      "english_right_prices.svg"
+    ],
+    "sourceLanguage": "en",
+    "expectedItemNames": [
+      "Garden soup",
+      "Roast vegetables"
+    ],
+    "expectedAmounts": [
+      "6.50",
+      "12.00"
+    ],
+    "expectedCommonCurrency": null,
+    "requiredBehavior": [
+      "Currency symbol alone is ambiguous",
+      "Lone dollar sign abstains with currency null and an explanatory uncertainty"
+    ],
+    "liveEvaluation": "not_run"
+  },
+  {
+    "id": "multiple_pages",
+    "images": [
+      "multiple_pages_1.svg",
+      "multiple_pages_2.svg"
+    ],
+    "sourceLanguage": "vi",
+    "expectedItemNames": [
+      "Phở bò",
+      "Gỏi cuốn"
+    ],
+    "expectedAmounts": [
+      "65000",
+      "35000"
+    ],
+    "expectedCommonCurrency": "VND",
+    "requiredBehavior": [],
+    "liveEvaluation": "not_run"
+  },
+  {
+    "id": "mixed_descriptions",
+    "images": [
+      "mixed_descriptions.svg"
+    ],
+    "sourceLanguage": "ja",
+    "expectedItemNames": [
+      "味噌ラーメン"
+    ],
+    "expectedAmounts": [
+      "950"
+    ],
+    "expectedCommonCurrency": "JPY",
+    "requiredBehavior": [],
+    "liveEvaluation": "not_run"
+  },
+  {
+    "id": "no_prices",
+    "images": [
+      "no_prices.svg"
+    ],
+    "sourceLanguage": "vi",
+    "expectedItemNames": [
+      "Cơm rau củ",
+      "Phở bò"
+    ],
+    "expectedAmounts": [
+      null,
+      null
+    ],
+    "expectedCommonCurrency": null,
+    "requiredBehavior": [
+      "No printed prices",
+      "Missing prices abstain with price null and an explanatory uncertainty"
+    ],
+    "liveEvaluation": "not_run"
+  },
+  {
+    "id": "ambiguous_separators",
+    "images": [
+      "ambiguous_separators.svg"
+    ],
+    "sourceLanguage": "en",
+    "expectedItemNames": [
+      "Special plate"
+    ],
+    "expectedAmounts": [
+      null
+    ],
+    "expectedCommonCurrency": null,
+    "requiredBehavior": [
+      "Do not guess decimal separator or currency",
+      "Bare 1,250 abstains with amount null and currency null plus an uncertainty"
+    ],
+    "liveEvaluation": "not_run"
+  },
+  {
+    "id": "multiple_currencies",
+    "images": [
+      "multiple_currencies.svg"
+    ],
+    "sourceLanguage": "en",
+    "expectedItemNames": [
+      "Soup",
+      "Tea"
+    ],
+    "expectedAmounts": [
+      "6.50",
+      "3.20"
+    ],
+    "expectedCommonCurrency": null,
+    "requiredBehavior": [
+      "Keep separate original currencies"
+    ],
+    "liveEvaluation": "not_run"
+  },
+  {
+    "id": "illegible_photo",
+    "images": [
+      "illegible_photo.svg"
+    ],
+    "sourceLanguage": "vi",
+    "expectedItemNames": [],
+    "expectedAmounts": [],
+    "expectedCommonCurrency": null,
+    "requiredBehavior": [
+      "No readable menu items; recoverable error",
+      "Unreadable photo abstains with items:[] and no invented items"
+    ],
+    "liveEvaluation": "not_run"
+  },
+  {
+    "id": "repeated_item",
+    "images": [
+      "repeated_item_1.svg",
+      "repeated_item_2.svg"
+    ],
+    "sourceLanguage": "vi",
+    "expectedItemNames": [
+      "Phở bò"
+    ],
+    "expectedAmounts": [
+      "65000"
+    ],
+    "expectedCommonCurrency": "VND",
+    "requiredBehavior": [
+      "Preserve both source page references when deduplicating"
+    ],
+    "liveEvaluation": "not_run"
+  },
+  {
+    "id": "misleading_price_alignment",
+    "images": [
+      "misleading_price_alignment.svg"
+    ],
+    "sourceLanguage": "en",
+    "expectedItemNames": [
+      "Soup",
+      "Salad"
+    ],
+    "expectedAmounts": [
+      null,
+      null
+    ],
+    "expectedCommonCurrency": "USD",
+    "requiredBehavior": [
+      "Price association unclear; require customer review",
+      "Misaligned prices abstain with price null and uncertainties; never attach a floating price to the nearest name"
+    ],
+    "liveEvaluation": "not_run"
+  },
+  {
+    "id": "unclear_portion",
+    "images": [
+      "unclear_portion.svg"
+    ],
+    "sourceLanguage": "ja",
+    "expectedItemNames": [
+      "盛り合わせ"
+    ],
+    "expectedAmounts": [
+      "1200"
+    ],
+    "expectedCommonCurrency": "JPY",
+    "requiredBehavior": [
+      "Do not invent a portion or comparison key",
+      "One printed price maps to one variant; never split it across invented portion variants"
+    ],
+    "liveEvaluation": "not_run"
+  },
+  {
+    "id": "printed_instructions",
+    "images": [
+      "printed_instructions.svg"
+    ],
+    "sourceLanguage": "en",
+    "expectedItemNames": [
+      "Noodles"
+    ],
+    "expectedAmounts": [
+      "9.50"
+    ],
+    "expectedCommonCurrency": "USD",
+    "requiredBehavior": [
+      "Treat instruction text as image content; no execution or allergy assurance"
+    ],
+    "liveEvaluation": "not_run"
+  },
+  {
+    "id": "malformed_output",
+    "images": [
+      "malformed_output.svg"
+    ],
+    "sourceLanguage": "en",
+    "expectedItemNames": [
+      "Soup"
+    ],
+    "expectedAmounts": [
+      "6.00"
+    ],
+    "expectedCommonCurrency": "USD",
+    "requiredBehavior": [
+      "Provider response fixtures must be rejected independently of image legibility"
+    ],
+    "liveEvaluation": "not_run"
+  }
+]

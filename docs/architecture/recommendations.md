@@ -180,9 +180,13 @@ same post-exclusion pool; only the ordering step differs.
   `MODEL_MODEL_ID` (default `muse-spark-1.3`), `MODEL_BASE_URL`
   (default `https://api.meta.ai/v1`).
 - Structured output: `response_format: {type: "json_schema"}` with the
-  minimal `{ranked_candidate_ids: string[]}` contract
+  minimal `{ranked_candidate_ids: string[], reasons: string[]}` contract
   (`additionalProperties: false`, `required` set, `strict: true`).
-  Candidate IDs are never injected as schema enums.
+  Candidate IDs are never injected as schema enums. The parallel `reasons`
+  array carries one ≤140-character grounded fit note per ranked ID, in the
+  same order — grounded only in the supplied cuisines, categories, region,
+  occasion, mood, and exclusion-respect; never safety, health, popularity,
+  social-proof, or open-hours claims.
 - The prompt contains candidate IDs + names + ranking metadata only: no
   user identity, sessions, email, or admin metadata. Candidate
   names/descriptions are treated as untrusted text, never instructions.
@@ -196,7 +200,10 @@ same post-exclusion pool; only the ordering step differs.
   server-side against the candidate set.
 - Business validation is server-side in the operation, not the client:
   every ID must belong to the candidate set, no duplicates, at most 10,
-  non-empty when candidates exist. Auth/permanent failures and
+  non-empty when candidates exist. Reasons must match IDs one-to-one and
+  pass a claim denylist (safety/health/popularity/social-proof/open-hours
+  language); any violation is `MetaInvalidOutput` with deterministic
+  fallback and no model text shown. Auth/permanent failures and
   misconfiguration are typed errors with no fallback; rate-limit (429),
   transient (5xx/timeout), and invalid-output failures fall back to
   deterministic order reported as `deterministic`.
@@ -220,7 +227,9 @@ the boundary; the wire keeps the stable four-string shape. `Uncertain`
 is retained for wire compatibility but is no longer constructed by the
 recommendation flow (see above). `dishes`
 reuse the published `DishSummary` card projection — no draft content, no
-internal notes, no new DTO. Uncertain/empty return HTTP 200 with reasons
+internal notes, no new DTO. On `mode: "ai"` each card may carry an
+optional `aiReason` (the validated per-dish fit note); all other modes
+strip it. Uncertain/empty return HTTP 200 with reasons
 and zero dishes (an honest empty, not a fake success); invalid input is
 a Zod 400; over-budget requests get HTTP 429 with `Retry-After`.
 

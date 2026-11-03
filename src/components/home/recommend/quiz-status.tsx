@@ -1,5 +1,6 @@
 import { Match } from "effect";
 import { SparklesIcon, TriangleAlertIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
 
 import type { RankingProvenance } from "@/modules/food-discovery/server/operations/recommendation-service";
 import type { Messages } from "@/shared/i18n";
@@ -246,5 +247,99 @@ export function AiExplanationCard({
         <p className="mt-2 text-sm font-semibold text-muted">{copy.recEmptySuggest}</p>
       ) : null}
     </aside>
+  );
+}
+
+/** Display bound for a per-dish Muse reason (mirrors the server contract). */
+export const MAX_DISPLAY_REASON_LENGTH = 340;
+
+const CONTROL_CODE_POINTS: ReadonlySet<number> = new Set([0x2028, 0x2029]);
+
+const isControlCodePoint = (code: number): boolean =>
+  code <= 0x1f || code === 0x7f || CONTROL_CODE_POINTS.has(code);
+
+/**
+ * Clean one model reason for display: blanks and control characters never
+ * render; output truncates to the server bound. Plain text only — callers
+ * render it as a React string child, never as HTML. The input is already a
+ * domain string: non-string model output is rejected at the service Schema
+ * boundary, so this layer only trims and truncates validated text.
+ */
+export const cleanReasonForDisplay = (reason: string | null | undefined): string | null => {
+  if (reason === null || reason === undefined) {
+    return null;
+  }
+
+  const cleaned = Array.from(reason)
+    .filter((ch) => !isControlCodePoint(ch.codePointAt(0) ?? 0))
+    .join("")
+    .trim();
+
+  if (cleaned === "") {
+    return null;
+  }
+
+  return cleaned.slice(0, MAX_DISPLAY_REASON_LENGTH);
+};
+
+/**
+ * Selected-dish Muse explanation, rendered INSIDE the featured carousel
+ * card as a full-width top strip (the card provides the cream background,
+ * padding, and borders — this component renders label, text, and toggle
+ * only). Provenance-gated: renders ONLY when `liveMuse` is true
+ * (backend-confirmed live Muse ranking), so deterministic, degraded, and
+ * stale/cross-identity payloads never present model text as personalization.
+ * Collapsed to three lines with a compact expand toggle on mobile; the
+ * toggle hides on desktop where the strip has a fixed height and scrolls.
+ */
+export function SelectedDishReason({
+  aiReason,
+  copy,
+  liveMuse,
+}: {
+  readonly aiReason: string | null | undefined;
+  readonly copy: Messages;
+  readonly liveMuse: boolean;
+}): ReactNode {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!liveMuse) {
+    return null;
+  }
+
+  const reason = cleanReasonForDisplay(aiReason);
+
+  if (reason === null) {
+    return null;
+  }
+
+  return (
+    <div>
+      <p className="flex items-center gap-1.5 text-xs font-extrabold tracking-wide text-food-orange-strong uppercase">
+        <SparklesIcon aria-hidden="true" className="size-3.5 flex-none" />
+        {copy.recWhyMusePicked}
+      </p>
+      <p
+        className={
+          expanded
+            ? "mt-1 text-[13px] leading-relaxed text-ink"
+            : "mt-1 line-clamp-3 text-[13px] leading-relaxed text-ink"
+        }
+      >
+        {reason}
+      </p>
+      {reason.length > 120 ? (
+        <button
+          type="button"
+          onClick={() => {
+            setExpanded(!expanded);
+          }}
+          aria-expanded={expanded}
+          className="mt-1 inline-flex min-h-8 cursor-pointer items-center rounded-full px-2 text-xs font-bold text-muted underline decoration-2 underline-offset-4 transition hover:text-ink md:hidden"
+        >
+          {expanded ? copy.recReasonLess : copy.recReasonMore}
+        </button>
+      ) : null}
+    </div>
   );
 }

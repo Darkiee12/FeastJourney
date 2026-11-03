@@ -150,46 +150,51 @@ export const withTransaction = <A, E, R>(
   operation: string,
   effect: Effect.Effect<A, E, R | TxSql>,
 ): Effect.Effect<A, E | TransactionFailed, R | Database> =>
-  Effect.flatMap(Database, (db) => {
-    const attempt = Effect.acquireUseRelease(
-      Effect.tryPromise({
-        try: () => beginTransaction(db.sql),
-        catch: (cause) =>
-          new TransactionFailed({
-            operation,
-            cause: describeCause(cause),
-          }),
-      }),
-      (tx) => Effect.provideService(effect, TxSql, tx),
-      (tx, exit) =>
-        Exit.isSuccess(exit)
-          ? Effect.tryPromise({
-              try: async () => {
-                try {
-                  await tx.unsafe("COMMIT");
-                } finally {
-                  tx.release();
-                }
-              },
-              catch: (cause) =>
-                new TransactionFailed({
-                  operation,
-                  cause: describeCause(cause),
-                }),
-            })
-          : Effect.promise(() =>
-              tx
-                .unsafe("ROLLBACK")
-                .catch(() => undefined)
-                .then(() => tx.release())
-                .catch(() => undefined),
-            ).pipe(Effect.ignore, Effect.andThen(Effect.void)),
-    );
+  Effect.flatMap(Effect.serviceOption(TxSql), (existing) => {
+    // A composed workflow owns the transaction; participating operations reuse it.
+    if (Option.isSome(existing)) return Effect.provideService(effect, TxSql, existing.value);
 
-    return Effect.retry(attempt, {
-      while: (error) => error instanceof TransactionConflict,
-      times: TRANSACTION_RETRY_ATTEMPTS,
-      schedule: TRANSACTION_RETRY_SCHEDULE,
+    return Effect.flatMap(Database, (db) => {
+      const attempt = Effect.acquireUseRelease(
+        Effect.tryPromise({
+          try: () => beginTransaction(db.sql),
+          catch: (cause) =>
+            new TransactionFailed({
+              operation,
+              cause: describeCause(cause),
+            }),
+        }),
+        (tx) => Effect.provideService(effect, TxSql, tx),
+        (tx, exit) =>
+          Exit.isSuccess(exit)
+            ? Effect.tryPromise({
+                try: async () => {
+                  try {
+                    await tx.unsafe("COMMIT");
+                  } finally {
+                    tx.release();
+                  }
+                },
+                catch: (cause) =>
+                  new TransactionFailed({
+                    operation,
+                    cause: describeCause(cause),
+                  }),
+              })
+            : Effect.promise(() =>
+                tx
+                  .unsafe("ROLLBACK")
+                  .catch(() => undefined)
+                  .then(() => tx.release())
+                  .catch(() => undefined),
+              ).pipe(Effect.ignore, Effect.andThen(Effect.void)),
+      );
+
+      return Effect.retry(attempt, {
+        while: (error) => error instanceof TransactionConflict,
+        times: TRANSACTION_RETRY_ATTEMPTS,
+        schedule: TRANSACTION_RETRY_SCHEDULE,
+      });
     });
   });
 

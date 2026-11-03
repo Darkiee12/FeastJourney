@@ -35,6 +35,6 @@
       "extensions": [".sql", ".reylo.yaml", ".reylo.yml"]
     }
   ],
-  "include": ["src/**/*", "tests/**/*", "vite.config.ts"],
+  "include": ["src/**/*", "tests/**/*", "vite.config.ts", "scripts/cleanup-menu-scans.ts"],
   "exclude": ["repos", ".agents", ".claude", "node_modules", ".output", "dist", "coverage"]
 }

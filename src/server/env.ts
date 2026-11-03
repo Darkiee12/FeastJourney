@@ -43,6 +43,16 @@ const envSchema = z.object({
   MODEL_CANDIDATE_LIMIT: z.coerce.number().int().max(100).optional(),
   MODEL_OUTPUT_LIMIT: z.coerce.number().int().optional(),
   MODEL_MAX_TOKENS: z.coerce.number().int().optional(),
+  // Scanner configuration is validated lazily when enabled; unrelated reads
+  // never depend on Muse or private image storage configuration.
+  MENU_SCANNER_ENABLED: z.string().optional(),
+  MENU_SCAN_MODEL: z.string().optional(),
+  MENU_SCAN_TIMEOUT_MS: z.string().optional(),
+  MENU_SCAN_RETRIES: z.string().optional(),
+  MENU_SCAN_MAX_RESPONSE_BYTES: z.string().optional(),
+  MENU_SCAN_MAX_IMAGES: z.string().optional(),
+  MENU_SCAN_MAX_IMAGE_BYTES: z.string().optional(),
+  MENU_SCAN_MAX_COMPLETION_TOKENS: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof envSchema>;

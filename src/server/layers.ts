@@ -26,6 +26,13 @@ import type {
   SourceRepository,
   TaxonomyRepository,
 } from "@/modules/food-discovery/server/repository/taxonomy-repository";
+import {
+  FxRatesLive,
+  FxProviderLive,
+  type FxRates,
+} from "@/modules/restaurant-discovery/server/index";
+import type { RestaurantPhotoStorage } from "@/modules/restaurant-discovery/server/integrations/restaurant-photo-storage";
+import { RestaurantPhotoFullLive } from "@/modules/restaurant-discovery/server/operations/photos";
 import { UserRepositoriesLive, UserServicesLive } from "@/modules/user/server/index";
 import type { UserAdminService } from "@/modules/user/server/operations/admin-service";
 import type { Authorization } from "@/modules/user/server/operations/authorization";
@@ -43,8 +50,14 @@ import { RateLimiterLive, RateLimitPolicyLive } from "@/server/http/rate-limit";
 import type { RateLimitPolicy } from "@/server/http/rate-limit";
 import { MetaClientLive } from "@/server/integrations/meta-client";
 import type { MetaClient } from "@/server/integrations/meta-client";
+import { MenuExtractorLive, type MenuExtractor } from "@/server/integrations/muse-menu";
+import {
+  PrivateMenuStorageLive,
+  type PrivateMenuStorage,
+} from "@/server/integrations/private-menu-storage";
 
 const CurationLive = Layer.provide(CurationServiceLive, RepositoriesLive);
+const FxLive = Layer.provide(FxRatesLive, FxProviderLive);
 
 const DomainLive = Layer.provide(
   Layer.mergeAll(CatalogServicesLive, CatalogImportServiceLive),
@@ -65,6 +78,7 @@ const RecommendationLive = Layer.provide(
 
 export const AppLive = Layer.mergeAll(
   DatabaseLive,
+  FxLive,
   RateLimiterLive,
   RateLimitPolicyLive,
   RepositoriesLive,
@@ -75,9 +89,16 @@ export const AppLive = Layer.mergeAll(
   UserLive,
   MetaClientLive,
   RecommendationLive,
+  MenuExtractorLive,
+  PrivateMenuStorageLive,
+  RestaurantPhotoFullLive,
 );
 
 export type AppServices =
+  | MenuExtractor
+  | PrivateMenuStorage
+  | RestaurantPhotoStorage
+  | FxRates
   | Database
   | PersistenceRateLimiter.RateLimiter
   | RateLimitPolicy

@@ -59,7 +59,7 @@ describe("results loading reuses shared geometry", () => {
     const loading = renderLoading();
 
     expect(loading).toContain(shared);
-    expect(loading).toContain("md:min-h-[22rem]");
+    expect(loading).toContain("--dish-feature-stage-desktop");
   });
 
   test("controls row reserves the real row offset at button height", () => {
@@ -156,9 +156,9 @@ describe("compact loading reserves the drawer card footprint", () => {
     expect(html).not.toContain(copyEn.recRailHeading);
     expect(html).not.toContain("<li");
     expect(html).not.toContain("mt-4 flex flex-wrap items-center gap-3");
-    // Title-aligned 44px icon actions live inside the card: two round
-    // placeholders, never full-width pills below it.
-    expect(countOccurrences(html, "h-11 w-11")).toBe(2);
+    // Title-aligned 44px icon actions live inside the card: three round
+    // placeholders (Explore, Save, Find), never full-width pills below it.
+    expect(countOccurrences(html, "h-11 w-11")).toBe(3);
     expect(html).not.toContain("mt-2 flex gap-2");
   });
 

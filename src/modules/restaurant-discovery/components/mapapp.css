@@ -1,0 +1,1135 @@
+/* Fullscreen restaurant map-app styles (PR13 split). Shell rules
+   (main:has(> .mapapp)) and MapLibre control overrides live in
+   styles.css; everything here is scoped under .mapapp-*. */
+@layer components {
+  .mapapp {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--color-cream);
+  }
+  .mapapp-skip {
+    position: absolute;
+    left: 1rem;
+    top: -4rem;
+    z-index: 60;
+    border-radius: 0.5rem;
+    background: white;
+    padding: 0.6rem 1rem;
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+  .mapapp-skip:focus-visible {
+    top: 0.5rem;
+  }
+  .mapapp-body {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .mapapp-mapwrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+  }
+  .mapapp-mapwrap .discovery-map {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+  .mapapp-mapwrap .discovery-map-fallback {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    place-content: center;
+  }
+  .user-dot-svg {
+    display: block;
+    color: var(--color-brand-blue);
+    filter: drop-shadow(0 1px 6px rgb(3 10 30 / 0.5));
+  }
+  .mapapp-search-area {
+    position: absolute;
+    left: 50%;
+    bottom: 1rem;
+    translate: -50% 0;
+    z-index: 5;
+    min-height: 2.75rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    font-weight: 700;
+    font-size: 0.9rem;
+    padding: 0.5rem 1.2rem;
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgb(3 10 30 / 0.25);
+    transition: opacity 200ms ease-out;
+    white-space: nowrap;
+  }
+  .mapapp-search-area:hover {
+    background: var(--color-cream);
+  }
+  .mapapp-maptools {
+    position: absolute;
+    right: 0.75rem;
+    bottom: max(1rem, env(safe-area-inset-bottom));
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.5rem;
+  }
+  .mapapp-recenter {
+    display: grid;
+    place-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgb(3 10 30 / 0.25);
+    color: var(--color-brand-blue-hover);
+  }
+  .mapapp-recenter:hover:not(:disabled) {
+    background: var(--color-cream);
+  }
+  .mapapp-recenter:disabled {
+    cursor: wait;
+    opacity: 0.65;
+  }
+  .mapapp-recenter svg {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+  .mapapp-chooser-float {
+    position: absolute;
+    z-index: 6;
+    inset-inline: 1rem;
+    top: 4.5rem;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .mapapp-chooser {
+    pointer-events: auto;
+    width: min(100%, 24rem);
+    background: white;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 1rem;
+    box-shadow: 0 18px 50px rgb(3 10 30 / 0.35);
+    padding: 1rem 1.1rem;
+    display: grid;
+    gap: 0.6rem;
+  }
+  .mapapp-chooser-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .mapapp-chooser-head h2 {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    letter-spacing: 0.02em;
+  }
+  .mapapp-chooser p {
+    font-size: 0.9rem;
+    color: var(--color-muted);
+  }
+  .mapapp-chooser-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .mapapp-iconbtn {
+    display: inline-grid;
+    place-content: center;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    cursor: pointer;
+  }
+  .mapapp-iconbtn:hover:not(:disabled) {
+    background: var(--color-cream);
+  }
+  .mapapp-iconbtn:disabled {
+    cursor: wait;
+    opacity: 0.65;
+  }
+  .mapapp-iconbtn svg {
+    width: 1.15rem;
+    height: 1.15rem;
+  }
+  .mapapp-chip-btn {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.4rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 0.45rem 1rem;
+    cursor: pointer;
+  }
+  .mapapp-chip-btn:hover:not(:disabled) {
+    background: var(--color-cream);
+  }
+  .mapapp-chip-btn svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .mapapp-primary-btn {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    background: var(--color-food-orange-strong);
+    color: white;
+    font-weight: 700;
+    font-size: 0.95rem;
+    padding: 0.55rem 1.4rem;
+    cursor: pointer;
+  }
+  .mapapp-primary-btn:hover:not(:disabled) {
+    background: var(--color-food-orange-dark);
+  }
+  .mapapp-primary-btn:disabled {
+    cursor: wait;
+    opacity: 0.65;
+  }
+  .mapapp-primary-btn svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .mapapp-ghost-btn {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 0.5rem 1.1rem;
+    cursor: pointer;
+  }
+  .mapapp-ghost-btn:hover {
+    background: var(--color-cream);
+  }
+  /* Results | Compare prices toggle: compact chip group, pressed state
+     reads as the active view. Dish-scoped searches only. */
+  .mapapp-viewtoggle {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+  }
+  .mapapp-viewtoggle .mapapp-ghost-btn[aria-pressed="true"] {
+    border-color: var(--color-ink);
+    background: var(--color-ink);
+    color: white;
+  }
+  .mapapp-spin {
+    animation: mapapp-spin 1s linear infinite;
+  }
+  @keyframes mapapp-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .mapapp-drawer-fab {
+    position: absolute;
+    left: 1rem;
+    top: 1rem;
+    z-index: 6;
+    display: inline-grid;
+    place-content: center;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgb(3 10 30 / 0.25);
+  }
+  .mapapp-drawer-fab:hover {
+    background: var(--color-cream);
+  }
+  .mapapp-drawer-fab svg {
+    width: 1.15rem;
+    height: 1.15rem;
+  }
+  .mapapp-drawer {
+    position: absolute;
+    z-index: 6;
+    left: 1rem;
+    top: 1rem;
+    bottom: 1rem;
+    width: clamp(360px, 30vw, 440px);
+    max-width: calc(100% - 2rem);
+    display: flex;
+    flex-direction: column;
+    background: white;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 1rem;
+    box-shadow: 0 18px 50px rgb(3 10 30 / 0.3);
+    overflow: hidden;
+    transition:
+      transform 200ms ease-out,
+      opacity 200ms ease-out;
+  }
+  .mapapp-drawer[data-open="false"] {
+    transform: translateX(-110%);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .mapapp-drawer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid var(--color-border-soft);
+  }
+  .mapapp-drawer-title {
+    font-family: var(--font-display);
+    font-size: 1.6rem;
+    letter-spacing: 0.02em;
+    line-height: 1;
+  }
+  .mapapp-drawer-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0.8rem 1rem 1rem;
+  }
+  .mapapp-search-inline {
+    display: grid;
+    gap: 0.5rem;
+  }
+  .mapapp-search-row {
+    display: flex;
+    gap: 0.4rem;
+  }
+  .mapapp-search-stack {
+    display: grid;
+    gap: 0.4rem;
+  }
+  .mapapp-search-stack .mapapp-search-actions {
+    justify-content: flex-start;
+  }
+  .mapapp-search-field {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+  .mapapp-sb-icon-static {
+    position: absolute;
+    left: 0.8rem;
+    top: 50%;
+    translate: 0 -50%;
+    width: 1.1rem;
+    height: 1.1rem;
+    color: var(--color-muted);
+    pointer-events: none;
+  }
+  .mapapp-search-field input {
+    width: 100%;
+    min-height: 3rem;
+    font-size: 1rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: var(--color-cream);
+    color: var(--color-ink);
+    padding: 0.6rem 0.8rem 0.6rem 2.5rem;
+  }
+  .mapapp-search-actions {
+    display: flex;
+    gap: 0.35rem;
+    flex: none;
+  }
+  .mapapp-sb-icon {
+    position: relative;
+    display: inline-grid;
+    place-content: center;
+    min-width: 2.75rem;
+    min-height: 3rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    cursor: pointer;
+  }
+  .mapapp-sb-icon:hover:not(:disabled) {
+    background: var(--color-cream);
+  }
+  .mapapp-sb-icon:disabled {
+    cursor: wait;
+    opacity: 0.65;
+  }
+  .mapapp-sb-icon svg {
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+  .mapapp-sb-badge {
+    position: absolute;
+    top: -0.4rem;
+    right: -0.4rem;
+    display: inline-grid;
+    place-content: center;
+    min-width: 1.3rem;
+    height: 1.3rem;
+    border-radius: 9999px;
+    background: var(--color-mango);
+    color: var(--color-ink);
+    font-size: 0.75rem;
+    font-weight: 800;
+    padding-inline: 0.25rem;
+  }
+  .mapapp-suggest {
+    display: grid;
+    gap: 0.15rem;
+    background: white;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    box-shadow: 0 18px 50px rgb(3 10 30 / 0.25);
+    padding: 0.35rem;
+    max-height: 19rem;
+    overflow: auto;
+    list-style: none;
+    margin: 0;
+  }
+  .mapapp-suggest > li {
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+  }
+  .mapapp-suggest button {
+    display: grid;
+    gap: 0.1rem;
+    width: 100%;
+    text-align: left;
+    padding: 0.6rem 0.75rem;
+    border: 0;
+    border-radius: 0.5rem;
+    background: transparent;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+  }
+  .mapapp-suggest button[data-active="true"],
+  .mapapp-suggest button:focus-visible {
+    background: var(--color-cream);
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: -2px;
+  }
+  .mapapp-suggest-kind {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-food-orange-strong);
+  }
+  .mapapp-suggest-label {
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+  .mapapp-suggest-enter {
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .mapapp-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    border: 0;
+    margin: 0;
+    padding: 0;
+  }
+  .mapapp-chip,
+  .mapapp-chip-dish {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: var(--color-cream);
+    color: var(--color-ink);
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 0.3rem 0.35rem 0.3rem 0.8rem;
+    max-width: 100%;
+  }
+  .mapapp-chip-dish {
+    border-color: var(--color-food-orange-strong);
+    background: white;
+  }
+  .mapapp-chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mapapp-chip-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-weight: 700;
+    color: var(--color-brand-blue-hover);
+  }
+  .mapapp-chip-link svg {
+    width: 0.9rem;
+    height: 0.9rem;
+  }
+  .mapapp-chip-x {
+    display: inline-grid;
+    place-content: center;
+    min-width: 2rem;
+    min-height: 2rem;
+    border-radius: 9999px;
+    border: 0;
+    background: transparent;
+    color: var(--color-ink);
+    cursor: pointer;
+  }
+  .mapapp-chip-x:hover {
+    background: rgb(3 10 30 / 0.08);
+  }
+  .mapapp-chip-x svg {
+    width: 0.9rem;
+    height: 0.9rem;
+  }
+  .mapapp-region {
+    font-size: 0.82rem;
+    color: var(--color-muted);
+  }
+  .mapapp-count {
+    font-weight: 700;
+    color: var(--color-ink);
+    font-size: 0.95rem;
+  }
+  .mapapp-price-scope {
+    display: grid;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+  .mapapp-price-scope-head {
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 700;
+    font-size: 0.88rem;
+    color: var(--color-ink);
+  }
+  .mapapp-price-scope-range {
+    margin: 0;
+    min-width: 0;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+  .mapapp-price-scope-range span {
+    font-weight: 700;
+  }
+  .mapapp-price-scope .mapapp-ghost-btn {
+    justify-self: start;
+    min-height: 2.5rem;
+    font-size: 0.85rem;
+    padding: 0.4rem 1rem;
+  }
+  .mapapp-note {
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .mapapp-alert {
+    border: 2px solid #b91c1c;
+    border-radius: 0.75rem;
+    background: white;
+    color: var(--color-ink);
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 0.7rem 0.9rem;
+  }
+  .mapapp-status {
+    display: grid;
+    gap: 0.5rem;
+    background: var(--color-cream);
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    padding: 1rem;
+  }
+  .mapapp-status h3 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+  .mapapp-status p {
+    font-size: 0.9rem;
+    color: var(--color-muted);
+  }
+  .mapapp-status-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .mapapp-list {
+    display: grid;
+    gap: 0.9rem;
+    align-content: start;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .mapapp-list li[data-selected="true"] .res-card {
+    border-color: var(--color-brand-blue);
+    outline: 2px solid var(--color-brand-blue);
+  }
+  .mapapp-preview {
+    display: grid;
+    gap: 0.45rem;
+    background: white;
+    border: 1px solid var(--color-brand-blue);
+    border-radius: 0.75rem;
+    padding: 0.9rem 1rem 1rem;
+  }
+  .mapapp-preview-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .mapapp-preview-back {
+    display: inline-flex;
+    min-height: 2.5rem;
+    align-items: center;
+    gap: 0.35rem;
+    border: 0;
+    background: none;
+    padding: 0;
+    color: var(--color-brand-blue-hover);
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  .mapapp-preview-back svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .mapapp-preview-x {
+    display: inline-grid;
+    place-content: center;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    cursor: pointer;
+  }
+  .mapapp-preview-x:hover {
+    background: var(--color-cream);
+  }
+  .mapapp-preview-x svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .mapapp-preview-eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-food-orange-strong);
+  }
+  .mapapp-preview-title {
+    font-size: 1.25rem;
+    line-height: 1.2;
+  }
+  .mapapp-preview-title a {
+    color: var(--color-ink);
+    text-decoration: none;
+  }
+  .mapapp-preview-title a:hover {
+    color: var(--color-brand-blue-hover);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .mapapp-preview-addr {
+    font-size: 0.9rem;
+    color: var(--color-muted);
+  }
+  .mapapp-preview-dish {
+    display: grid;
+    gap: 0.25rem;
+    border-top: 1px dashed var(--color-border-soft);
+    padding-top: 0.6rem;
+  }
+  .mapapp-preview-dishname {
+    font-weight: 700;
+    color: var(--color-ink);
+    font-size: 0.95rem;
+  }
+  .mapapp-preview-na {
+    font-size: 0.88rem;
+    color: var(--color-muted);
+  }
+  .mapapp-preview-meta {
+    font-size: 0.8rem;
+    color: var(--color-muted);
+  }
+  .mapapp-preview-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
+  }
+  .mapapp-preview-view {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.45rem;
+    border-radius: 9999px;
+    background: var(--color-food-orange-strong);
+    color: white;
+    font-weight: 700;
+    font-size: 0.92rem;
+    padding: 0.5rem 1.2rem;
+    text-decoration: none;
+  }
+  .mapapp-preview-view:hover {
+    background: var(--color-food-orange-dark);
+  }
+  .mapapp-preview-view svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .mapapp-preview-mapbtn {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.45rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 0.5rem 1.1rem;
+    cursor: pointer;
+  }
+  .mapapp-preview-mapbtn:hover {
+    background: var(--color-cream);
+  }
+  .mapapp-preview-mapbtn svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  /* Venue photo strip: responsive grid with reserved 4:3 boxes so lazy
+     images never shift layout. Fixture art is 800x600; real photos keep
+     their own intrinsic ratio via width/height attributes + cover. */
+  .mapapp-preview-photos {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  }
+  .mapapp-preview-photos li {
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+    aspect-ratio: 4 / 3;
+    overflow: hidden;
+    border-radius: 0.5rem;
+    background: var(--color-cream);
+  }
+  .mapapp-preview-photos img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .mapapp-options {
+    border-top: 1px solid var(--color-border-soft);
+    padding-top: 0.6rem;
+  }
+  .mapapp-options summary {
+    min-height: 2.75rem;
+    display: flex;
+    align-items: center;
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: var(--color-ink);
+    cursor: pointer;
+    border-radius: 0.5rem;
+  }
+  .mapapp-options summary:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .mapapp-options .currency-selector {
+    margin-top: 0.5rem;
+  }
+  .mapapp-sort {
+    display: grid;
+    gap: 0.3rem;
+    margin-top: 0.6rem;
+    font-weight: 700;
+    font-size: 0.9rem;
+  }
+  .mapapp-sort select,
+  .mapapp-options .currency-selector select {
+    min-height: 2.75rem;
+    font-size: 0.95rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: white;
+    color: var(--color-ink);
+    padding: 0.5rem 0.75rem;
+    width: 100%;
+  }
+  .mapapp-topsearch {
+    position: absolute;
+    z-index: 6;
+    inset-inline: 0.75rem;
+    top: calc(0.75rem + env(safe-area-inset-top));
+    /* Bound the expanded panel to the map stage: percentages resolve
+       against .mapapp-body (positioned), not the auto-height bar. */
+    max-height: calc(100% - 1rem);
+    display: grid;
+    align-content: start;
+  }
+  .mapapp-search-collapsed {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: white;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 9999px;
+    box-shadow: 0 12px 32px rgb(3 10 30 / 0.25);
+    padding: 0.25rem 0.25rem 0.25rem 0.8rem;
+  }
+  .mapapp-search-collapsed input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    font-size: 1rem;
+    min-height: 2.75rem;
+    color: var(--color-ink);
+  }
+  .mapapp-search-collapsed input:focus {
+    outline: none;
+  }
+  .mapapp-search-collapsed:focus-within {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 1px;
+  }
+  .mapapp-sb-icon-static {
+    width: 1.1rem;
+    height: 1.1rem;
+    color: var(--color-muted);
+    flex: none;
+  }
+  .mapapp-search-panel {
+    background: white;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 1rem;
+    box-shadow: 0 18px 50px rgb(3 10 30 / 0.35);
+    padding: 0.6rem 0.65rem 0.65rem;
+    display: grid;
+    gap: 0.5rem;
+    max-height: 100%;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+  .mapapp-search-panel-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .mapapp-search-panel-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+  .mapapp-sheet {
+    position: relative;
+    z-index: 5;
+    flex: none;
+    min-width: 0;
+    background: white;
+    border-top: 1px solid var(--color-border-soft);
+    border-radius: 1.25rem 1.25rem 0 0;
+    box-shadow: 0 -12px 40px rgb(3 10 30 / 0.25);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .mapapp-sheet[data-dragging="true"] {
+    transition: none;
+  }
+  .mapapp-sheet:not([data-dragging="true"]) {
+    transition: height 200ms ease-out;
+  }
+  .mapapp-sheet-handle {
+    flex: none;
+    min-width: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.75rem;
+    min-height: 2.75rem;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: grab;
+    touch-action: none;
+    appearance: none;
+  }
+  .mapapp-sheet-handle:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: -2px;
+  }
+  .mapapp-sheet-grip {
+    width: 2.75rem;
+    height: 0.3rem;
+    border-radius: 9999px;
+    background: var(--color-border-soft);
+    flex: none;
+  }
+  .mapapp-sheet-summary {
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+    min-width: 0;
+    flex: 1;
+  }
+  .mapapp-sheet-summary strong {
+    color: var(--color-ink);
+    font-size: 0.95rem;
+    white-space: nowrap;
+  }
+  .mapapp-sheet-summary span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mapapp-sheet-chevron {
+    width: 1.1rem;
+    height: 1.1rem;
+    flex: none;
+    color: var(--color-muted);
+    transition: transform 200ms ease-out;
+  }
+  .mapapp-sheet-chevron[data-open="true"] {
+    transform: rotate(180deg);
+  }
+  .mapapp-sheet-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0 0.9rem 1rem;
+  }
+  /* Peek (data-snap="0") hides the body via the hidden attribute: the
+     author display:flex above beats the UA [hidden] rule, so restate it.
+     Only the drag handle + grounded count label remain visible. */
+  .mapapp-sheet-body[hidden] {
+    display: none;
+  }
+  .restaurant-pin {
+    display: grid;
+    place-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+    border: 0;
+    border-radius: 0.75rem;
+    background: transparent;
+    cursor: pointer;
+  }
+  .restaurant-pin svg {
+    width: 38px;
+    height: 38px;
+    transform: scale(0.79);
+    transition: transform 150ms ease-out;
+    filter: drop-shadow(0 2px 5px rgb(3 10 30 / 0.5));
+  }
+  .restaurant-pin.is-selected svg {
+    transform: scale(1);
+    filter: drop-shadow(0 5px 14px rgb(3 10 30 / 0.6));
+  }
+  .restaurant-pin:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .restaurant-pin svg {
+      transition: none;
+    }
+  }
+  /* Warm production basemap decision (implemented in
+     restaurant-map.tsx WARM_BASEMAP/applyWarmBasemap): keep MapLibre +
+     VITE_MAP_STYLE_URL; warm via decorative paint (cream land #FAF6EC,
+     soft-blue water #BFDDF0, light-green parks #D8EACD, muted amber
+     arterials #EFCF96, white minors, haloed labels). Recommended tile
+     provider: MapTiler Streets (vector, vi labels, key + domain lock,
+     usage billing + alerts) or CARTO Voyager (positron/voyager, OSM
+     attribution). Never tile.openstreetmap.org as a production CDN.
+     Attribution stays compact-visible; pins (#E53935) and user dot
+     (brand blue) are the only saturated marks. Zoom 13-17 framing is
+     owned by the map camera; cooperativeGestures stays off. */
+  .mapapp-mapwrap .discovery-map-empty {
+    position: absolute;
+    left: 50%;
+    bottom: 4.25rem;
+    translate: -50% 0;
+    z-index: 4;
+    max-width: min(22rem, calc(100% - 2rem));
+    display: grid;
+    gap: 0.2rem;
+    background: rgb(255 255 255 / 0.94);
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    box-shadow: 0 8px 24px rgb(3 10 30 / 0.18);
+    padding: 0.6rem 0.85rem;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+    pointer-events: none;
+    text-align: center;
+  }
+  .discovery-map-empty-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+  .discovery-map-empty p {
+    margin: 0;
+  }
+  /* Empty-overlay actions (map-owned): the overlay itself never
+     intercepts gestures (pointer-events none above); only these buttons
+     opt back in so pan/zoom keep working around them. Widen preserves
+     dish identity via the parent navigation; the radius chip opens the
+     existing radius options dialog (⌄ affordance, never a bare X). */
+  .discovery-map-empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    justify-content: center;
+    margin-top: 0.35rem;
+    pointer-events: auto;
+  }
+  .discovery-map-empty-actions .mapapp-primary-btn,
+  .discovery-map-empty-actions .mapapp-chip-btn {
+    min-height: 2.5rem;
+    font-size: 0.85rem;
+    padding: 0.4rem 1rem;
+  }
+  .discovery-map-empty-actions .mapapp-chip-btn:focus-visible,
+  .discovery-map-empty-actions .mapapp-primary-btn:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  /* Skeleton shimmer for in-sheet / card / venue loading states. Opacity
+     and background-position only; disabled under reduced motion. */
+  .mapapp-skel {
+    display: grid;
+    gap: 0.45rem;
+  }
+  .mapapp-skeleton {
+    display: grid;
+    gap: 0.6rem;
+  }
+  .mapapp-skel-card {
+    display: grid;
+    gap: 0.45rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 0.9rem 1rem;
+    list-style: none;
+  }
+  .mapapp-skel-line {
+    display: block;
+    height: 0.85rem;
+    border-radius: 9999px;
+    background: linear-gradient(
+      90deg,
+      var(--color-cream) 25%,
+      var(--color-border-soft) 50%,
+      var(--color-cream) 75%
+    );
+    background-size: 200% 100%;
+    animation: mapapp-skel 1.4s ease-in-out infinite;
+  }
+  .mapapp-skel-line.wide {
+    height: 1.1rem;
+    width: 75%;
+  }
+  .mapapp-skel-line.narrow {
+    width: 40%;
+  }
+  @keyframes mapapp-skel {
+    to {
+      background-position: -200% 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mapapp-drawer,
+    .mapapp-sheet:not([data-dragging="true"]),
+    .mapapp-search-area,
+    .mapapp-sheet-chevron {
+      transition: none;
+    }
+    .mapapp-spin {
+      animation: none;
+    }
+    .mapapp-skel-line {
+      animation: none;
+    }
+  }
+}

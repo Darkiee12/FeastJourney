@@ -29,7 +29,7 @@ const statements = {
   favorite: ["create", "read", "delete"],
   profile: ["read", "update"],
   food: ["read", "create", "update", "publish", "import"],
-  restaurant: ["read", "submit", "verify"],
+  restaurant: ["read", "submit", "verify", "manage", "review"],
   moderation: ["read", "resolve"],
   support: ["read", "manage"],
   admin: ["access"],

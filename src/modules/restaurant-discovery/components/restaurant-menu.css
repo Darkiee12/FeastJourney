@@ -1,0 +1,212 @@
+/* Self-fetching restaurant menu panel (PR13).
+   Scoped under .restaurant-menu-panel and .menu-panel-* only;
+   tokens come from styles.css @theme. */
+@layer components {
+  .restaurant-menu-panel {
+    display: grid;
+    gap: 0.75rem;
+    min-width: 0;
+  }
+  .menu-panel-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .menu-panel-back {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.45rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 0.5rem 1.1rem;
+    cursor: pointer;
+  }
+  .menu-panel-back:hover {
+    background: var(--color-cream);
+  }
+  .menu-panel-back:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .menu-panel-back svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .menu-panel-channels {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .menu-panel-channels legend {
+    padding: 0;
+  }
+  .menu-panel-chip {
+    min-height: 2.5rem;
+    padding: 0.375rem 0.85rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .menu-panel-chip:hover {
+    background: var(--color-cream);
+  }
+  .menu-panel-chip.is-active {
+    background: var(--color-ink);
+    border-color: var(--color-ink);
+    color: white;
+  }
+  .menu-panel-chip:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .menu-panel-lang {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .menu-panel-lang-label {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    color: var(--color-muted);
+  }
+  .menu-panel-lang-label svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .menu-panel-lang-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 12rem;
+    min-height: 2.75rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: white;
+    color: var(--color-ink);
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 0.5rem 0.65rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .menu-panel-lang-select:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .menu-panel-lang-suggest {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    min-width: 0;
+  }
+  .menu-panel-lang-suggest button {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 9999px;
+    background: white;
+    color: var(--color-ink);
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 0.25rem 0.65rem;
+    cursor: pointer;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .menu-panel-lang-suggest button:hover {
+    background: var(--color-cream);
+  }
+  .menu-panel-lang-suggest button:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .menu-panel-lang-note {
+    flex-basis: 100%;
+    min-width: 0;
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    color: var(--color-muted);
+  }
+  .menu-panel-scroll {
+    display: grid;
+    gap: 0.75rem;
+    min-width: 0;
+  }
+  .menu-panel-loading {
+    display: grid;
+    gap: 0.6rem;
+  }
+  .menu-panel-skeleton {
+    min-height: 4rem;
+    border-radius: 0.75rem;
+    background: var(--color-cream);
+    border: 1px solid var(--color-border-soft);
+  }
+  .menu-panel-error {
+    display: grid;
+    gap: 0.6rem;
+    justify-items: start;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 1.25rem;
+  }
+  .menu-panel-retry {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    background: var(--color-food-orange-strong);
+    color: white;
+    font-weight: 700;
+    padding: 0.5rem 1.25rem;
+    cursor: pointer;
+  }
+  .menu-panel-retry:hover {
+    background: var(--color-food-orange-dark);
+  }
+  .menu-panel-retry:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .menu-panel-empty {
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 1.25rem;
+    color: var(--color-muted);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .menu-panel-back,
+    .menu-panel-retry {
+      transition: none;
+    }
+  }
+}

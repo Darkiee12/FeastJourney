@@ -8,6 +8,7 @@ import {
   RECOMMENDATION_MOODS,
 } from "@/modules/food-discovery/recommendation.constants";
 import {
+  MAX_REASON_LENGTH,
   RANKING_RESPONSE_FORMAT,
   RANKING_SCHEMA,
   decodeRankingPayload,
@@ -39,12 +40,25 @@ describe("recommendation transport/domain parity", () => {
 describe("provider schema parity", () => {
   test("provider schema pins the exact ranking contract", () => {
     expect(RANKING_SCHEMA.type).toBe("object");
-    expect(RANKING_SCHEMA.required).toEqual(["ranked_candidate_ids"]);
+    expect(RANKING_SCHEMA.required).toEqual(["ranked_candidate_ids", "reasons"]);
     expect(RANKING_SCHEMA.additionalProperties).toBe(false);
     expect(RANKING_SCHEMA.properties.ranked_candidate_ids).toEqual({
       type: "array",
       items: { type: "string" },
     });
+    expect(RANKING_SCHEMA.properties.reasons).toEqual({
+      type: "array",
+      items: { type: "string", maxLength: MAX_REASON_LENGTH },
+    });
+    expect(MAX_REASON_LENGTH).toBe(340);
+  });
+
+  test("provider schema stays within the strict:true subset", () => {
+    expect(RANKING_SCHEMA.type).toBe("object");
+    expect(RANKING_SCHEMA.additionalProperties).toBe(false);
+    expect(Object.keys(RANKING_SCHEMA.properties).toSorted()).toEqual(
+      [...RANKING_SCHEMA.required].toSorted(),
+    );
   });
 
   test("request envelope pins strict structured output", () => {
@@ -55,7 +69,9 @@ describe("provider schema parity", () => {
   });
 
   test("canonical codec accepts provider-shaped payloads and rejects the rest", () => {
-    const valid = decodeRankingPayload(JSON.parse('{"ranked_candidate_ids": ["1", "2"]}'));
+    const valid = decodeRankingPayload(
+      JSON.parse('{"ranked_candidate_ids": ["1", "2"], "reasons": ["a", "b"]}'),
+    );
 
     expect(Option.isSome(valid)).toBe(true);
 
@@ -66,5 +82,25 @@ describe("provider schema parity", () => {
     const wrongItems = decodeRankingPayload(JSON.parse('{"ranked_candidate_ids": [1, 2]}'));
 
     expect(Option.isNone(wrongItems)).toBe(true);
+
+    const missingReasons = decodeRankingPayload(JSON.parse('{"ranked_candidate_ids": ["1"]}'));
+
+    expect(Option.isNone(missingReasons)).toBe(true);
+
+    const longReason = decodeRankingPayload(
+      JSON.parse(
+        `{"ranked_candidate_ids": ["1"], "reasons": ["${"x".repeat(MAX_REASON_LENGTH + 1)}"]}`,
+      ),
+    );
+
+    expect(Option.isNone(longReason)).toBe(true);
+
+    const atLimit = decodeRankingPayload(
+      JSON.parse(
+        `{"ranked_candidate_ids": ["1"], "reasons": ["${"x".repeat(MAX_REASON_LENGTH)}"]}`,
+      ),
+    );
+
+    expect(Option.isSome(atLimit)).toBe(true);
   });
 });

@@ -19,6 +19,7 @@ const full: AdminCapabilities = {
   members: true,
   overview: true,
   reviews: true,
+  restaurants: true,
   roles: true,
 };
 
@@ -42,7 +43,7 @@ describe("adminNavEntries", () => {
     expect(adminNavEntries(NO_ADMIN_CAPABILITIES, copy)).toEqual([]);
   });
 
-  test("exposes all seven sections with dashboard exact", () => {
+  test("exposes all eight sections with dashboard exact", () => {
     const entries = adminNavEntries(full, copy);
 
     expect(entries.map((entry) => entry.to)).toEqual([
@@ -50,6 +51,7 @@ describe("adminNavEntries", () => {
       "/admin/dishes",
       "/admin/places",
       "/admin/imports",
+      "/admin/restaurants",
       "/admin/reviews",
       "/admin/users",
       "/admin/roles",

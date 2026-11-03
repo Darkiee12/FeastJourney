@@ -1,0 +1,1158 @@
+/* Restaurant discovery search styles (PR13 split): dish/venue search,
+   cards, filters, sheets, and detail layouts. Namespaced under
+   .discovery-*, .restaurant-*, .res-*, and .currency-selector so the
+   homepage (.home, .hero, .discover-carousel-*) is untouched. */
+@layer components {
+  .discovery-page {
+    display: grid;
+    gap: 1.5rem;
+    min-width: 0;
+  }
+  .discovery-page nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+  .discovery-page a {
+    color: var(--color-brand-blue-hover);
+    text-underline-offset: 3px;
+  }
+  .discovery-page header {
+    display: grid;
+    gap: 0.75rem;
+  }
+  .discovery-page h1 {
+    font-family: var(--font-display);
+    font-size: clamp(2.5rem, 6vw, 4rem);
+    line-height: 1.1;
+  }
+  .discovery-page h2 {
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+  .discovery-page h3 {
+    font-size: 1rem;
+    font-weight: 600;
+  }
+  .discovery-page input,
+  .discovery-page select,
+  .discovery-page textarea {
+    width: 100%;
+    min-height: 2.75rem;
+    border: 1px solid var(--color-muted);
+    border-radius: 0.5rem;
+    background: white;
+    padding: 0.5rem 0.75rem;
+    color: var(--color-ink);
+  }
+  .discovery-page label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+  .discovery-page button:where(:not(.maplibregl-ctrl button)),
+  .discovery-page .discovery-action {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.5rem;
+    border: 1px solid transparent;
+    padding: 0.5rem 1rem;
+    background: var(--color-food-orange-strong);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .discovery-page button:where(:not(.maplibregl-ctrl button)):hover,
+  .discovery-page .discovery-action:hover {
+    background: var(--color-food-orange-dark);
+  }
+  .discovery-page button:where(:not(.maplibregl-ctrl button)):disabled {
+    cursor: wait;
+    opacity: 0.65;
+  }
+  .discovery-page button.secondary {
+    background: white;
+    border-color: var(--color-muted);
+    color: var(--color-ink);
+  }
+  .discovery-page button.secondary:hover {
+    background: var(--color-cream);
+  }
+  .discovery-eyebrow {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-food-orange-strong);
+  }
+  .discovery-card {
+    display: grid;
+    gap: 0.75rem;
+    padding: 1.5rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.5rem;
+    background: white;
+    overflow-wrap: anywhere;
+  }
+  .discovery-card[data-selected="true"] {
+    border-color: var(--color-brand-blue);
+    outline: 2px solid var(--color-brand-blue);
+  }
+  .discovery-card-actions,
+  .filter-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .discovery-selection {
+    border-left: 3px solid var(--color-food-orange-strong);
+    padding-left: 1rem;
+  }
+  .discovery-empty,
+  .discovery-message {
+    display: grid;
+    gap: 1rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.5rem;
+    background: white;
+    padding: 1.5rem;
+  }
+  .discovery-message {
+    border-color: var(--color-food-orange-strong);
+  }
+  .currency-selector {
+    display: grid;
+    gap: 0.25rem;
+    max-width: 24rem;
+  }
+  .currency-selector small {
+    color: var(--color-muted);
+  }
+  .restaurant-filters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.5rem;
+    background: white;
+  }
+  .filter-help,
+  .filter-actions {
+    grid-column: 1 / -1;
+  }
+  .filter-help {
+    font-size: 0.875rem;
+    color: var(--color-muted);
+  }
+  .restaurant-results,
+  .restaurant-detail-layout {
+    display: grid;
+    gap: 1.5rem;
+    min-width: 0;
+  }
+  .restaurant-result-list ol {
+    display: grid;
+    gap: 1rem;
+    list-style: none;
+  }
+  .restaurant-offering {
+    border-top: 1px solid var(--color-border-soft);
+    padding-top: 0.75rem;
+    display: grid;
+    gap: 0.5rem;
+  }
+  .discovery-results-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .mobile-map-toggle {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .mobile-map-toggle button {
+    background: white;
+    border-color: var(--color-muted);
+    color: var(--color-ink);
+  }
+  .mobile-map-toggle button[aria-pressed="true"] {
+    background: var(--color-ocean-deep);
+    color: white;
+  }
+  .restaurant-results[data-mobile-view="list"] .restaurant-result-map {
+    display: none;
+  }
+  .restaurant-results[data-mobile-view="map"] .restaurant-result-list {
+    display: none;
+  }
+  .discovery-map,
+  .discovery-map-fallback {
+    height: 28rem;
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.5rem;
+  }
+  .discovery-map-fallback {
+    display: grid;
+    place-content: center;
+    padding: 1.5rem;
+    background: white;
+    color: var(--color-muted);
+  }
+  .discovery-page .restaurant-pin {
+    min-width: 2.75rem;
+    border-radius: 50%;
+    background: var(--color-ocean-deep);
+    border: 2px solid white;
+  }
+  .discovery-page .restaurant-pin[aria-pressed="true"] {
+    background: var(--color-food-orange-strong);
+  }
+  .dish-discovery-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  }
+  .discovery-search-bar {
+    display: grid;
+    gap: 0.5rem;
+    max-width: 36rem;
+  }
+  @media (min-width: 64rem) {
+    .restaurant-filters {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .restaurant-results,
+    .restaurant-detail-layout {
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+      align-items: start;
+    }
+    .restaurant-result-map {
+      position: sticky;
+      top: 6rem;
+    }
+    .restaurant-results[data-mobile-view] .restaurant-result-list,
+    .restaurant-results[data-mobile-view] .restaurant-result-map {
+      display: block;
+    }
+    .mobile-map-toggle {
+      display: none;
+    }
+  }
+  @media (max-width: 24rem) {
+    .restaurant-filters {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  /* Traveler-first restaurant discovery: hero search, cards, sheet. */
+  .res-page {
+    display: grid;
+    gap: 0;
+    min-width: 0;
+  }
+  .res-hero {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(180deg, var(--color-space-deep), var(--color-ocean-deep));
+    color: white;
+  }
+  .res-hero-inner {
+    position: relative;
+    z-index: 2;
+    margin-inline: auto;
+    width: 100%;
+    max-width: 56rem;
+    padding: 2.5rem 1.25rem 2rem;
+    text-align: center;
+  }
+  .res-eyebrow {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-mango);
+  }
+  .res-title {
+    font-family: var(--font-display);
+    font-size: clamp(2.5rem, 8vw, 4rem);
+    line-height: 1.05;
+    letter-spacing: 0.015em;
+    text-wrap: balance;
+    margin-top: 0.5rem;
+    text-shadow: var(--text-shadow-hero);
+  }
+  .res-sub {
+    margin-top: 0.5rem;
+    font-size: clamp(1rem, 2.4vw, 1.15rem);
+    font-weight: 600;
+    color: white;
+  }
+  .res-searchbar {
+    margin-top: 1.5rem;
+    display: grid;
+    gap: 0.75rem;
+    background: white;
+    color: var(--color-ink);
+    border-radius: 1rem;
+    padding: 0.9rem;
+    box-shadow: 0 18px 50px rgb(3 10 30 / 0.45);
+    text-align: left;
+  }
+  .res-search-field {
+    position: relative;
+  }
+  .res-search-field > svg,
+  .res-area > svg {
+    position: absolute;
+    left: 0.9rem;
+    top: 50%;
+    translate: 0 -50%;
+    width: 1.15rem;
+    height: 1.15rem;
+    color: var(--color-muted);
+    pointer-events: none;
+  }
+  .res-search-field input,
+  .res-area select {
+    width: 100%;
+    min-height: 3rem;
+    font-size: 1rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: var(--color-cream);
+    color: var(--color-ink);
+    padding: 0.65rem 0.9rem 0.65rem 2.7rem;
+  }
+  .res-search-field input:focus-visible,
+  .res-area select:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 1px;
+    border-color: var(--color-brand-blue);
+  }
+  .res-suggest {
+    position: absolute;
+    z-index: 30;
+    inset-inline: 0;
+    top: calc(100% + 0.4rem);
+    margin: 0;
+    padding: 0.35rem;
+    list-style: none;
+    background: white;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    box-shadow: 0 18px 50px rgb(3 10 30 / 0.25);
+    max-height: 19rem;
+    overflow: auto;
+  }
+  .res-suggest button {
+    display: grid;
+    gap: 0.1rem;
+    width: 100%;
+    text-align: left;
+    padding: 0.6rem 0.75rem;
+    border: 0;
+    border-radius: 0.5rem;
+    background: transparent;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+  }
+  .res-suggest button[data-active="true"],
+  .res-suggest button:focus-visible {
+    background: var(--color-cream);
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: -2px;
+  }
+  .res-suggest-kind {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-food-orange-strong);
+  }
+  .res-suggest-label {
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+  .res-suggest-enter {
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .res-search-row {
+    display: grid;
+    gap: 0.4rem;
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+  .res-area {
+    position: relative;
+    grid-column: 1 / -1;
+  }
+  .res-near,
+  .res-go,
+  .res-filters-btn {
+    white-space: nowrap;
+    padding: 0.6rem 0.5rem;
+    font-size: 0.85rem;
+    min-width: 0;
+  }
+  .res-near,
+  .res-go,
+  .res-filters-btn {
+    display: inline-flex;
+    min-height: 3rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    border-radius: 9999px;
+    padding: 0.6rem 1.1rem;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .res-near svg,
+  .res-filters-btn svg {
+    width: 1.05rem;
+    height: 1.05rem;
+  }
+  .res-go {
+    background: var(--color-food-orange-strong);
+    color: white;
+    box-shadow: 0 10px 28px rgb(194 65 12 / 0.45);
+  }
+  .res-go:hover {
+    background: var(--color-food-orange-dark);
+  }
+  .res-near {
+    background: white;
+    border-color: var(--color-border-soft);
+    color: var(--color-ink);
+  }
+  .res-near:hover:not(:disabled) {
+    background: var(--color-cream);
+  }
+  .res-near:disabled {
+    cursor: wait;
+    opacity: 0.65;
+  }
+  .res-filters-btn {
+    position: relative;
+    background: var(--color-ocean-deep);
+    color: white;
+  }
+  .res-filters-btn:hover {
+    background: var(--color-space-deep);
+  }
+  .res-filters-badge {
+    display: inline-grid;
+    place-content: center;
+    min-width: 1.4rem;
+    height: 1.4rem;
+    border-radius: 9999px;
+    background: var(--color-mango);
+    color: var(--color-ink);
+    font-size: 0.8rem;
+    font-weight: 800;
+    padding-inline: 0.3rem;
+  }
+  .res-near:focus-visible,
+  .res-go:focus-visible,
+  .res-filters-btn:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .res-dish {
+    margin: 1.25rem auto 0;
+    width: min(100% - 2.5rem, 56rem);
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+    background: white;
+    border: 1px solid var(--color-border-soft);
+    border-left: 4px solid var(--color-food-orange-strong);
+    border-radius: 1rem;
+    padding: 1.1rem 1.25rem;
+  }
+  .res-dish-avatar {
+    display: grid;
+    place-content: center;
+    flex: none;
+    width: 3.25rem;
+    height: 3.25rem;
+    border-radius: 9999px;
+    background: var(--color-food-orange-strong);
+    color: white;
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    line-height: 1;
+  }
+  .res-dish-body {
+    display: grid;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+  .res-dish-body h2 {
+    font-family: var(--font-display);
+    font-size: 1.6rem;
+    letter-spacing: 0.02em;
+  }
+  .res-dish-body p {
+    font-size: 0.9rem;
+    color: var(--color-muted);
+  }
+  .res-dish-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-top: 0.35rem;
+  }
+  .res-dish-actions a {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 700;
+    color: var(--color-brand-blue-hover);
+  }
+  .res-dish-actions a svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .res-ghost {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.4rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 0.45rem 1rem;
+    cursor: pointer;
+  }
+  .res-ghost:hover {
+    background: var(--color-cream);
+  }
+  .res-ghost svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .res-primary {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    background: var(--color-food-orange-strong);
+    color: white;
+    font-weight: 700;
+    padding: 0.55rem 1.4rem;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .res-primary:hover {
+    background: var(--color-food-orange-dark);
+  }
+  .res-primary:focus-visible,
+  .res-ghost:focus-visible,
+  .res-dish-actions a:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .res-main {
+    margin-inline: auto;
+    width: 100%;
+    max-width: 72rem;
+    padding: 1.5rem 1.25rem 3rem;
+    display: grid;
+    gap: 1rem;
+    align-content: start;
+  }
+  .res-alert {
+    margin: 1.25rem auto 0;
+    width: min(100% - 2.5rem, 56rem);
+    border: 2px solid #b91c1c;
+    border-radius: 0.75rem;
+    background: white;
+    color: var(--color-ink);
+    font-weight: 600;
+    padding: 0.9rem 1.1rem;
+  }
+  .res-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .res-count {
+    margin-right: auto;
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+  .res-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .res-tools .currency-selector {
+    max-width: none;
+  }
+  .res-tools .currency-selector label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .res-tools select {
+    min-height: 2.75rem;
+    font-size: 0.9rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 9999px;
+    background: white;
+    color: var(--color-ink);
+    padding: 0.45rem 0.8rem;
+    max-width: 15rem;
+  }
+  .res-viewtoggle {
+    display: inline-flex;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 9999px;
+    background: white;
+    padding: 0.2rem;
+  }
+  .res-viewtoggle button {
+    min-height: 2.4rem;
+    border: 0;
+    border-radius: 9999px;
+    background: transparent;
+    color: var(--color-ink);
+    font-weight: 700;
+    font-size: 0.9rem;
+    padding: 0.3rem 1rem;
+    cursor: pointer;
+  }
+  .res-viewtoggle button[aria-pressed="true"] {
+    background: var(--color-ocean-deep);
+    color: white;
+  }
+  .res-location {
+    font-size: 0.9rem;
+    color: var(--color-muted);
+  }
+  .res-location button {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: var(--color-brand-blue-hover);
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+    font-size: inherit;
+  }
+  .res-note {
+    font-size: 0.9rem;
+    color: var(--color-muted);
+  }
+  .res-results {
+    display: grid;
+    gap: 1.5rem;
+    min-width: 0;
+    align-items: start;
+  }
+  .res-results[data-mobile-view="list"] .res-aside {
+    display: none;
+  }
+  .res-results[data-mobile-view="map"] .res-list {
+    display: none;
+  }
+  .res-list {
+    display: grid;
+    gap: 1.25rem;
+    align-content: start;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .res-card {
+    display: grid;
+    background: white;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 1rem;
+    overflow: hidden;
+  }
+  .res-card[data-selected="true"] {
+    border-color: var(--color-brand-blue);
+    outline: 2px solid var(--color-brand-blue);
+  }
+  .res-photo {
+    display: grid;
+    place-content: center;
+    min-height: 7rem;
+    background:
+      radial-gradient(circle at 20% 20%, rgb(194 65 12 / 0.12), transparent 55%),
+      radial-gradient(circle at 85% 30%, rgb(37 99 235 / 0.1), transparent 50%), var(--color-cream);
+  }
+  .res-photo span {
+    font-family: var(--font-display);
+    font-size: 3.5rem;
+    line-height: 1;
+    color: var(--color-food-orange-strong);
+    opacity: 0.85;
+  }
+  .res-card-body {
+    display: grid;
+    gap: 0.4rem;
+    padding: 1.1rem 1.25rem 1.25rem;
+    align-content: start;
+  }
+  .res-card-eyebrow {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-food-orange-strong);
+  }
+  .res-card-body h3 {
+    font-size: 1.35rem;
+    line-height: 1.2;
+  }
+  .res-card-body h3 a {
+    color: var(--color-ink);
+    text-decoration: none;
+  }
+  .res-card-body h3 a:hover {
+    color: var(--color-brand-blue-hover);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .res-card-addr {
+    font-size: 0.92rem;
+    color: var(--color-muted);
+  }
+  .res-match {
+    display: grid;
+    gap: 0.3rem;
+    margin-top: 0.35rem;
+    border-top: 1px dashed var(--color-border-soft);
+    padding-top: 0.7rem;
+  }
+  .res-match-dish {
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+  .res-price-na {
+    font-size: 0.9rem;
+    color: var(--color-muted);
+  }
+  .res-match-meta {
+    font-size: 0.82rem;
+    color: var(--color-muted);
+  }
+  .res-card-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+  }
+  .res-view {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.45rem;
+    border-radius: 9999px;
+    background: var(--color-food-orange-strong);
+    color: white;
+    font-weight: 700;
+    font-size: 0.95rem;
+    padding: 0.55rem 1.25rem;
+    text-decoration: none;
+  }
+  .res-view:hover {
+    background: var(--color-food-orange-dark);
+  }
+  .res-view svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .res-mapbtn {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.45rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 0.5rem 1.1rem;
+    cursor: pointer;
+  }
+  .res-mapbtn:hover {
+    background: var(--color-cream);
+  }
+  .res-mapbtn svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .res-view:focus-visible,
+  .res-mapbtn:focus-visible,
+  .res-card-body h3 a:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .res-aside {
+    display: grid;
+    gap: 0.6rem;
+    align-content: start;
+  }
+  .res-aside > button {
+    min-height: 2.75rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  .res-aside > button:hover {
+    background: var(--color-cream);
+  }
+  .res-empty {
+    display: grid;
+    gap: 0.7rem;
+    justify-items: center;
+    text-align: center;
+    background: white;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 1rem;
+    padding: 2.5rem 1.5rem;
+    max-width: 36rem;
+    margin-inline: auto;
+  }
+  .res-empty-icon {
+    width: 3.5rem;
+    height: 3.5rem;
+    color: var(--color-food-orange-strong);
+  }
+  .res-empty h2 {
+    font-family: var(--font-display);
+    font-size: 1.9rem;
+    letter-spacing: 0.02em;
+  }
+  .res-empty p {
+    color: var(--color-muted);
+    max-width: 28rem;
+  }
+  .res-empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.7rem;
+    margin-top: 0.4rem;
+  }
+  .res-sheet-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgb(7 27 70 / 0.5);
+  }
+  .res-sheet {
+    position: fixed;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    background: white;
+    color: var(--color-ink);
+    inset-inline: 0;
+    bottom: 0;
+    max-height: 88dvh;
+    border-radius: 1.25rem 1.25rem 0 0;
+    box-shadow: 0 -18px 60px rgb(3 10 30 / 0.35);
+  }
+  .res-sheet:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: -2px;
+  }
+  .res-sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.1rem 1.25rem;
+    border-bottom: 1px solid var(--color-border-soft);
+  }
+  .res-sheet-title {
+    font-family: var(--font-display);
+    font-size: 1.8rem;
+    letter-spacing: 0.02em;
+  }
+  .res-icon-btn {
+    display: inline-grid;
+    place-content: center;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    cursor: pointer;
+  }
+  .res-icon-btn:hover {
+    background: var(--color-cream);
+  }
+  .res-icon-btn svg {
+    width: 1.15rem;
+    height: 1.15rem;
+  }
+  .res-sheet-body {
+    display: grid;
+    gap: 1.25rem;
+    padding: 1.25rem;
+    overflow: auto;
+    align-content: start;
+  }
+  .res-field {
+    display: grid;
+    gap: 0.55rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .res-field > label,
+  .res-field > legend {
+    font-weight: 700;
+    font-size: 0.95rem;
+    padding: 0;
+  }
+  .res-field select,
+  .res-field input[type="text"],
+  .res-field input:not([type]) {
+    width: 100%;
+    min-height: 3rem;
+    font-size: 1rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: var(--color-cream);
+    color: var(--color-ink);
+    padding: 0.6rem 0.9rem;
+  }
+  .res-seg {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .res-seg label {
+    flex: 1 1 auto;
+    display: inline-flex;
+    min-height: 3rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    font-weight: 600;
+    font-size: 0.92rem;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+  }
+  .res-seg label[data-checked="true"] {
+    background: var(--color-ocean-deep);
+    border-color: var(--color-ocean-deep);
+    color: white;
+  }
+  .res-seg label[data-disabled="true"] {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .res-seg input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .res-seg label:has(input:focus-visible) {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .res-seg-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .res-hint {
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .res-price-row {
+    display: grid;
+    gap: 0.6rem;
+    grid-template-columns: 1fr 1fr;
+  }
+  .res-price-row label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+  }
+  .res-sheet-foot {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    gap: 0.7rem;
+    padding-top: 0.5rem;
+    background: white;
+  }
+  .res-sheet-foot .res-primary {
+    flex: 1 1 auto;
+  }
+  .res-results[data-map="off"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .res-results[data-map="off"] .res-list {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+  }
+  @media (min-width: 40rem) {
+    .res-search-row {
+      grid-template-columns: minmax(0, 1.4fr) auto auto auto;
+      align-items: center;
+    }
+    .res-area {
+      grid-column: auto;
+    }
+    .res-near,
+    .res-go,
+    .res-filters-btn {
+      padding-inline: 1.1rem;
+    }
+    .res-results[data-map="on"] .res-card {
+      grid-template-columns: 13rem minmax(0, 1fr);
+    }
+    .res-results[data-map="on"] .res-photo {
+      min-height: 100%;
+    }
+    .res-results[data-map="on"] .res-photo span {
+      font-size: 4.5rem;
+    }
+    .res-results[data-map="off"] .res-photo {
+      aspect-ratio: 16 / 9;
+      min-height: 0;
+    }
+    .res-seg-col {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+  @media (min-width: 64rem) {
+    .res-hero-inner {
+      padding-top: 3.5rem;
+    }
+    .res-results {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+    }
+    .res-results[data-mobile-view] .res-list,
+    .res-results[data-mobile-view] .res-aside {
+      display: grid;
+    }
+    .res-viewtoggle {
+      display: none;
+    }
+    .res-aside {
+      position: sticky;
+      top: 5rem;
+    }
+    .res-sheet {
+      inset-inline: auto 0;
+      top: 0;
+      bottom: 0;
+      width: min(26rem, calc(100vw - 2rem));
+      max-height: none;
+      border-radius: 1.25rem 0 0 1.25rem;
+    }
+  }
+  /* Dish-gated restaurant entry actions (dish page + results sheet).
+     Compact pair beside dish content; never rendered without a dish. */
+  .dish-price-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
+  }
+  .dish-price-action {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    padding: 0.5rem 1rem;
+    color: var(--color-ink);
+    font-weight: 600;
+    font-size: 0.875rem;
+    text-decoration: none;
+  }
+  .dish-price-action:hover {
+    background: var(--color-cream);
+  }
+  .dish-price-action svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  /* Price comparison view: honest ranking, originals primary. */
+  .price-compare {
+    display: grid;
+    gap: 0.75rem;
+  }
+  .price-compare-list {
+    display: grid;
+    gap: 0.5rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .price-compare-row {
+    display: grid;
+    gap: 0.25rem;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 0.75rem 1rem;
+  }
+  .price-compare-row > a {
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+  .price-compare-rank {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--color-food-orange-strong);
+  }
+  .price-compare-empty {
+    display: grid;
+    gap: 0.5rem;
+    border: 1px dashed var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 1rem;
+  }
+}

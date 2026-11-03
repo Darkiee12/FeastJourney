@@ -34,6 +34,22 @@ unapplied. Green builds based solely on a stale `.reylo/` cache are
 disallowed: Reylo re-analyzes changed statements against the live schema and
 fails closed without it.
 
+The same `backend` job also provisions a disposable single-node Garage
+(`dxflrs/garage:v2.5.0`) next to PostgreSQL and exports loopback S3 variables
+(`S3_ENDPOINT_INTERNAL=http://127.0.0.1:3900`, region `garage`, bucket
+`feastjourney-private`, generated `S3_ACCESS_KEY_ID` /
+`S3_SECRET_ACCESS_KEY`) to every later step via `$GITHUB_ENV`. The committed
+`infra/.env.example` placeholders are not valid Garage credentials, so the job
+replaces them with `openssl rand`-generated values before
+`compose up -d --wait postgres garage`. A bounded `garage-s3-check.mjs`
+readiness probe (PUT/HEAD/GET plus anonymous/bogus denial and DELETE) fails
+the job fast when the store is unreachable, instead of surfacing as dozens of
+storage-suite failures. The full `bun test --isolate tests/` run then
+exercises the real storage-backed suites (menu scan promotion/hardening,
+garage S3 round-trip, restaurant-photo adapter) against these disposable
+services; suites without S3 configuration fail closed rather than silently
+skipping.
+
 Keep database test fixtures synthetic and disposable; never use user photographs, real account tokens or production credentials. Use PostgreSQL for query tests rather than mocking SQL semantics.
 
 Integration tests refuse to run unless `DATABASE_URL` points at the disposable loopback `feastjourney` test database. The guard lives in `tests/bootstrap.ts`, which Bun preloads before any test module evaluates (`bunfig.toml` `[test] preload`), so static application imports can never observe an unconfigured environment regardless of file order; `tests/integration/cleanup.ts` keeps per-suite fixture tracking plus the same guard as a fallback.
@@ -41,11 +57,32 @@ Integration tests refuse to run unless `DATABASE_URL` points at the disposable l
 ## Developer loop
 
 ```bash
-docker compose --env-file infra/.env -f infra/compose.yaml up -d --wait postgres
+# Garage placeholders in infra/.env are not valid credentials: replace them
+# with disposable generated values (never commit, never log the secret).
+RPC_SECRET="$(openssl rand -hex 32)"
+APP_ID="GK$(openssl rand -hex 16)"
+APP_SECRET="$(openssl rand -hex 32)"
+sed -i "s/^GARAGE_RPC_SECRET=.*/GARAGE_RPC_SECRET=${RPC_SECRET}/" infra/.env
+sed -i "s/^S3_ACCESS_KEY_ID=.*/S3_ACCESS_KEY_ID=${APP_ID}/" infra/.env
+sed -i "s/^S3_SECRET_ACCESS_KEY=.*/S3_SECRET_ACCESS_KEY=${APP_SECRET}/" infra/.env
+docker compose --env-file infra/.env -f infra/compose.yaml up -d --wait postgres garage
 docker compose --env-file infra/.env -f infra/compose.yaml run --rm migrator
 docker compose --env-file infra/.env -f infra/compose.yaml run --rm migrator validate
-# Connect the host-side Reylo type checker to a dev-only database endpoint.
+# Host-side tooling and storage-backed tests reach the disposable services on
+# loopback (add -f infra/compose.ports.yaml to the commands above for host
+# port access). Never point these at existing user data.
+export DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5433/feastjourney
+export S3_ENDPOINT_INTERNAL=http://127.0.0.1:3900 S3_REGION=garage
+export S3_BUCKET_PRIVATE=feastjourney-private S3_BUCKET_MEDIA=feastjourney-private
+export S3_ACCESS_KEY_ID=<generated above> S3_SECRET_ACCESS_KEY=<generated above>
+S3_ENDPOINT=http://127.0.0.1:3900 S3_BUCKET=feastjourney-private node infra/scripts/garage-s3-check.mjs
 bun run check-types
+# --isolate is mandatory, not optional:
+# tests/admin-places-routing.test.ts stubs @tanstack/react-router via
+# mock.module, which is process-persistent in bun 1.4.4 (mock.restore() does
+# not clear it). Without per-file isolation the venue component suites fail
+# with router.routesById TypeErrors.
+bun test --isolate tests/
 ```
 
 The Compose network deliberately exposes **no PostgreSQL port to the host**. Until an intentional loopback-only forwarding strategy or a containerized typecheck is implemented, running `bun run check-types` directly on the host with live `.sql` imports requires explicit access to the database; do not promise it will work by default. Document the chosen access mechanism with the application scaffold.

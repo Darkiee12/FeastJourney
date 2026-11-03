@@ -1,0 +1,1 @@
+SELECT id, name, comparison_key, translation_language, translated_label FROM feastjourney.restaurant_menu_item_variants WHERE menu_item_id = :item::uuid AND venue_id = :venue::uuid AND status = 'draft' ORDER BY name, id;

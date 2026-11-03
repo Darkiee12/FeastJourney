@@ -41,3 +41,10 @@ export type { AdminUserSummary } from "@/modules/user/server/operations/admin-se
 export type { SessionSummary } from "@/modules/user/server/operations/session-service";
 
 export type { RoleSummary } from "@/modules/user/server/operations/role-service";
+
+export { recordAuditEvent } from "@/modules/user/server/operations/audit";
+
+export {
+  getPreferredCurrency,
+  setPreferredCurrency,
+} from "@/modules/user/server/operations/currency-preference";

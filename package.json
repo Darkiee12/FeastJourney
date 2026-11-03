@@ -20,12 +20,15 @@
     "fmt": "oxfmt .",
     "check-types": "tsc --noEmit --runExternalCode -p tsconfig.json",
     "check": "bun run format && bun run lint && bun run check-types",
-    "test": "bun test tests/",
+    "test": "bun test --isolate tests/",
     "audit": "bun run audit:dependencies && bun run audit:slop && bun run audit:react-doctor && bun run audit:react-compiler",
     "audit:dependencies": "bun audit",
     "audit:slop": "bunx aislop@0.18.1 ci",
     "audit:react-doctor": "bunx react-doctor@0.9.18 --no-supply-chain --no-score src",
-    "audit:react-compiler": "bunx react-compiler-healthcheck@1.0.0 --src 'src/**/*.{ts,tsx}'"
+    "audit:react-compiler": "bunx react-compiler-healthcheck@1.0.0 --src 'src/**/*.{ts,tsx}'",
+    "maintenance:menu-scans": "bun scripts/cleanup-menu-scans.ts",
+    "test:browser": "bun tests/browser/menu-journey.ts",
+    "test:menu-provider": "bun tests/browser/provider-fixture.ts"
   },
   "devDependencies": {
     "@oxlint/plugins": "1.79.0",
@@ -41,6 +44,7 @@
     "oxfmt": "0.65.0",
     "oxlint": "1.85.0",
     "oxlint-tsgolint": "7.0.2002",
+    "playwright": "1.64.0-alpha-1790635538000",
     "prettier": "^3.9.10",
     "typescript": "^7.1.0-dev.20261026.1",
     "vite": "^8.3.5",

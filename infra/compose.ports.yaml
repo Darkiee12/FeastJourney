@@ -14,3 +14,9 @@ services:
   postgres:
     ports:
       - "127.0.0.1:5433:5432"
+  # Loopback-only host access to the disposable Garage instance, so
+  # host-side integration tests can exercise private photo storage without
+  # exposing anything beyond localhost. Same policy as postgres above.
+  garage:
+    ports:
+      - "127.0.0.1:3900:3900"

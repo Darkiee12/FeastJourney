@@ -1,0 +1,195 @@
+/* Venue overview + action bar + menu highlights (PR13).
+   Scoped under .venue-* only; tokens come from styles.css @theme. */
+@layer components {
+  .venue-overview {
+    display: grid;
+    gap: 1rem;
+    min-width: 0;
+  }
+  .venue-head {
+    display: grid;
+    gap: 0.35rem;
+  }
+  .venue-back {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-self: start;
+    gap: 0.45rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 0.5rem 1.1rem;
+    cursor: pointer;
+  }
+  .venue-back:hover {
+    background: var(--color-cream);
+  }
+  .venue-back:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .venue-back svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .venue-eyebrow {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-food-orange-strong);
+  }
+  .venue-title {
+    font-family: var(--font-display);
+    font-size: clamp(1.8rem, 5vw, 2.5rem);
+    line-height: 1.1;
+    letter-spacing: 0.015em;
+  }
+  .venue-business {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+  .venue-addr {
+    font-size: 0.92rem;
+    color: var(--color-muted);
+  }
+  .venue-rating {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+  .venue-rating svg {
+    width: 1rem;
+    height: 1rem;
+    color: var(--color-food-orange-strong);
+  }
+  .venue-gallery {
+    display: grid;
+    gap: 0.6rem;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .venue-gallery .venue-photo {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 0.75rem;
+  }
+  .venue-photo {
+    display: grid;
+    place-content: center;
+    min-height: 7rem;
+    border-radius: 0.75rem;
+    background:
+      radial-gradient(circle at 20% 20%, rgb(194 65 12 / 0.12), transparent 55%),
+      radial-gradient(circle at 85% 30%, rgb(37 99 235 / 0.1), transparent 50%), var(--color-cream);
+  }
+  .venue-photo span {
+    font-family: var(--font-display);
+    font-size: 3rem;
+    line-height: 1;
+    color: var(--color-food-orange-strong);
+    opacity: 0.85;
+  }
+  .venue-actionbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .venue-action {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-soft);
+    background: white;
+    color: var(--color-ink);
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 0.5rem 1.1rem;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .venue-action:hover {
+    background: var(--color-cream);
+  }
+  .venue-action:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .venue-action svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .venue-highlights {
+    display: grid;
+    gap: 0.6rem;
+  }
+  .venue-highlights > h2 {
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+  .venue-highlight-list {
+    display: grid;
+    gap: 0.6rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .venue-highlight-card {
+    display: grid;
+    gap: 0.25rem;
+    width: 100%;
+    text-align: left;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 0.8rem 1rem;
+    cursor: pointer;
+    color: var(--color-ink);
+    font: inherit;
+  }
+  .venue-highlight-card:hover {
+    background: var(--color-cream);
+  }
+  .venue-highlight-card:focus-visible {
+    outline: 2px solid var(--color-brand-blue);
+    outline-offset: 2px;
+  }
+  .venue-highlight-name {
+    font-weight: 700;
+  }
+  .venue-price-na {
+    font-size: 0.88rem;
+    color: var(--color-muted);
+  }
+  .venue-empty {
+    display: grid;
+    gap: 0.75rem;
+    justify-items: start;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 1.25rem;
+  }
+  .venue-empty p {
+    color: var(--color-muted);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .venue-highlight-card,
+    .venue-action {
+      transition: none;
+    }
+  }
+}

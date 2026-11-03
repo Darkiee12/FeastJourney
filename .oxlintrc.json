@@ -153,6 +153,57 @@
         "typescript/no-redundant-type-constituents": "off"
       }
     },
+    // Restaurant Discovery mirrors the food-discovery/user engine-limitation
+    // override above: Reylo .sql row types and TanStack server-function client
+    // types do not resolve inside Oxlint's engine (routes/components calling
+    // restaurant.functions, operations reading Reylo rows). tsc with a migrated
+    // database remains the authority for SQL typing and client contracts.
+    {
+      "files": [
+        "src/modules/restaurant-discovery/server/repository/**/*.ts",
+        "src/modules/restaurant-discovery/server/operations/*.ts",
+        "src/modules/restaurant-discovery/*.functions.ts",
+        "src/modules/restaurant-discovery/*.ts",
+        "src/modules/restaurant-discovery/components/**/*.{ts,tsx}",
+        "src/routes/restaurants.tsx",
+        "src/routes/restaurants.index.tsx",
+        "src/routes/restaurants.$venueId.tsx",
+        "src/routes/scan.tsx",
+        "src/routes/admin.restaurants.tsx",
+        "src/routes/dishes.tsx",
+        "src/routes/dishes.index.tsx",
+        "src/routes/api/menu-scans.ts",
+        "tests/integration/restaurants.test.ts",
+        "tests/integration/restaurant-customer-reviews.test.ts",
+        "tests/integration/restaurant-customer-review-lifecycle.test.ts",
+        "tests/integration/restaurant-customer-review-privacy.test.ts",
+        "tests/integration/restaurant-customer-review-queue.test.ts",
+        "tests/integration/restaurant-fx-cache.test.ts",
+        "tests/integration/restaurant-publication-gating.test.ts",
+        "tests/integration/menu-scan-config-status.test.ts",
+        "tests/integration/menu-scan-hardening.test.ts",
+        "tests/integration/menu-scan-promotion.test.ts",
+        "tests/integration/menu-scan-provenance.test.ts",
+        "tests/integration/restaurant-menu-pages.test.ts",
+        "tests/integration/restaurant-photo-api.test.ts",
+        "tests/unit/restaurant-*.test.{ts,tsx}",
+        "tests/unit/scan-*.test.{ts,tsx}",
+        "tests/unit/menu-scan-hardening.test.ts",
+        "tests/unit/menu-scan-transport.test.ts",
+        "tests/unit/menu-image.test.ts",
+        "tests/unit/muse-menu.test.ts",
+        "tests/unit/meta-client-abort.test.ts",
+        "tests/browser/**/*.ts"
+      ],
+      "rules": {
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-return": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/no-redundant-type-constituents": "off"
+      }
+    },
     {
       "files": [
         "vite.config.ts",
@@ -194,6 +245,7 @@
     "coverage/**",
     "**/routeTree.gen.ts",
     "**/*.generated.ts",
-    "tools/oxlint/**"
+    "tools/oxlint/**",
+    "probe-mapux.mjs"
   ]
 }

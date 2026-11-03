@@ -88,6 +88,14 @@ export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
             <MapPinned aria-hidden="true" className="h-5 w-5 flex-none" />
             {copy.ctaExplore}
           </Link>
+
+          <Link
+            to="/restaurants"
+            search={{ lang }}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full border-2 border-white/40 bg-transparent px-6 text-base font-bold text-white transition hover:border-white/65 hover:bg-white/10 sm:min-h-13 sm:px-8 sm:text-lg"
+          >
+            {copy.navRestaurants}
+          </Link>
         </div>
       </div>
 
