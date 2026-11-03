@@ -1,7 +1,13 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { ChevronDownIcon, Globe2Icon, MapPinIcon, RefreshCwIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import {
+  ChevronDownIcon,
+  Globe2Icon,
+  MapPinIcon,
+  RefreshCwIcon,
+  SlidersHorizontalIcon,
+} from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { DishCarousel } from "@/components/dish/dish-carousel";
 import {
@@ -388,6 +394,22 @@ export function DiscoverySection({
     scope: indicatorScope,
   });
 
+  // Sheet scroll ownership: the section is the scroll container inside the
+  // sheet (the pane stays overflow-hidden), so a scope change can reset to
+  // the top while rotation refreshes keep the current scroll position. The
+  // effect keys on the scope only — rotation bumps never move the reader.
+  const sheetScrollRef = useRef<HTMLElement | null>(null);
+  const prevScopeKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!inSheet) return;
+
+    if (prevScopeKeyRef.current === scopeKey) return;
+
+    prevScopeKeyRef.current = scopeKey;
+    sheetScrollRef.current?.scrollTo({ top: 0 });
+  }, [inSheet, scopeKey]);
+
   // Reserved loading-status slot: first load reads "Finding dishes…",
   // background refetches read "Updating dishes…", and the slot stays
   // rendered (empty) when ready so the carousel never shifts. A background
@@ -521,25 +543,38 @@ export function DiscoverySection({
     <section
       id="discover"
       aria-labelledby="discover-heading"
-      className={inSheet ? "bg-cream px-4 py-4" : "scroll-mt-18 bg-cream px-5 py-16 sm:px-8"}
+      ref={inSheet ? sheetScrollRef : undefined}
+      className={
+        inSheet
+          ? "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-cream px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+          : "scroll-mt-18 bg-cream px-5 py-16 sm:px-8"
+      }
     >
-      <div className="mx-auto max-w-6xl">
-        <h2
-          id="discover-heading"
-          className="font-display mb-3 text-[clamp(2.25rem,6vw,3.5rem)] leading-[1.05] tracking-[0.015em] text-balance"
-        >
-          {heading}
-        </h2>
+      <div className={inSheet ? "flex min-h-0 flex-1 flex-col" : "mx-auto max-w-6xl"}>
+        {inSheet ? (
+          <h2 id="discover-heading" className="sr-only">
+            {heading}
+          </h2>
+        ) : (
+          <>
+            <h2
+              id="discover-heading"
+              className="font-display mb-3 text-[clamp(2.25rem,6vw,3.5rem)] leading-[1.05] tracking-[0.015em] text-balance"
+            >
+              {heading}
+            </h2>
 
-        <p className="mb-8 max-w-[60ch] text-lg text-muted">{subtitle}</p>
+            <p className="mb-8 max-w-[60ch] text-lg text-muted">{subtitle}</p>
+          </>
+        )}
 
-        <div className="mb-8 flex flex-wrap items-center gap-x-3 gap-y-2">
-          {inSheet && mobile !== null ? (
+        {inSheet && mobile !== null ? (
+          <div className="mb-3 flex items-center gap-2">
             <button
               type="button"
               onClick={mobile.openLocationPicker}
               aria-label={`${indicator.label} · ${discoveryLocationCopyFor(lang).changeLocation}`}
-              className="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink"
+              className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-full border-2 border-ink bg-white px-4 text-sm font-bold text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
             >
               {indicator.icon === "globe" ? (
                 <Globe2Icon aria-hidden="true" className="size-4 flex-none" />
@@ -549,7 +584,20 @@ export function DiscoverySection({
               <span className="min-w-0 flex-1 truncate text-left">{indicator.label}</span>
               <ChevronDownIcon aria-hidden="true" className="size-4 flex-none opacity-60" />
             </button>
-          ) : (
+            <button
+              type="button"
+              onClick={mobile.openQuiz}
+              aria-label={lang === "vi" ? "Lọc món ăn" : "Filter dishes"}
+              title={lang === "vi" ? "Lọc món ăn" : "Filter dishes"}
+              className="inline-flex min-h-11 flex-none cursor-pointer items-center gap-1.5 rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold text-ink transition hover:border-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+            >
+              <SlidersHorizontalIcon aria-hidden="true" className="size-4 flex-none" />
+              {lang === "vi" ? "Lọc" : "Filter"}
+            </button>
+          </div>
+        ) : null}
+        {!inSheet ? (
+          <div className="mb-8 flex flex-wrap items-center gap-x-3 gap-y-2">
             <DiscoveryLocation
               countries={countryOptions}
               countriesLoading={countriesQuery.isPending}
@@ -569,24 +617,46 @@ export function DiscoverySection({
               onExploreWorldwide={exploreWorldwide}
               onUsePrecise={usePrecise}
             />
-          )}
-          {/* Reserved status slot: always rendered with a minimum height so
-              loading transitions never move the carousel below. */}
-          <output aria-live="polite" className="block min-h-5 text-sm font-semibold text-muted">
-            {statusText === "" ? DISCOVERY_STATUS_PLACEHOLDER : statusText}
-          </output>
-          {staleOnError ? (
-            <button
-              type="button"
-              onClick={() => {
-                void carouselQuery.refetch();
-              }}
-              className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold text-ink transition hover:border-ink"
+            {/* Reserved status slot: always rendered with a minimum height so
+                loading transitions never move the carousel below. */}
+            <output aria-live="polite" className="block min-h-5 text-sm font-semibold text-muted">
+              {statusText === "" ? DISCOVERY_STATUS_PLACEHOLDER : statusText}
+            </output>
+            {staleOnError ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void carouselQuery.refetch();
+                }}
+                className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold text-ink transition hover:border-ink"
+              >
+                {headerCopy.retryDishes}
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <>
+            {/* Reserved status slot: always rendered with a minimum height so
+                loading transitions never move the carousel below. */}
+            <output
+              aria-live="polite"
+              className="mb-3 block min-h-5 text-sm font-semibold text-muted"
             >
-              {headerCopy.retryDishes}
-            </button>
-          ) : null}
-        </div>
+              {statusText === "" ? DISCOVERY_STATUS_PLACEHOLDER : statusText}
+            </output>
+            {staleOnError ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void carouselQuery.refetch();
+                }}
+                className="mb-3 inline-flex min-h-11 cursor-pointer items-center self-start rounded-full border-2 border-border-soft bg-white px-4 text-sm font-bold text-ink transition hover:border-ink"
+              >
+                {headerCopy.retryDishes}
+              </button>
+            ) : null}
+          </>
+        )}
 
         {fallbackState === "loading" ? <DiscoveryLoadingState copy={copy} /> : null}
 

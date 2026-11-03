@@ -184,11 +184,7 @@ function MobileHomeInner({ copy, lang }: { copy: Messages; lang: Locale }) {
 
       <MobileSheet heightPx={sheetHeightPx} lang={lang} discoverLabel={copy.navDiscover}>
         <div
-          className={
-            discoveryActive
-              ? `flex min-h-0 flex-1 flex-col ${mode === "location" ? "overflow-hidden" : "overflow-y-auto overscroll-contain"}`
-              : "hidden"
-          }
+          className={discoveryActive ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "hidden"}
           aria-hidden={!discoveryActive}
         >
           <DiscoverySection copy={copy} lang={lang} variant="sheet" />

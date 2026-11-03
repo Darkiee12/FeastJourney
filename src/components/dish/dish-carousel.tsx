@@ -1,4 +1,5 @@
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { ArrowUpRightIcon, ChevronLeftIcon, ChevronRightIcon, StoreIcon } from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -9,13 +10,14 @@ import {
   type TouchEvent as ReactTouchEvent,
 } from "react";
 
-import { DishActions } from "@/components/dish/dish-actions";
+import { DishActions, dishRestaurantsSearch } from "@/components/dish/dish-actions";
 import { DishMedia } from "@/components/dish/dish-media";
 import { usePrefersReducedMotion } from "@/components/home/globe/use-prefers-reduced-motion";
 import type { DishCardImage, DishSummary } from "@/modules/food-discovery/server/domain/dish";
 import type { PublishedDishImage } from "@/modules/food-discovery/server/operations/dish-media-service";
 import type { CarouselCard } from "@/modules/food-discovery/server/operations/dish-service";
 import {
+  SaveDishButton,
   statusForDish,
   type FavoriteStatusQuery,
 } from "@/modules/user/components/save-dish-button";
@@ -433,68 +435,116 @@ export function DishCarousel({
                   ? dish.descriptionLanguage
                   : undefined;
 
+              // Alternate name only when distinct: identical names never
+              // render twice. Region tags stay an unlabeled eyebrow — the
+              // data model does not confirm dish-origin semantics, so no
+              // "Origin:" prefix is asserted here.
+              const nativeName =
+                dish.nativeName !== undefined && dish.nativeName !== title ? dish.nativeName : null;
+
               return (
                 <article
                   key={dish.id}
                   aria-label={`${copy.carouselSlide} ${slide + 1} ${copy.carouselOf} ${total}`}
                   aria-hidden={shown ? undefined : true}
                   inert={shown ? undefined : true}
-                  className="w-full flex-none overflow-hidden rounded-2xl border border-border-soft bg-white p-2.5 shadow-[0_12px_28px_rgba(194,65,12,0.08)]"
+                  className="w-full flex-none overflow-hidden rounded-2xl border border-border-soft bg-white shadow-[0_12px_28px_rgba(194,65,12,0.08)]"
                 >
                   {reason !== undefined ? (
-                    <div className="mb-2 max-h-44 min-h-[5.5rem] overflow-y-auto rounded-xl bg-cream/60 px-3 py-2.5">
+                    <div className="m-3 mb-0 rounded-xl border border-mango bg-cream px-3 py-2.5">
                       {reason}
                     </div>
                   ) : null}
-                  <div className="flex gap-3">
-                    <div
-                      className="relative h-28 w-28 flex-none overflow-hidden rounded-xl bg-cream min-[400px]:h-32 min-[400px]:w-32 max-[359px]:h-24 max-[359px]:w-24"
-                      title={dish.image?.attribution ?? undefined}
-                    >
+                  <div
+                    className="relative aspect-[16/10] w-full overflow-hidden bg-cream"
+                    title={dish.image?.attribution ?? undefined}
+                  >
+                    {dish.image === null || dish.image === undefined ? (
+                      <span
+                        aria-hidden="true"
+                        className="font-display grid h-full w-full place-items-center bg-gradient-to-br from-food-orange-strong to-mango text-6xl text-white"
+                      >
+                        {title.slice(0, 1).toUpperCase()}
+                      </span>
+                    ) : (
                       <DishMedia
-                        image={toCarouselPublishedImage(dish.image ?? null, dish.id)}
+                        image={toCarouselPublishedImage(dish.image, dish.id)}
                         eager={slide === 0}
-                        sizes="(max-width: 400px) 112px, 128px"
+                        sizes="(max-width: 640px) 100vw, 400px"
                         unavailableLabel={copy.carouselPhotoSoon}
-                        loadingLabel={copy.discoverLocalLoading}
+                        loadingLabel={title}
                         className="absolute inset-0 h-full w-full"
                       />
+                    )}
+                    <div className="absolute top-2 right-2">
+                      <SaveDishButton
+                        compact
+                        dishId={dish.id}
+                        lang={lang}
+                        onSaveSheetOpenChange={onSaveSheetOpenChange}
+                        returnTo="/"
+                        session={session}
+                        status={statusForDish(favoriteStatus, dish.id)}
+                      />
                     </div>
-                    <div className="flex min-w-0 flex-1 flex-col gap-1 py-0.5">
-                      <div className="flex min-w-0 flex-nowrap items-start justify-end gap-2">
-                        <h3 className="font-display min-w-0 flex-1 basis-24 text-[1.35rem] leading-tight tracking-wide text-balance break-words">
-                          {title}
-                        </h3>
-                        <DishActions
-                          copy={copy}
-                          dishId={dish.id}
-                          dishSlug={dish.slug}
-                          lang={lang}
-                          onSaveSheetOpenChange={onSaveSheetOpenChange}
-                          returnTo="/"
-                          session={session}
-                          status={statusForDish(favoriteStatus, dish.id)}
-                          tabIndex={shown ? undefined : -1}
-                        />
-                      </div>
-                      {dish.nativeName !== undefined ? (
-                        <p
-                          lang={dish.nativeLanguageTag}
-                          className="truncate text-sm font-bold text-ink"
-                        >
-                          {dish.nativeName}
-                        </p>
-                      ) : null}
-                      {description !== null ? (
-                        <p
-                          lang={descriptionLanguage}
-                          className="line-clamp-2 text-[13px] leading-snug text-ink"
-                        >
-                          {description}
-                        </p>
-                      ) : (
-                        <p className="text-xs text-muted italic">{copy.carouselNoDescription}</p>
-                      )}
+                  </div>
+                  <div className="flex min-w-0 flex-col gap-1.5 p-4">
+                    {dish.regionNames.length > 0 ? (
+                      <p className="truncate text-xs font-bold tracking-[0.14em] text-food-orange-strong uppercase">
+                        {dish.regionNames.slice(0, 2).join(" · ")}
+                      </p>
+                    ) : null}
+                    <h3 className="font-display min-w-0 text-2xl leading-tight text-balance break-words text-ink">
+                      {title}
+                    </h3>
+                    {nativeName !== null ? (
+                      <p
+                        lang={dish.nativeLanguageTag}
+                        className="truncate text-sm font-semibold text-ink"
+                      >
+                        {nativeName}
+                      </p>
+                    ) : null}
+                    {description !== null ? (
+                      <p
+                        lang={descriptionLanguage}
+                        className="line-clamp-3 text-[0.95rem] leading-relaxed break-words text-ink"
+                      >
+                        {description}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-muted italic">{copy.carouselNoDescription}</p>
+                    )}
+                    <div className="mt-1 flex flex-wrap items-center gap-2 pt-1">
+                      <SaveDishButton
+                        dishId={dish.id}
+                        lang={lang}
+                        onSaveSheetOpenChange={onSaveSheetOpenChange}
+                        returnTo="/"
+                        session={session}
+                        status={statusForDish(favoriteStatus, dish.id)}
+                      />
+                      <Link
+                        to="/restaurants"
+                        search={dishRestaurantsSearch(dish.id, dish.slug, lang)}
+                        tabIndex={shown ? undefined : -1}
+                        aria-label={copy.recFindRestaurants}
+                        title={copy.recFindRestaurants}
+                        className="inline-flex min-h-11 items-center gap-1.5 rounded-full border-2 border-ink bg-white px-4 text-sm font-bold text-ink transition hover:bg-ink hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                      >
+                        <StoreIcon aria-hidden="true" className="size-4 flex-none" />
+                        {copy.recFindRestaurants}
+                      </Link>
+                      <Link
+                        to="/dishes/$dishId"
+                        params={{ dishId: dish.slug }}
+                        search={{ lang }}
+                        tabIndex={shown ? undefined : -1}
+                        className="inline-flex min-h-11 items-center gap-1.5 rounded-full border-2 border-food-orange-strong bg-food-orange-strong px-4 text-sm font-bold text-white transition hover:bg-food-orange-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                      >
+                        <ArrowUpRightIcon aria-hidden="true" className="size-4 flex-none" />
+                        {copy.recViewDish}
+                      </Link>
                     </div>
                   </div>
                 </article>

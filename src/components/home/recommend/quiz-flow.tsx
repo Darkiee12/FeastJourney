@@ -24,9 +24,11 @@ import {
   draftLocation,
   EMPTY_DRAFT,
   formatTemplate,
+  geographicScopeKeyFor,
   isCityPlaceId,
   isExplicitRegionChoice,
   needsAccountPrefill,
+  normalizeCacheTerms,
   parseCommaList,
   persistPrefs,
   PREFS_STORAGE_KEY,
@@ -896,20 +898,23 @@ export function RecommendSection() {
 
   const resultFavorites = useFavoriteStatus(resultIds, resultUserId);
 
+  // Presentation reset key: one entry per canonical request (actor +
+  // coarse geo scope + prefs + locale + seed), so a new request — including
+  // an account switch or scope change with otherwise identical answers —
+  // always reopens on the first slide instead of inheriting a stale index.
+  // New Muse reasons can never surface under a previous request's position.
   const outcomeKey =
     submitted === null
       ? "none"
       : [
-          submitted.surpriseSeed,
+          userIdOrGuest,
+          geographicScopeKeyFor(toTransportPayload(submitted)),
+          submitted.locale,
           submitted.meal,
           submitted.mood,
-          submitted.locale,
-          submitted.country ?? "",
-          submitted.location?.kind ?? "",
-          submitted.location !== undefined && submitted.location.kind === "city"
-            ? submitted.location.placeId
-            : "",
-          submitted.excludedIngredients.join("|"),
+          submitted.cuisine ?? "",
+          ...normalizeCacheTerms(submitted.excludedIngredients),
+          submitted.surpriseSeed,
         ].join(":");
 
   const carouselItems = useMemo(
@@ -1143,13 +1148,20 @@ export function RecommendSection() {
           tabIndex={-1}
           className="block h-0 w-full overflow-hidden"
         />
-        <div className="flex flex-none items-center justify-between gap-2 px-4 pt-1">
-          <div className="min-w-0 flex-1">
-            {showResults ? (
-              <p className="truncate text-base font-extrabold tracking-wide text-ink">
-                {copy.recRecommendationsHeading}
-              </p>
-            ) : (
+        <div className="flex flex-none items-center gap-2 px-4 pt-1">
+          {showResults ? (
+            <div className="flex flex-1 justify-end">
+              <button
+                type="button"
+                onClick={backToQuiz}
+                aria-label={copy.recAdjust}
+                className="inline-flex min-h-11 min-w-11 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-3 text-sm font-bold text-ink"
+              >
+                <SlidersHorizontalIcon aria-hidden="true" className="size-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="min-w-0 flex-1">
               <div className="min-w-0">
                 <p aria-live="polite" className="truncate text-sm">
                   <span className="font-semibold text-muted">
@@ -1170,18 +1182,8 @@ export function RecommendSection() {
                   ))}
                 </div>
               </div>
-            )}
-          </div>
-          {showResults ? (
-            <button
-              type="button"
-              onClick={backToQuiz}
-              aria-label={copy.recAdjust}
-              className="inline-flex min-h-11 min-w-11 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-border-soft bg-white px-3 text-sm font-bold text-ink"
-            >
-              <SlidersHorizontalIcon aria-hidden="true" className="size-4" />
-            </button>
-          ) : null}
+            </div>
+          )}
         </div>
         {draft.cityId !== null && draft.cityLabel !== null ? (
           <div className="flex-none px-4 pt-2">
@@ -1265,7 +1267,10 @@ export function RecommendSection() {
                 {copy.recResultsCount.replace("{count}", String(outcome.dishes.length))}
               </p>
             ) : null}
-            {detectedName !== null ? (
+            {/* Quiz phase only: once results show, scope display belongs
+                to YourPicksCard (requested scope) plus the served-scope
+                warnings — never a stale detection line beside them. */}
+            {detectedName !== null && !showResults ? (
               <p className="mt-3 max-w-[60ch] text-base font-bold text-ink">
                 {formatTemplate(copy.recWhereExploring, detectedName)}
               </p>
@@ -1596,8 +1601,11 @@ export function RecommendSection() {
       const rankingVariant =
         outcome.mode === "deterministic" ? rankingVariantFor(outcome.mode, outcome.ranking) : null;
 
+      // Keyed per canonical request: each new result set fades/slides in as
+      // one composition (title + explanation together), never a staggered
+      // jump. Remount also resets carousel internals alongside railIndex.
       return (
-        <div>
+        <div key={outcomeKey} className="motion-safe:animate-rec-step-enter">
           {outcome.warnings.length > 0 ? (
             <div className="mb-2">
               <ResultWarnings copy={copyMessages} warnings={outcome.warnings} />
@@ -1688,8 +1696,10 @@ export function RecommendSection() {
       );
     }
 
+    // Same keyed enter transition as the compact rail: one composed
+    // fade/slide per result set, no title/explanation stagger.
     return (
-      <div>
+      <div key={outcomeKey} className="motion-safe:animate-rec-step-enter">
         {outcome.warnings.length > 0 ? (
           <div className="mb-3">
             <ResultWarnings copy={copyMessages} warnings={outcome.warnings} />
