@@ -21,6 +21,7 @@ import currencies from "@/modules/restaurant-discovery/server/repository/sql/dis
 import localRanges from "@/modules/restaurant-discovery/server/repository/sql/local-price-ranges.sql";
 import menuDishCandidates from "@/modules/restaurant-discovery/server/repository/sql/menu-dish-candidates.sql";
 import sectionsQuery from "@/modules/restaurant-discovery/server/repository/sql/menu-edit-sections.sql";
+import localizationsQuery from "@/modules/restaurant-discovery/server/repository/sql/menu-localizations-by-venue.sql";
 import menu from "@/modules/restaurant-discovery/server/repository/sql/menu.sql";
 import photoPublishedByVenueIds from "@/modules/restaurant-discovery/server/repository/sql/photo-published-by-venue-ids.sql";
 import searchArea from "@/modules/restaurant-discovery/server/repository/sql/search-area.sql";
@@ -49,6 +50,9 @@ export type PhotoPublishedRow = (typeof photoPublishedByVenueIds)["~reylo"]["ele
 
 /** One menu arrangement row, inferred from the shared sections query. */
 export type RestaurantMenuSectionRow = (typeof sectionsQuery)["~reylo"]["element"];
+
+/** One stored localization row, inferred from the shared venue query. */
+export type MenuLocalization = (typeof localizationsQuery)["~reylo"]["element"];
 
 const locationParameters = (input: RestaurantSearch) => ({
   area: input.area,
@@ -149,11 +153,19 @@ export const getRestaurant = Effect.fn("restaurants.getRestaurant")(function* (
   const publishedItems = new Set(offerings.map((offering) => offering.item_id));
   const sections = sectionGroups.flat().filter((row) => publishedItems.has(row.id));
 
+  // Additive machine-translation tier: stored servable rows for this venue.
+  // The panel overlays matching-hash rows below the approved tier (see
+  // presentReviewedWithLocalizations); nothing here changes the offerings.
+  const localizations = yield* runQuery("restaurants/menu-localizations", (sql) =>
+    localizationsQuery.run(sql, { venue: venueId }),
+  );
+
   return {
     venue: detail,
     offerings,
     photos,
     sections,
+    localizations,
   };
 });
 

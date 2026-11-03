@@ -53,7 +53,15 @@ export function ResultsDrawer({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && openRef.current) onToggle();
+      if (event.key !== "Escape" || !openRef.current) return;
+
+      if (event.defaultPrevented) return;
+
+      // A modal dialog (e.g. the filters sheet) owns Escape while open;
+      // the drawer must not collapse underneath it.
+      if (document.querySelector('[role="dialog"]') !== null) return;
+
+      onToggle();
     };
 
     window.addEventListener("keydown", onKey);

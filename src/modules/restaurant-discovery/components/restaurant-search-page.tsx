@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, getRouteApi, useRouterState } from "@tanstack/react-router";
 import { Crosshair, MapPin } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { z } from "zod";
 
 import {
@@ -15,6 +16,7 @@ import {
   MapSearchBar,
   type SearchPick,
 } from "@/modules/restaurant-discovery/components/map-search-bar";
+import { PanelToolbar } from "@/modules/restaurant-discovery/components/panel-toolbar";
 import {
   PriceComparePanel,
   type PriceCompareRow,
@@ -58,7 +60,10 @@ import { panelForRoute, type RestaurantPanel } from "@/modules/restaurant-discov
 import { getRestaurantReviewSummaryFn } from "@/modules/restaurant-discovery/restaurant-reviews.functions";
 import { getRestaurantFn } from "@/modules/restaurant-discovery/restaurant.functions";
 import { restaurantSearchSchema } from "@/modules/restaurant-discovery/restaurant.schema";
-import type { RestaurantSearch } from "@/modules/restaurant-discovery/restaurant.schema";
+import type {
+  RestaurantSearch,
+  RestaurantVenueView,
+} from "@/modules/restaurant-discovery/restaurant.schema";
 import type {
   DishRestaurantResult,
   RestaurantResult,
@@ -287,7 +292,6 @@ export function RestaurantSearchPage() {
       .map((rate) => [rate.base, rate]),
   );
 
-  const dishSlug = search.fromDish ?? data.results.dish?.slug ?? null;
   const dishName = data.results.dish?.name ?? data.results.dish?.slug ?? null;
 
   const hasCoords = search.longitude !== undefined || search.west !== undefined;
@@ -369,7 +373,7 @@ export function RestaurantSearchPage() {
     (search.budget === undefined ? 0 : 1) +
     (search.sort === "recommended" ? 0 : 1);
 
-  const applyPatch = (patch: Partial<RestaurantSearch>) => {
+  const applyPatch = (patch: Partial<RestaurantSearch & RestaurantVenueView>) => {
     const parsed = restaurantSearchSchema.safeParse({ ...search, ...patch });
 
     if (!parsed.success) {
@@ -379,8 +383,18 @@ export function RestaurantSearchPage() {
     }
 
     setMessage("");
+    // Panel identity rides along: filter edits must never close the open
+    // venue. Explicit patch keys win (e.g. a venue-scoped clear), otherwise
+    // the current URL state is preserved; undefined keys are stripped.
     void navigate({
-      search: { ...parsed.data, lang: search.lang, fromDish: search.fromDish },
+      search: {
+        ...parsed.data,
+        lang: search.lang,
+        fromDish: search.fromDish,
+        venue: "venue" in patch ? patch.venue : search.venue,
+        view: "view" in patch ? patch.view : search.view,
+        item: "item" in patch ? patch.item : search.item,
+      },
     });
   };
 
@@ -665,6 +679,19 @@ export function RestaurantSearchPage() {
     if (focusResults) listTitleRef.current?.focus({ preventScroll: true });
   };
 
+  // Results-level Back: when the Food Journey carried a dish filter
+  // (`fromDish`), Back returns to that dish; otherwise browse is the root
+  // and the toolbar renders no Back at all.
+  const goDish = () => {
+    if (search.fromDish === undefined) return;
+
+    void navigate({
+      to: "/dishes/$dishId",
+      params: { dishId: search.fromDish },
+      search: { lang: search.lang },
+    });
+  };
+
   const channelLabel = channelLabelFor(search.channel, copy);
 
   // The currency selector only earns its place when comparable priced
@@ -865,26 +892,99 @@ export function RestaurantSearchPage() {
     priceScopeLabel = search.area;
   }
 
+  const venueName = selectedModel?.name ?? detail?.venue.name ?? "";
+
+  // Compact browse context beneath the toolbar title: dish and/or radius
+  // only, and only when relevant. Every other filter stays in the chips.
+  let toolbarContext: string | null = null;
+
+  if (panel.kind === "browse") {
+    const parts: Array<string> = [];
+
+    if (dishName !== null) parts.push(dishName);
+
+    if (search.longitude !== undefined) {
+      const radiusText =
+        search.radius >= 1000 ? `${search.radius / 1000} km` : `${search.radius} m`;
+
+      parts.push(copy.priceSummaryWithin.replace("{radius}", radiusText));
+    } else if (search.area !== "") {
+      parts.push(search.area);
+    }
+
+    toolbarContext = parts.length > 0 ? parts.join(" · ") : null;
+  }
+
+  // One route-aware toolbar per view: the single primary Back. Venue panels
+  // render no own back buttons; every transition stays on this route (same
+  // mounted map, no refetch), preserving dish/radius/venue/item/quantities
+  // through the URL and the existing stores.
+  let toolbar: ReactNode;
+
+  if (panel.kind === "overview") {
+    toolbar = (
+      <PanelToolbar
+        view="overview"
+        title={venueName}
+        backText={copy.resultsTitle}
+        backLabel={copy.backToResults}
+        onBack={() => closePreview(true)}
+      />
+    );
+  } else if (panel.kind === "menu") {
+    toolbar = (
+      <PanelToolbar
+        view="menu"
+        title={venueName}
+        backText={venueName === "" ? copy.backToResults : venueName}
+        backLabel={copy.menuBackToOverview}
+        onBack={selected === null ? null : () => showOverviewPanel(selected)}
+      />
+    );
+  } else if (panel.kind === "reviews") {
+    toolbar = (
+      <PanelToolbar
+        view="reviews"
+        title={venueName}
+        sectionLabel={copy.panelReviewsTitle}
+        backText={venueName === "" ? copy.backToResults : venueName}
+        backLabel={copy.menuBackToOverview}
+        onBack={selected === null ? null : () => showOverviewPanel(selected)}
+      />
+    );
+  } else {
+    toolbar = (
+      <PanelToolbar
+        view="browse"
+        title={copy.resultsTitle}
+        countLabel={countLabel}
+        contextLine={toolbarContext}
+        backText={search.fromDish === undefined ? null : copy.backToDish}
+        backLabel={copy.backToDish}
+        onBack={search.fromDish === undefined ? null : goDish}
+      />
+    );
+  }
+
   const resultsBody = (
     <>
+      {toolbar}
       {!previewOpen && (
         <FilterChips
           copy={copy}
           search={search}
-          lang={search.lang}
           dishName={dishName}
-          dishSlug={dishSlug}
           cuisineLabel={cuisineLabel}
           onPatch={applyPatch}
         />
       )}
-      {conversion.unavailable && (
+      {!previewOpen && conversion.unavailable && (
         <p aria-live="polite" className="mapapp-note">
           {copy.priceNote}
         </p>
       )}
-      {emptyKind === "loading" && <SearchResultsSkeleton label={loadingLabel} />}
-      {emptyKind === "no-scope" && (
+      {!previewOpen && emptyKind === "loading" && <SearchResultsSkeleton label={loadingLabel} />}
+      {!previewOpen && emptyKind === "no-scope" && (
         <div className="mapapp-status" aria-live="polite">
           <h3>{copy.chooserTitle}</h3>
           <p>{copy.chooserBody}</p>
@@ -903,7 +1003,7 @@ export function RestaurantSearchPage() {
           </div>
         </div>
       )}
-      {emptyKind === "empty-catalog" && (
+      {!previewOpen && emptyKind === "empty-catalog" && (
         <div className="mapapp-status" aria-live="polite">
           <h3>{copy.emptyDatasetTitle}</h3>
           <p>{copy.emptyDatasetBody}</p>
@@ -917,7 +1017,7 @@ export function RestaurantSearchPage() {
           </div>
         </div>
       )}
-      {emptyKind === "no-evidence" && (
+      {!previewOpen && emptyKind === "no-evidence" && (
         <div className="mapapp-status" aria-live="polite">
           <h3>{copy.noReviewedTitle}</h3>
           <p>{copy.noReviewedBody}</p>
@@ -934,7 +1034,7 @@ export function RestaurantSearchPage() {
           </div>
         </div>
       )}
-      {emptyKind === "no-match" && (
+      {!previewOpen && emptyKind === "no-match" && (
         <div className="mapapp-status" aria-live="polite">
           <h3>{copy.noMatchTitle}</h3>
           <p>{copy.noMatchBody}</p>
@@ -948,7 +1048,7 @@ export function RestaurantSearchPage() {
           </div>
         </div>
       )}
-      {emptyKind === "no-area" && (
+      {!previewOpen && emptyKind === "no-area" && (
         <div className="mapapp-status" aria-live="polite">
           <h3>{copy.noAreaTitle}</h3>
           <p>{copy.noAreaBody}</p>
@@ -970,7 +1070,7 @@ export function RestaurantSearchPage() {
           </div>
         </div>
       )}
-      {rows.length > 0 && (
+      {!previewOpen && rows.length > 0 && (
         <>
           <p aria-live="polite" className="mapapp-count">
             {countLabel}
@@ -1022,7 +1122,7 @@ export function RestaurantSearchPage() {
               </button>
             </fieldset>
           )}
-          {isDishMode && compareOpen && !(previewOpen && selectedModel !== null) && (
+          {isDishMode && compareOpen && selectedModel === null && (
             <PriceComparePanel
               rows={compareRows}
               sortMode={search.sort}
@@ -1032,7 +1132,7 @@ export function RestaurantSearchPage() {
           )}
           <ul
             className="mapapp-list"
-            hidden={(previewOpen && selectedModel !== null) || (isDishMode && compareOpen)}
+            hidden={selectedModel !== null || (isDishMode && compareOpen)}
           >
             {rows.map((venue) => {
               const model = modelFor(venue);
@@ -1083,13 +1183,6 @@ export function RestaurantSearchPage() {
                       >
                         {copy.retryAction}
                       </button>
-                      <button
-                        type="button"
-                        className="mapapp-ghost-btn"
-                        onClick={() => closePreview(true)}
-                      >
-                        {copy.backToResults}
-                      </button>
                     </div>
                   </>
                 ) : (
@@ -1106,8 +1199,6 @@ export function RestaurantSearchPage() {
                 lang={search.lang}
                 locale={search.lang}
                 offerings={detail.offerings}
-                onBackToResults={() => closePreview(true)}
-                backToResultsLabel={copy.backToResults}
                 fromDish={search.fromDish ?? null}
                 onOpenMenuItem={() => showMenuPanel(detail.venue.id)}
                 onShowMenu={() => showMenuPanel(detail.venue.id)}
@@ -1132,7 +1223,6 @@ export function RestaurantSearchPage() {
               key={`${selected}:${search.channel}`}
               channel={search.channel}
               lang={search.lang}
-              onBackToOverview={() => showOverviewPanel(selected)}
               onChannelChange={(value) => {
                 void navigate({ search: { ...search, channel: value } });
               }}
@@ -1153,10 +1243,12 @@ export function RestaurantSearchPage() {
           )}
         </div>
       )}
-      <details className="mapapp-options">
-        <summary>{copy.displayOptions}</summary>
-        {showCurrency && <CurrencySelector preference={preference} />}
-      </details>
+      {!previewOpen && (
+        <details className="mapapp-options">
+          <summary>{copy.displayOptions}</summary>
+          {showCurrency && <CurrencySelector preference={preference} />}
+        </details>
+      )}
     </>
   );
 
@@ -1306,9 +1398,11 @@ export function RestaurantSearchPage() {
               }}
               onOpenLocation={() => setChooserManual(true)}
             />
-            <p className="mapapp-region" aria-live="polite">
-              {regionLabel}
-            </p>
+            {!previewOpen && (
+              <p className="mapapp-region" aria-live="polite">
+                {regionLabel}
+              </p>
+            )}
             <div id="mapapp-results">
               <h2 ref={listTitleRef} tabIndex={-1} className="sr-only">
                 {copy.resultsTitle}
@@ -1376,6 +1470,11 @@ export function RestaurantSearchPage() {
         dishActive={isDishMode}
         canSortNearest={search.longitude !== undefined}
         onApply={applyPatch}
+        dishName={dishName}
+        onClearDish={() => {
+          setSheetOpen(false);
+          clearDish();
+        }}
         onClear={() => {
           setSheetOpen(false);
           clearAll();

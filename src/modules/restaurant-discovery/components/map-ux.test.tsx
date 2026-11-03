@@ -277,8 +277,12 @@ describe("search intent preserved (static guards)", () => {
       "src/modules/restaurant-discovery/components/restaurant-filters-sheet.tsx",
     );
 
+    // Compact dish chip (name + ×) clears only the dish-scoped filters.
     expect(sheet).toContain("copy.clearDish");
-    expect(sheet).toContain("copy.dishEvidence");
     expect(sheet).toContain("dish: undefined");
+    expect(sheet).toContain("clearDishPatch");
+    // Backend restriction stays out of the sheet chrome: no repeated
+    // "reviewed evidence" paragraph next to the chip.
+    expect(sheet).not.toContain("copy.dishEvidence");
   });
 });

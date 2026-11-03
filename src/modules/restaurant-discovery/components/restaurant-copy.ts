@@ -170,6 +170,7 @@ const english = {
   priceSummaryVenues: "{count} restaurants with comparable prices",
   menuLoading: "Loading the reviewed menu…",
   menuLoadFailed: "The menu could not load.",
+  panelReviewsTitle: "Reviews",
 };
 
 const vietnamese: typeof english = {
@@ -343,6 +344,7 @@ const vietnamese: typeof english = {
   priceSummaryVenues: "{count} nhà hàng có giá so sánh được",
   menuLoading: "Đang tải thực đơn đã duyệt…",
   menuLoadFailed: "Không tải được thực đơn.",
+  panelReviewsTitle: "Đánh giá",
 };
 
 export type RestaurantCopy = typeof english;

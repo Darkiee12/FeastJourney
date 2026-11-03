@@ -153,3 +153,29 @@ export const venuePhotoPreviewsFn = createServerFn({ method: "GET" })
 
     return runClientOperation(listVenuePhotoPreviews(data), "search");
   });
+
+// Channel availability read: distinct sales channels with current listed
+// prices for one venue. The menu panel shows its channel control only when
+// two or more eligible channels qualify; dine-in-only venues get no UI.
+export const getVenueChannelsFn = createServerFn({ method: "GET" })
+  .validator(venueIdSchema)
+  .handler(async ({ data }) => {
+    const { Effect } = await import("effect");
+
+    const venueChannels = (
+      await import("@/modules/restaurant-discovery/server/repository/sql/venue-channels.sql")
+    ).default;
+
+    const { runQuery } = await import("@/server/database/query");
+
+    const { runClientOperation } = await import("@/server/http/run-client-operation");
+
+    return runClientOperation(
+      Effect.map(
+        runQuery("restaurants/venue-channels", (sql) =>
+          venueChannels.run(sql, { id: data.venueId }),
+        ),
+        (rows) => rows.map((row) => row.sales_channel),
+      ),
+    );
+  });

@@ -10,6 +10,7 @@ export {
 export type {
   Venue,
   MenuOffering,
+  MenuLocalization,
   RestaurantResult,
   DishRestaurantResult,
   VenuePhotoPreview,

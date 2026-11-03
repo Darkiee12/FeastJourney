@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, Star } from "lucide-react";
+import { Star } from "lucide-react";
 
 import { MenuHighlights } from "@/modules/restaurant-discovery/components/menu-highlights";
 import type { RestaurantCopy } from "@/modules/restaurant-discovery/components/restaurant-copy";
@@ -59,15 +59,15 @@ export interface VenueRatingSummary {
 
 /** Venue identity header: name, area/address, distance when known, and
  *  the genuine rating summary when available. No photos, hours, prices,
- *  or ratings are invented here. */
+ *  or ratings are invented here. Navigation owns the single toolbar Back;
+ *  this panel renders no own back button. The fromDish breadcrumb stays as
+ *  the contextual return to the Food Journey dish. */
 export function VenueOverview({
   copy,
   highlights,
   lang,
   locale,
   offerings,
-  onBackToResults,
-  backToResultsLabel = "Back to results",
   fromDish = null,
   onOpenMenuItem,
   onShowMenu,
@@ -82,8 +82,6 @@ export function VenueOverview({
   readonly lang: Locale;
   readonly locale: string;
   readonly offerings: ReadonlyArray<MenuOffering>;
-  readonly onBackToResults?: (() => void) | undefined;
-  readonly backToResultsLabel?: string | undefined;
   readonly fromDish?: string | null | undefined;
   readonly onOpenMenuItem: (itemId: string) => void;
   readonly onShowMenu: () => void;
@@ -100,12 +98,6 @@ export function VenueOverview({
   return (
     <article className="venue-overview gap-3" aria-label={venue.name}>
       <header className="venue-head">
-        {onBackToResults !== undefined && (
-          <button type="button" className="venue-back" onClick={onBackToResults}>
-            <ArrowLeft aria-hidden="true" />
-            {backToResultsLabel}
-          </button>
-        )}
         {fromDish !== null && fromDish !== "" && (
           <p className="venue-dish-link">
             <Link to="/dishes/$dishId" params={{ dishId: fromDish }} search={{ lang }}>

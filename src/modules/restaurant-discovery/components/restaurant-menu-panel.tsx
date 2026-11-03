@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, BookOpen } from "lucide-react";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { BookOpen } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { menuCopy } from "@/modules/restaurant-discovery/components/menu-copy";
@@ -20,13 +20,7 @@ import {
   type RestaurantCopy,
 } from "@/modules/restaurant-discovery/components/restaurant-copy";
 import { WaiterOrderCard } from "@/modules/restaurant-discovery/components/waiter-order-card";
-import {
-  HINGLISH_STYLE,
-  detectMenuBrowserLanguage,
-  readSavedMenuLanguage,
-  resolveMenuLanguage,
-  writeSavedMenuLanguage,
-} from "@/modules/restaurant-discovery/menu-language";
+import { HINGLISH_STYLE, useMenuLanguage } from "@/modules/restaurant-discovery/menu-language";
 import type {
   InteractiveMenu,
   MenuSelection,
@@ -34,7 +28,10 @@ import type {
 import { menuBcp47TagFor, presentReviewed } from "@/modules/restaurant-discovery/menu-presentation";
 import { useMenuSelection } from "@/modules/restaurant-discovery/menu-selection-store";
 import { listMenuPagesFn } from "@/modules/restaurant-discovery/restaurant-menu-media.functions";
-import { getRestaurantFn } from "@/modules/restaurant-discovery/restaurant.functions";
+import {
+  getRestaurantFn,
+  getVenueChannelsFn,
+} from "@/modules/restaurant-discovery/restaurant.functions";
 import type { RestaurantSearch } from "@/modules/restaurant-discovery/restaurant.schema";
 import type { Locale } from "@/shared/i18n";
 import type { ExchangeRate } from "@/shared/money";
@@ -54,25 +51,6 @@ const scrollKeyFor = (venueId: string, channel: MenuChannel, menuLang: string): 
 const humanizeSection = (section: string): string =>
   section.replaceAll("-", " ").replaceAll("_", " ");
 
-/** Same-tab notice for menu-language saves (cross-tab arrives via
- *  the storage event). Mirrors the currency preference store. */
-const menuLanguageStoreEvent = "feastjourney-menu-language";
-
-const changeMenuLanguage = (value: string): void => {
-  writeSavedMenuLanguage(value);
-  window.dispatchEvent(new Event(menuLanguageStoreEvent));
-};
-
-const subscribeToMenuLanguage = (notify: () => void): (() => void) => {
-  window.addEventListener("storage", notify);
-  window.addEventListener(menuLanguageStoreEvent, notify);
-
-  return () => {
-    window.removeEventListener("storage", notify);
-    window.removeEventListener(menuLanguageStoreEvent, notify);
-  };
-};
-
 type BoardItem = InteractiveMenu["items"][number];
 
 /** Self-fetching reviewed menu panel for one venue + sales channel.
@@ -86,14 +64,12 @@ type BoardItem = InteractiveMenu["items"][number];
 export function RestaurantMenuPanel({
   channel,
   lang,
-  onBackToOverview,
   onChannelChange,
   rates,
   venueId,
   venueName,
   countryCode,
   initialExpandedItemId,
-  backLabel,
   errorHeading,
   retryLabel,
   loadingLabel,
@@ -104,14 +80,12 @@ export function RestaurantMenuPanel({
 }: {
   readonly channel: MenuChannel;
   readonly lang: Locale;
-  readonly onBackToOverview: () => void;
   readonly onChannelChange?: ((channel: MenuChannel) => void) | undefined;
   readonly rates?: ReadonlyMap<string, ExchangeRate> | undefined;
   readonly venueId: string;
   readonly venueName: string | null;
   readonly countryCode: string | null;
   readonly initialExpandedItemId?: string | undefined;
-  readonly backLabel?: string | undefined;
   readonly errorHeading?: string | undefined;
   readonly retryLabel?: string | undefined;
   readonly loadingLabel?: string | undefined;
@@ -129,28 +103,12 @@ export function RestaurantMenuPanel({
 
   const offerings = query.data?.offerings ?? [];
 
-  // Independent menu-reading language: explicit session choice > saved
-  // preference > app language > browser language > English. Switching it
-  // re-projects the already-fetched rows client-side — zero new requests,
-  // no discovery rerun, no map remount.
-  //
-  // Browser globals (saved preference, navigator.languages) are unreadable
-  // during SSR and differ per visitor, so they enter through the external
-  // store: the server snapshot resolves from the app language only, which
-  // is exactly what the server rendered — hydration agrees, then the
-  // client snapshot folds saved/browser preferences in with a normal
-  // update. Reading them during render would both crash runtimes without
-  // navigator.languages and mismatch hydration.
-  const menuLang = useSyncExternalStore(
-    subscribeToMenuLanguage,
-    () =>
-      resolveMenuLanguage({
-        app: lang,
-        browser: detectMenuBrowserLanguage(navigator.languages),
-        saved: readSavedMenuLanguage(),
-      }),
-    () => resolveMenuLanguage({ app: lang }),
-  );
+  // Menu-reading language via the shared `useMenuLanguage(appLang)`
+  // contract: explicit session choice > remembered preference (only when
+  // the traveler opts in) > app language > browser language > English.
+  // Switching re-projects the already-fetched rows client-side — zero new
+  // requests, no discovery rerun, no map remount.
+  const { menuLang, changeMenuLanguage, remember, setRemember } = useMenuLanguage(lang);
 
   const projectionLang = menuLang === HINGLISH_STYLE ? "en" : menuLang;
 
@@ -179,6 +137,27 @@ export function RestaurantMenuPanel({
   const showPagesTab = pagesQuery.isSuccess && pages.length > 0;
   const offeringsEmpty = query.isSuccess && offerings.length === 0;
   const tab = tabOverride ?? (showPagesTab && offeringsEmpty ? "pages" : "menu");
+
+  // Channel availability: distinct sales channels with current listed prices
+  // for this venue. The control renders only when two or more eligible
+  // channels qualify — dine-in-only venues show no channel UI at all.
+  const channelsQuery = useQuery({
+    queryKey: ["restaurant-channels", venueId],
+    queryFn: () => getVenueChannelsFn({ data: { venueId } }),
+    staleTime: 60000,
+    retry: false,
+  });
+
+  const eligibleChannels = (channelsQuery.data ?? []).filter(
+    (value): value is MenuChannel =>
+      value === "dine_in" || value === "takeaway" || value === "delivery",
+  );
+
+  const channelOptions: ReadonlyArray<MenuChannel> = eligibleChannels.includes(channel)
+    ? eligibleChannels
+    : [...eligibleChannels, channel];
+
+  const showChannelControl = onChannelChange !== undefined && eligibleChannels.length >= 2;
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -214,7 +193,6 @@ export function RestaurantMenuPanel({
   // review acknowledgements survive overview ↔ menu ↔ reviews switches.
   const copy = menuCopy(lang);
   const rcopy: RestaurantCopy = restaurantCopy(lang);
-  const backLabelText = backLabel ?? rcopy.menuBackToOverview;
   const errorHeadingText = errorHeading ?? rcopy.menuLoadFailed;
   const retryLabelText = retryLabel ?? rcopy.retryAction;
   const loadingLabelText = loadingLabel ?? rcopy.menuLoading;
@@ -408,8 +386,6 @@ export function RestaurantMenuPanel({
     channelName = rcopy.delivery;
   }
 
-  const channelChannels: ReadonlyArray<MenuChannel> = ["dine_in", "takeaway", "delivery"];
-
   const channelChipLabel = (value: MenuChannel): string => {
     if (value === "takeaway") return rcopy.takeaway;
 
@@ -418,13 +394,15 @@ export function RestaurantMenuPanel({
     return rcopy.dineIn;
   };
 
+  const changeChannel = (value: string): void => {
+    if (onChannelChange === undefined) return;
+
+    if (value === "takeaway" || value === "delivery" || value === "dine_in") onChannelChange(value);
+  };
+
   return (
     <section className="restaurant-menu-panel" aria-label={venueName ?? "Restaurant menu"}>
       <div className="menu-panel-head">
-        <button type="button" className="menu-panel-back" onClick={onBackToOverview}>
-          <ArrowLeft aria-hidden="true" />
-          {backLabelText}
-        </button>
         <MenuLanguageSelector
           id={`menu-lang-${venueId}`}
           value={menuLang}
@@ -436,22 +414,24 @@ export function RestaurantMenuPanel({
           hinglishUnavailable={copy.hinglishUnavailable}
           unavailableLabel={copy.menuLanguageUnavailable}
           moreLanguagesLabel={copy.moreLanguagesLabel}
+          remember={remember}
+          onToggleRemember={() => setRemember(!remember)}
         />
-        {onChannelChange !== undefined && (
-          <fieldset className="menu-panel-channels">
-            <legend className="sr-only">{rcopy.diningOptions}</legend>
-            {channelChannels.map((value) => (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={channel === value}
-                className={channel === value ? "menu-panel-chip is-active" : "menu-panel-chip"}
-                onClick={() => onChannelChange(value)}
-              >
-                {channelChipLabel(value)}
-              </button>
-            ))}
-          </fieldset>
+        {showChannelControl && (
+          <label className="menu-panel-channel">
+            <span>{rcopy.diningOptions}</span>
+            <select
+              value={channel}
+              onChange={(event) => changeChannel(event.target.value)}
+              aria-label={rcopy.diningOptions}
+            >
+              {channelOptions.map((value) => (
+                <option key={value} value={value}>
+                  {channelChipLabel(value)}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
       </div>
       {showPagesTab && (

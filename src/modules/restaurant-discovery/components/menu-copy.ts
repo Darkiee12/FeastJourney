@@ -101,6 +101,7 @@ const english = {
   hinglishLabel: "Hinglish style",
   hinglishUnavailable:
     "No reviewed Hinglish text for these dishes yet — showing English. Original names are preserved below.",
+  rememberMenuLanguage: "Remember language",
   helpAddMenu: "Help add this menu",
 };
 
@@ -206,6 +207,7 @@ const vietnamese: typeof english = {
   hinglishLabel: "Kiểu Hinglish",
   hinglishUnavailable:
     "Chưa có bản Hinglish đã duyệt cho các món này — đang hiện tiếng Anh. Tên gốc được giữ nguyên bên dưới.",
+  rememberMenuLanguage: "Nhớ ngôn ngữ",
   helpAddMenu: "Giúp thêm thực đơn này",
 };
 

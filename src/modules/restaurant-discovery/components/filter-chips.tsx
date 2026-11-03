@@ -1,30 +1,20 @@
-import { Link } from "@tanstack/react-router";
-import { ArrowLeft, X } from "lucide-react";
+import { X } from "lucide-react";
 
 import type { RestaurantCopy } from "@/modules/restaurant-discovery/components/restaurant-copy";
 import type { RestaurantSearch } from "@/modules/restaurant-discovery/restaurant.schema";
-import type { Locale } from "@/shared/i18n";
 
 export interface FilterChipsProps {
   readonly copy: RestaurantCopy;
   readonly search: RestaurantSearch;
-  readonly lang: Locale;
   readonly dishName: string | null;
-  readonly dishSlug: string | null;
   readonly cuisineLabel: string | null;
   readonly onPatch: (patch: Partial<RestaurantSearch>) => void;
 }
 
-/** Compact active-filter chips. Each chip removes exactly one constraint. */
-export function FilterChips({
-  copy,
-  search,
-  lang,
-  dishName,
-  dishSlug,
-  cuisineLabel,
-  onPatch,
-}: FilterChipsProps) {
+/** Compact active-filter chips, browse view only. The selected dish renders
+ *  as one compact removable chip (`DishName ×`); the return to the Food
+ *  Journey dish lives in the overview breadcrumb and the toolbar, never here. */
+export function FilterChips({ copy, search, dishName, cuisineLabel, onPatch }: FilterChipsProps) {
   const chips: Array<{
     readonly key: string;
     readonly label: string;
@@ -131,42 +121,21 @@ export function FilterChips({
   return (
     <fieldset className="mapapp-chips">
       <legend className="sr-only">{copy.filters}</legend>
-      {chips.map((chip) =>
-        chip.key === "dish" && dishSlug !== null ? (
-          <span key={chip.key} className="mapapp-chip-dish">
-            <Link
-              to="/dishes/$dishId"
-              params={{ dishId: dishSlug }}
-              search={{ lang }}
-              className="mapapp-chip-link"
-            >
-              <ArrowLeft aria-hidden="true" />
-              {copy.backToDish}
-            </Link>
-            <span className="mapapp-chip-label">{chip.label}</span>
-            <button
-              type="button"
-              className="mapapp-chip-x"
-              onClick={chip.remove}
-              aria-label={copy.clearDish}
-            >
-              <X aria-hidden="true" />
-            </button>
-          </span>
-        ) : (
-          <span key={chip.key} className="mapapp-chip">
-            <span className="mapapp-chip-label">{chip.label}</span>
-            <button
-              type="button"
-              className="mapapp-chip-x"
-              onClick={chip.remove}
-              aria-label={`${copy.clearFilters}: ${chip.label}`}
-            >
-              <X aria-hidden="true" />
-            </button>
-          </span>
-        ),
-      )}
+      {chips.map((chip) => (
+        <span key={chip.key} className="mapapp-chip">
+          <span className="mapapp-chip-label">{chip.label}</span>
+          <button
+            type="button"
+            className="mapapp-chip-x"
+            onClick={chip.remove}
+            aria-label={
+              chip.key === "dish" ? copy.clearDish : `${copy.clearFilters}: ${chip.label}`
+            }
+          >
+            <X aria-hidden="true" />
+          </button>
+        </span>
+      ))}
     </fieldset>
   );
 }
