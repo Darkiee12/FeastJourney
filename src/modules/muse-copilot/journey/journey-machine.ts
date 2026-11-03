@@ -1,7 +1,9 @@
 import {
   JourneyEvent,
   JourneyState,
+  MuseAction,
   transition,
+  type CopilotContext,
   type JourneyTask,
 } from "@/modules/muse-copilot/journey/types";
 
@@ -12,38 +14,35 @@ export const initialJourneyState: JourneyState = JourneyState.Home();
 export const enterTask = (task: JourneyTask): JourneyState =>
   transition(JourneyState.Home(), JourneyEvent.SelectTask({ task }));
 
-/** Leave any state for the landing picker. */
-export const goHome = (state: JourneyState): JourneyState =>
-  transition(state, JourneyEvent.GoHome());
-
-/** Step back one level (flow slot → landing, waiter card → order review). */
-export const goBack = (state: JourneyState): JourneyState =>
-  transition(state, JourneyEvent.GoBack());
-
-/** The task a flow-carrying state belongs to, or null outside a flow. */
-export const taskOfState = (state: JourneyState): JourneyTask | null =>
-  JourneyState.$match(state, {
-    Home: () => null,
-    Capture: ({ task }) => task,
-    Uploading: ({ task }) => task,
-    Analyzing: ({ task }) => task,
-    Researching: ({ task }) => task,
-    PresentingResults: ({ task }) => task,
-    OrderReview: () => null,
-    WaiterCard: () => null,
-    RecoverableFailure: () => null,
-  });
-
-/** True only on the landing picker — the shell shows task cards then. */
-export const isHomeState = (state: JourneyState): boolean =>
-  JourneyState.$match(state, {
-    Home: () => true,
-    Capture: () => false,
-    Uploading: () => false,
-    Analyzing: () => false,
-    Researching: () => false,
-    PresentingResults: () => false,
-    OrderReview: () => false,
-    WaiterCard: () => false,
-    RecoverableFailure: () => false,
+/**
+ * Pure typed context transition for frozen `MuseAction`s (plan §17). This is
+ * not a second state machine — the `JourneyState` machine above stays the
+ * single state system; this maps action outcomes onto shareable scope. Only
+ * actions carrying scope touch the context, and only with defined values:
+ * omitted keys keep the current scope so dish/city survive task switches.
+ * Explicit clearing stays with the removable scope chips. The workspace
+ * reports the result through `onUpdateContext`, which syncs the shareable
+ * ids back to the URL; scan ownership is always re-verified server-side.
+ */
+export const applyActionToContext = (context: CopilotContext, action: MuseAction): CopilotContext =>
+  MuseAction.$match(action, {
+    AskQuestion: () => context,
+    OpenRoute: () => context,
+    OpenTool: () => context,
+    BrowseDishes: () => context,
+    SetContext: ({ city, country, dishId, scanId, venueId }) => ({
+      ...context,
+      city: city ?? context.city,
+      country: country ?? context.country,
+      dishId: dishId ?? context.dishId,
+      venueId: venueId ?? context.venueId,
+      scanId: scanId ?? context.scanId,
+    }),
+    FindRestaurants: ({ dishId }) => (dishId === undefined ? context : { ...context, dishId }),
+    ResumeScan: ({ scanId }) => ({ ...context, scanId }),
+    OpenOrder: ({ scanId, venueId }) => ({
+      ...context,
+      venueId: venueId ?? context.venueId,
+      scanId: scanId ?? context.scanId,
+    }),
   });

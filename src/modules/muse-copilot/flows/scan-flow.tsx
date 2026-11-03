@@ -1,47 +1,124 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
-import { z } from "zod";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import {
+  isScanClientError,
+  ownedScanIdFrom,
+  scanEntrySearch,
+  scanStatusText,
+} from "@/modules/muse-copilot/flows/scan-return-adapter";
 import type { WorkspacePanelApi } from "@/modules/muse-copilot/flows/task-panel";
-
-const uuidSchema = z.uuid();
+import { menuScanClient } from "@/modules/restaurant-discovery/menu-scan-client";
 
 /**
  * Scan handoff (plan §15). The canonical `/scan` route owns capture,
  * validation, persistence, extraction, and review — nothing is duplicated
- * here. Entry navigates directly to `/scan` with locale, verified venue
- * scope, and the Muse return context; no intermediate scanner form lives
- * in the workspace. Returning with an owned scan id renders the
- * continue-with-scan actions (ask, explain, order, find similar); ownership
- * re-verifies server-side on every use and no secrets ride the URL.
- *
- * Known gap: the scanner's "Continue with Muse" link does not yet carry
- * the owned scan id back (menu-scan-page is outside this lane), so returns
- * land without scan context until that link appends `scan=<id>`.
+ * here. Selecting the task navigates directly to `/scan` with locale,
+ * validated venue scope, and the Muse return context; the manual button
+ * below stays only as a fallback (blocked navigation, retry). Returning
+ * with an owned scan id renders the continue-with-scan actions (ask,
+ * explain, order, inspect, find similar); ownership and expiry re-verify
+ * server-side on entry, mapping to actionable errors before any re-upload.
+ * Only the owned scan id rides the link — no secrets, no revision
+ * metadata in Muse UI.
  */
-export function ScanPanel({ context, copy, selectTask, setDraft }: WorkspacePanelApi): ReactNode {
+export function ScanPanel({
+  context,
+  copy,
+  onUpdateContext,
+  publishNote,
+  selectTask,
+  setDraft,
+}: WorkspacePanelApi): ReactNode {
   const navigate = useNavigate();
   const [opening, setOpening] = useState(false);
+
+  const ownedScanId = ownedScanIdFrom(context.scanId);
+
+  // Direct entry: first mount without a return scan goes straight to the
+  // canonical scanner. Runs once — an expired-scan clearing below must not
+  // re-trigger navigation while the visitor reads the recovery guidance.
+  const didEnter = useRef(false);
+
+  useEffect(() => {
+    if (didEnter.current || ownedScanId !== null) {
+      return;
+    }
+
+    didEnter.current = true;
+    setOpening(true);
+
+    void navigate({
+      to: "/scan",
+      search: scanEntrySearch(context.language, context.venueId),
+    });
+  }, [context.language, context.venueId, navigate, ownedScanId]);
+
+  // Return verification: the scan id re-authorizes server-side on entry.
+  // Expired or foreign scans surface an actionable error and drop the id so
+  // the entry state (with its scan-again path) returns. Runs once per id;
+  // revision metadata is never rendered.
+  const verifiedRef = useRef<string | null>(null);
+  const cancelledRef = useRef(false);
+
+  useEffect(() => {
+    cancelledRef.current = false;
+
+    if (ownedScanId !== null && verifiedRef.current !== ownedScanId) {
+      verifiedRef.current = ownedScanId;
+
+      void (async () => {
+        try {
+          await menuScanClient.get(ownedScanId);
+        } catch (error) {
+          if (cancelledRef.current) {
+            return;
+          }
+
+          publishNote(
+            isScanClientError(error) ? scanStatusText(copy, error) : copy.errorUnavailable,
+          );
+          onUpdateContext({ scanId: undefined });
+        }
+      })();
+    }
+
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, [copy, onUpdateContext, ownedScanId, publishNote]);
 
   const openScanner = (): void => {
     setOpening(true);
 
-    const parsedVenue = uuidSchema.safeParse(context.venueId);
-
     void navigate({
       to: "/scan",
-      search: parsedVenue.success
-        ? {
-            lang: context.language,
-            venueId: parsedVenue.data,
-            returnVenue: parsedVenue.data,
-            returnView: "copilot" as const,
-          }
-        : { lang: context.language, returnView: "copilot" as const },
+      search: scanEntrySearch(context.language, context.venueId),
     });
   };
 
-  if (context.scanId !== undefined) {
+  const inspectScan = (): void => {
+    // Owned-scan branch only: ownedScanId is already a validated uuid
+    // (ownedScanIdFrom rejects anything else). The canonical `/scan` route
+    // carries no scan id in its search contract — it restores this exact
+    // scan from session storage and offers the Muse return link — so entry
+    // carries the same locale/venue scope plus return context, and the page
+    // resumes the owned scan instead of starting a blank capture.
+    if (ownedScanId === null) {
+      openScanner();
+
+      return;
+    }
+
+    setOpening(true);
+
+    void navigate({
+      to: "/scan",
+      search: scanEntrySearch(context.language, context.venueId),
+    });
+  };
+
+  if (ownedScanId !== null) {
     return (
       <div className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-white px-4 py-3 shadow-[0_8px_20px_rgba(3,10,30,0.08)]">
         <p className="text-sm font-bold text-ink">{copy.scanContextTitle}</p>
@@ -77,6 +154,15 @@ export function ScanPanel({ context, copy, selectTask, setDraft }: WorkspacePane
             className="inline-flex min-h-9 cursor-pointer items-center rounded-full border border-border-soft bg-white px-4 text-xs font-bold text-ink transition hover:border-food-orange-strong"
           >
             {copy.scanBuildOrder}
+          </button>
+
+          <button
+            type="button"
+            onClick={inspectScan}
+            disabled={opening}
+            className="inline-flex min-h-9 cursor-pointer items-center rounded-full border border-border-soft bg-white px-4 text-xs font-bold text-ink transition hover:border-food-orange-strong disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {copy.orderOpenScan}
           </button>
 
           <button

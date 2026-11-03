@@ -1,9 +1,10 @@
 import { Data, Duration, Effect } from "effect";
 
-import { DishService } from "@/modules/food-discovery/server/index";
+import { CatalogService, DishService } from "@/modules/food-discovery/server/index";
 import type { MenuScanDocument } from "@/modules/restaurant-discovery/menu-scan.schema";
 import {
   getRestaurant,
+  listRestaurantAreas,
   searchRestaurants,
   type MenuOffering,
   type RestaurantResult,
@@ -19,6 +20,7 @@ import type { Database } from "@/server/database/client";
 import {
   dishDetailToolSchema,
   dishSearchToolSchema,
+  geoResolveToolSchema,
   priceCompareToolSchema,
   researchToolSchema,
   scanMenuToolSchema,
@@ -26,6 +28,7 @@ import {
   venueSearchToolSchema,
   type DishDetailToolInput,
   type DishSearchToolInput,
+  type GeoResolveToolInput,
   type PriceCompareToolInput,
   type ResearchToolInput,
   type ScanMenuToolInput,
@@ -46,9 +49,11 @@ import { isAmount, isCurrency } from "@/shared/money";
  * in copilot-service; these functions only execute pre-shaped calls.
  */
 
-export type CopilotCatalogEnv = Database | DishService;
+export type CopilotCatalogEnv = Database | DishService | CatalogService;
 
 export type CopilotVenueEnv = Database | DishService | FxRates;
+
+export type CopilotGeoEnv = Database | CatalogService;
 
 export type CopilotScanEnv = Database;
 
@@ -145,6 +150,12 @@ export interface CopilotDishDetail {
   readonly name: string | undefined;
   readonly description: string | null;
   readonly regionNames: ReadonlyArray<string>;
+  /**
+   * Verified catalog ingredient display names (bounded). Grounds honest
+   * dietary notes: the reply may list these as catalog facts but must
+   * still qualify broth, seasonings, and preparation with the venue.
+   */
+  readonly ingredients: ReadonlyArray<string>;
 }
 
 export type DishDetailLookup = Data.TaggedEnum<{
@@ -183,6 +194,10 @@ export const getDishTool = Effect.fn("copilot.tool.getDish")(function* (
               regionNames: profile.places
                 .map((place) => place.name)
                 .filter((name): name is string => name !== undefined),
+              ingredients: profile.ingredients
+                .map((entry) => entry.name)
+                .filter((name): name is string => name !== undefined)
+                .slice(0, 20),
             },
           }),
         ),
@@ -247,29 +262,81 @@ export const searchVenuesTool = Effect.fn("copilot.tool.searchVenues")(function*
     return VenueLookup.VenuesEmpty();
   }
 
-  const program: Effect.Effect<VenueLookup, never, CopilotVenueEnv> = searchRestaurants({
-    q: parsed.data.q,
-    area: parsed.data.area,
-    cuisine: "",
-    radius: 5000,
-    channel: "dine_in",
-    sort: "recommended",
-    limit: parsed.data.limit,
-  }).pipe(
-    Effect.map((output): VenueLookup => {
-      if (output.items.length === 0) {
-        return VenueLookup.VenuesEmpty();
-      }
+  const program: Effect.Effect<VenueLookup, never, CopilotVenueEnv> =
+    parsed.data.dishId === undefined
+      ? searchRestaurants({
+          q: parsed.data.q,
+          area: parsed.data.area,
+          cuisine: "",
+          radius: 5000,
+          channel: "dine_in",
+          sort: "recommended",
+          limit: parsed.data.limit,
+        }).pipe(
+          Effect.map((output): VenueLookup => {
+            if (output.items.length === 0) {
+              return VenueLookup.VenuesEmpty();
+            }
 
-      return VenueLookup.VenuesFound({ venues: output.items.map(toVenueHit) });
-    }),
-    Effect.catchTag("RestaurantInputError", () => Effect.succeed(VenueLookup.VenuesEmpty())),
-    Effect.catch(() =>
-      Effect.succeed(
-        VenueLookup.VenuesUnavailable({ reason: "Restaurant lookup is temporarily unavailable." }),
-      ),
-    ),
-  );
+            return VenueLookup.VenuesFound({ venues: output.items.map(toVenueHit) });
+          }),
+          Effect.catchTag("RestaurantInputError", () => Effect.succeed(VenueLookup.VenuesEmpty())),
+          Effect.catch(() =>
+            Effect.succeed(
+              VenueLookup.VenuesUnavailable({
+                reason: "Restaurant lookup is temporarily unavailable.",
+              }),
+            ),
+          ),
+        )
+      : searchRestaurants({
+          dish: parsed.data.dishId,
+          area: parsed.data.area,
+          q: parsed.data.q,
+          cuisine: "",
+          radius: 5000,
+          channel: "dine_in",
+          sort: "recommended",
+          limit: parsed.data.limit,
+        }).pipe(
+          Effect.map((output): VenueLookup => {
+            const seen = new Set<string>();
+            const venues: Array<CopilotVenueHit> = [];
+
+            for (const row of output.dishItems) {
+              if (seen.has(row.id)) {
+                continue;
+              }
+
+              seen.add(row.id);
+              venues.push(toVenueHit(row));
+
+              if (venues.length >= parsed.data.limit) {
+                break;
+              }
+            }
+
+            if (venues.length === 0) {
+              return VenueLookup.VenuesEmpty();
+            }
+
+            return VenueLookup.VenuesFound({ venues });
+          }),
+          Effect.catchTags({
+            DishNotFound: () => Effect.succeed(VenueLookup.VenuesEmpty()),
+            InvalidLocale: () => Effect.succeed(VenueLookup.VenuesEmpty()),
+            InvalidSearchFilter: () => Effect.succeed(VenueLookup.VenuesEmpty()),
+            PlaceNotFound: () => Effect.succeed(VenueLookup.VenuesEmpty()),
+            RestaurantInputError: () => Effect.succeed(VenueLookup.VenuesEmpty()),
+          }),
+          Effect.catch(() =>
+            Effect.succeed(
+              VenueLookup.VenuesUnavailable({
+                reason: "Restaurant lookup is temporarily unavailable.",
+              }),
+            ),
+          ),
+        );
 
   const result = yield* withToolTimeout(program, "searchVenues");
 
@@ -512,6 +579,162 @@ export const researchTool = Effect.fn("copilot.tool.research")(function* (
 
   if (result === null) {
     return ResearchLookup.ResearchUnavailable({ reason: "Web research timed out. Please retry." });
+  }
+
+  return result;
+});
+
+export type GeoResolution = Data.TaggedEnum<{
+  CityResolved: {
+    readonly name: string;
+    readonly countryName: string | null;
+    readonly countryIso: string | null;
+  };
+  CountryResolved: { readonly name: string; readonly iso: string | null };
+  GeoUnresolved: {};
+  GeoUnavailable: { readonly reason: string };
+}>;
+
+export const GeoResolution = Data.taggedEnum<GeoResolution>();
+
+/**
+ * Diacritic-insensitive fold mirroring the catalog `normalizeSearchKey`
+ * (fold đ, strip combining marks, lowercase) for comparing raw mentions
+ * against canonical area/country lists. Kept local so the copilot does
+ * not reach into another module's private domain helpers.
+ */
+const foldMentionKey = (value: string): string => {
+  const folded = value.replace(/đ/g, "d").replace(/Đ/g, "d");
+
+  return folded
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/gu, "")
+    .normalize("NFC")
+    .replace(/[ʼ'’`]/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 120);
+};
+
+/**
+ * Generic initialism match ("HCMC" → "Ho Chi Minh City"): the mention must
+ * be 2-6 ASCII letters and equal the concatenated first letters of the
+ * candidate's words. A general mechanism over canonical data, never a
+ * hardcoded city map.
+ */
+const matchesInitialism = (mention: string, candidate: string): boolean => {
+  if (!/^[a-z]{2,6}$/i.test(mention)) {
+    return false;
+  }
+
+  const initials = candidate
+    .split(/[^a-zA-ZÀ-ỹ]+/gu)
+    .filter((word) => word.length > 0)
+    .map((word) => word[0]?.toLowerCase() ?? "")
+    .join("");
+
+  return initials.length >= 2 && initials === mention.toLowerCase();
+};
+
+export const resolveMentionTool = Effect.fn("copilot.tool.resolveMention")(function* (
+  input: GeoResolveToolInput,
+) {
+  const parsed = geoResolveToolSchema.safeParse(input);
+
+  if (!parsed.success) {
+    yield* Effect.logWarning("Copilot geo resolution got invalid arguments").pipe(
+      Effect.annotateLogs({ operation: "resolveMention" }),
+    );
+
+    return GeoResolution.GeoUnresolved();
+  }
+
+  const mention = parsed.data.q.trim();
+
+  const program: Effect.Effect<GeoResolution, never, CopilotGeoEnv> = Effect.gen(function* () {
+    const service = yield* CatalogService;
+
+    const cities = yield* service.searchCities(mention, "en", 3).pipe(
+      Effect.catchTags({
+        IngredientNotFound: () => Effect.succeed([]),
+        InvalidLocale: () => Effect.succeed([]),
+        InvalidSearchFilter: () => Effect.succeed([]),
+        PlaceNotFound: () => Effect.succeed([]),
+      }),
+      Effect.catch(() => Effect.succeed(null)),
+    );
+
+    if (cities === null) {
+      return GeoResolution.GeoUnavailable({ reason: "Place lookup is temporarily unavailable." });
+    }
+
+    const city = cities[0];
+
+    if (city !== undefined && city.name !== undefined) {
+      let countryName: string | null = null;
+
+      if (city.country !== null) {
+        const countries = yield* service
+          .listCountries("en", 300)
+          .pipe(Effect.catch(() => Effect.succeed([])));
+
+        const match = countries.find((entry) => entry.iso3166 === city.country);
+
+        countryName = match?.displayName ?? null;
+      }
+
+      return GeoResolution.CityResolved({
+        name: city.name,
+        countryName,
+        countryIso: city.country,
+      });
+    }
+
+    const countries = yield* service
+      .listCountries("en", 300)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+
+    if (countries === null) {
+      return GeoResolution.GeoUnavailable({ reason: "Place lookup is temporarily unavailable." });
+    }
+
+    const mentionKey = foldMentionKey(mention);
+
+    const countryHit = countries.find(
+      (entry) =>
+        entry.displayName !== undefined && foldMentionKey(entry.displayName) === mentionKey,
+    );
+
+    if (countryHit !== undefined && countryHit.displayName !== undefined) {
+      return GeoResolution.CountryResolved({
+        name: countryHit.displayName,
+        iso: countryHit.iso3166,
+      });
+    }
+
+    const areaRows = yield* listRestaurantAreas.pipe(Effect.catch(() => Effect.succeed(null)));
+
+    if (areaRows === null) {
+      return GeoResolution.GeoUnavailable({ reason: "Place lookup is temporarily unavailable." });
+    }
+
+    const areaHit = areaRows
+      .map((row) => row.area)
+      .find((area) => foldMentionKey(area) === mentionKey || matchesInitialism(mention, area));
+
+    if (areaHit !== undefined) {
+      return GeoResolution.CityResolved({ name: areaHit, countryName: null, countryIso: null });
+    }
+
+    return GeoResolution.GeoUnresolved();
+  });
+
+  const result = yield* withToolTimeout(program, "resolveMention");
+
+  if (result === null) {
+    return GeoResolution.GeoUnavailable({ reason: "Place lookup timed out. Please retry." });
   }
 
   return result;

@@ -119,7 +119,10 @@ function MobileHomeInner({ copy, lang }: { copy: Messages; lang: Locale }) {
         <GlobeCanvas copy={copy} lang={lang} />
       </div>
 
-      <div className="relative z-[2] mx-auto w-full max-w-3xl px-5 pt-[clamp(1.5rem,6vh,3rem)] text-center">
+      <div
+        data-hero-copy
+        className="relative z-[2] mx-auto w-full max-w-3xl px-5 pt-[clamp(1.5rem,6vh,3rem)] text-center"
+      >
         <h1 className="font-display mb-4 text-[clamp(2.6rem,11vw,4rem)] leading-[1.02] tracking-[0.015em] text-balance text-white uppercase text-shadow-hero">
           {copy.heroHeading}
         </h1>

@@ -2,6 +2,7 @@ import {
   DishRecommendationCard,
   DishRecommendationCardSkeleton,
   type CardProvenance,
+  type DishRecommendationPresentation,
 } from "@/components/home/dish-recommendation-card";
 import type { RankedDishSummary } from "@/modules/food-discovery/server/operations/recommendation-service";
 import type { FavoriteStatusQuery } from "@/modules/user/components/save-dish-button";
@@ -21,6 +22,7 @@ export function ResultCard({
   dish,
   favoriteStatus,
   lang,
+  presentation,
   provenance,
   session,
 }: {
@@ -28,6 +30,7 @@ export function ResultCard({
   readonly dish: RankedDishSummary;
   readonly favoriteStatus: FavoriteStatusQuery;
   readonly lang: Locale;
+  readonly presentation?: DishRecommendationPresentation | undefined;
   readonly provenance: CardProvenance;
   readonly session: SessionState;
 }) {
@@ -37,6 +40,7 @@ export function ResultCard({
       dish={dish}
       favoriteStatus={favoriteStatus}
       lang={lang}
+      presentation={presentation}
       provenance={provenance}
       returnTo="/"
       session={session}
@@ -48,6 +52,10 @@ export function ResultCard({
  * Loading skeleton for the results grid. Re-exported shape of the shared
  * card skeleton so grid callers keep one import.
  */
-export function ResultCardSkeleton() {
-  return <DishRecommendationCardSkeleton />;
+export function ResultCardSkeleton({
+  presentation,
+}: {
+  readonly presentation?: DishRecommendationPresentation | undefined;
+} = {}) {
+  return <DishRecommendationCardSkeleton presentation={presentation} />;
 }

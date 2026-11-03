@@ -4,29 +4,31 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { CopilotCopy } from "@/modules/muse-copilot/copilot-copy";
 import { CopilotCards } from "@/modules/muse-copilot/flows/conversation-cards";
 import {
+  ActionChips,
   FollowUpChips,
   RecoverableError,
 } from "@/modules/muse-copilot/flows/conversation-feedback";
 import type {
   CopilotContext,
-  JourneyTask,
+  MuseAction,
   MuseFailure,
   MuseTurn,
 } from "@/modules/muse-copilot/journey/types";
+import type { Locale } from "@/shared/i18n";
 
 export interface ConversationViewportProps {
   readonly busy: boolean;
   readonly children?: ReactNode | undefined;
   readonly copy: CopilotCopy;
-  readonly language: "en" | "vi";
+  readonly language: Locale;
+  readonly onPickAction: (action: MuseAction) => void;
   readonly onPickFollowUp: (text: string) => void;
   readonly onRetry: (() => void) | null;
-  readonly onSelectTask: (task: JourneyTask) => void;
   readonly onUpdateContext: (patch: Partial<CopilotContext>) => void;
   readonly pendingStage: ReactNode;
   readonly retryAfterSeconds: number | null;
   readonly retryTurnId: string | null;
-  readonly signIn: { readonly lang: "en" | "vi"; readonly returnTo: string } | null;
+  readonly signIn: { readonly lang: Locale; readonly returnTo: string } | null;
   readonly turns: ReadonlyArray<MuseTurn>;
 }
 
@@ -92,7 +94,7 @@ export function MuseAvatar() {
 function UserBubble({ copy, text }: { readonly copy: CopilotCopy; readonly text: string }) {
   return (
     <div className="flex items-end justify-end gap-2">
-      <p className="max-w-[85%] rounded-2xl rounded-br-md border border-mango/40 bg-mango/25 px-4 py-3 text-sm leading-relaxed break-words whitespace-pre-wrap text-ink">
+      <p className="max-w-[85%] min-w-0 rounded-2xl rounded-br-md border border-brand-blue/25 bg-brand-blue/10 px-4 py-3 text-sm leading-relaxed break-words whitespace-pre-wrap text-ink">
         <span className="sr-only">{`${copy.youLabel}: `}</span>
         {text}
       </p>
@@ -116,9 +118,9 @@ function AssistantBlock({
   busy,
   copy,
   language,
+  onPickAction,
   onPickFollowUp,
   onRetry,
-  onSelectTask,
   onUpdateContext,
   retryAfterSeconds,
   signIn,
@@ -126,22 +128,39 @@ function AssistantBlock({
 }: {
   readonly busy: boolean;
   readonly copy: CopilotCopy;
-  readonly language: "en" | "vi";
+  readonly language: Locale;
+  readonly onPickAction: (action: MuseAction) => void;
   readonly onPickFollowUp: (text: string) => void;
   readonly onRetry: (() => void) | null;
-  readonly onSelectTask: (task: JourneyTask) => void;
   readonly onUpdateContext: (patch: Partial<CopilotContext>) => void;
   readonly retryAfterSeconds: number | null;
-  readonly signIn: { readonly lang: "en" | "vi"; readonly returnTo: string } | null;
+  readonly signIn: { readonly lang: Locale; readonly returnTo: string } | null;
   readonly turn: MuseTurn;
 }): ReactNode {
   const failure: MuseFailure | null = turn.failure;
+
+  // Short text-only replies stay compact: tighter padding, smaller
+  // provenance caption — no card chrome for a one-line answer (plan §12).
+  const compact =
+    turn.text !== "" &&
+    turn.text.length <= 160 &&
+    turn.cards.length === 0 &&
+    turn.followUps.length === 0 &&
+    turn.actions.length === 0 &&
+    (turn.notice === null || turn.notice === "") &&
+    failure === null;
 
   return (
     <div className="flex items-start gap-2">
       <MuseAvatar />
 
-      <div className="flex min-w-0 flex-1 flex-col gap-2 rounded-2xl rounded-bl-md border border-border-soft bg-white px-4 py-3 shadow-[0_8px_20px_rgba(3,10,30,0.1)]">
+      <div
+        className={
+          compact
+            ? "flex min-w-0 flex-1 flex-col gap-1.5 rounded-2xl rounded-bl-md border border-border-soft bg-white px-3.5 py-2.5 shadow-[0_1px_2px_rgba(3,10,30,0.08)]"
+            : "flex min-w-0 flex-1 flex-col gap-2 rounded-2xl rounded-bl-md border border-border-soft bg-white px-4 py-3 shadow-[0_1px_2px_rgba(3,10,30,0.08)]"
+        }
+      >
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs font-bold tracking-[0.14em] text-food-orange-strong uppercase">
             {copy.museLabel}
@@ -170,11 +189,13 @@ function AssistantBlock({
           cards={turn.cards}
           copy={copy}
           language={language}
-          onSelectTask={onSelectTask}
+          onAction={onPickAction}
           onUpdateContext={onUpdateContext}
         />
 
         <FollowUpChips busy={busy} copy={copy} items={turn.followUps} onPick={onPickFollowUp} />
+
+        <ActionChips busy={busy} items={turn.actions} onPick={onPickAction} />
 
         {failure === null || onRetry === null ? null : (
           <RecoverableError
@@ -201,9 +222,9 @@ export function ConversationViewport({
   children,
   copy,
   language,
+  onPickAction,
   onPickFollowUp,
   onRetry,
-  onSelectTask,
   onUpdateContext,
   pendingStage,
   retryAfterSeconds,
@@ -265,9 +286,9 @@ export function ConversationViewport({
               busy={busy}
               copy={copy}
               language={language}
+              onPickAction={onPickAction}
               onPickFollowUp={onPickFollowUp}
               onRetry={retryTurnId === turn.id ? onRetry : null}
-              onSelectTask={onSelectTask}
               onUpdateContext={onUpdateContext}
               retryAfterSeconds={retryAfterSeconds}
               signIn={signIn}

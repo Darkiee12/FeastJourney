@@ -3,11 +3,19 @@
  * `.muse-workspace`, so no other route is affected and the global `main`
  * padding contract stays untouched for ordinary pages.
  *
- * Galaxy identity (addendum + mockups): the page band stays deep navy with
- * subtle gradients and very sparse stars; the conversation lives on a
- * cream workspace card with white content cards and restrained orange
+ * Galaxy identity (addendum + overhaul §§6,23): the page band stays deep
+ * navy with subtle gradients and very sparse stars; the conversation lives
+ * on a cream workspace card with white content cards and restrained orange
  * primary actions. Dark text never sits on navy; light text never sits on
  * cream.
+ *
+ * This file owns ROUTE concerns only: galaxy layers, viewport sizing,
+ * safe-area, scroll shell, footer coordination, the interim thread
+ * measure, and the desktop prose measure. Ordinary buttons/cards/rows
+ * live as Tailwind utilities in their components. The toolbar/city/chips/
+ * composer rules below style markup owned by `flows/muse-workspace.tsx`
+ * (Lane 4) — migrating them to utilities requires editing that file, so
+ * they stay here until that lane migrates. Do not duplicate them in JSX.
  */
 
 /* Break the workspace out of the centered page column (like the map
@@ -22,10 +30,6 @@ main:has(> .muse-workspace) {
   flex-direction: column;
   min-height: 0;
   background:
-    radial-gradient(120% 50% at 50% 0%, rgb(139 92 246 / 0.16), transparent 60%),
-    radial-gradient(100% 40% at 50% 110%, rgb(37 99 235 / 0.14), transparent 65%),
-    linear-gradient(180deg, var(--color-space-deep) 0%, var(--color-ocean-deep) 62%, #0b2350 100%);
-  background-image:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='640'%3E%3Cg fill='white'%3E%3Ccircle cx='80' cy='90' r='1.2' opacity='.5'/%3E%3Ccircle cx='320' cy='60' r='1' opacity='.35'/%3E%3Ccircle cx='540' cy='150' r='1.3' opacity='.45'/%3E%3Ccircle cx='200' cy='330' r='1' opacity='.35'/%3E%3Ccircle cx='470' cy='400' r='1.2' opacity='.4'/%3E%3Ccircle cx='120' cy='540' r='1' opacity='.35'/%3E%3C/g%3E%3C/svg%3E"),
     radial-gradient(120% 50% at 50% 0%, rgb(139 92 246 / 0.16), transparent 60%),
     radial-gradient(100% 40% at 50% 110%, rgb(37 99 235 / 0.14), transparent 65%),
@@ -49,13 +53,14 @@ main:has(> .muse-workspace) {
 }
 
 /* Cream conversation card: fills the navy band below the toolbar on
-   mobile; a centered rounded card on desktop. Owns the thread scroll. */
+   mobile; a centered fluid card on desktop. Owns the thread scroll. */
 .muse-workspace {
   position: relative;
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   background: transparent;
   color: #fff;
   overflow: clip;
@@ -66,6 +71,8 @@ main:has(> .muse-workspace) {
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
   background: var(--color-cream);
   color: var(--color-ink);
   border-top-left-radius: 1.25rem;
@@ -79,15 +86,35 @@ main:has(> .muse-workspace) {
   }
 
   .muse-workspace-card {
-    width: min(56rem, 100%);
+    width: min(80rem, 100%);
     margin-inline: auto;
     border-radius: 1.5rem;
-    box-shadow: 0 24px 64px rgb(3 10 30 / 0.45);
+    box-shadow: 0 16px 40px rgb(3 10 30 / 0.35);
+  }
+}
+
+/* Shell-owned thread measure (interim): at desktop widths the viewport's
+   inner 42rem column relaxes to 72rem so structured cards and results use
+   the wide card. Long prose keeps its own measure via the 65ch rule below.
+   Viewport lane: move this measure into conversation-viewport.tsx (widen
+   or remove its inner max-w-2xl) and delete this override. */
+@media (min-width: 1024px) {
+  .muse-workspace-card .max-w-2xl {
+    max-width: 72rem;
+  }
+
+  /* Readable prose measure inside the widened thread: assistant/user long
+     text and card descriptions cap at ~65ch, while cards, results, and
+     media keep the full thread width. Desktop-only so the viewport lane's
+     mobile bubble measure (max-w-85%) is untouched. */
+  .muse-workspace-card p.whitespace-pre-wrap {
+    max-width: 65ch;
   }
 }
 
 /* Compact navy toolbar: back chevron, Muse identity, gold city pill,
-   start-over — white text on the navy band. */
+   start-over — white text on the navy band. Markup owned by
+   flows/muse-workspace.tsx; styles stay here until that file migrates. */
 .muse-workspace-toolbar {
   display: flex;
   flex: none;
@@ -120,7 +147,7 @@ main:has(> .muse-workspace) {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  min-height: 2.25rem;
+  min-height: 2.75rem;
   max-width: 12rem;
   border-radius: 9999px;
   border: 1px solid rgb(251 191 36 / 0.55);
@@ -150,8 +177,8 @@ main:has(> .muse-workspace) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 2.75rem;
+  height: 2.75rem;
   flex: none;
   border-radius: 9999px;
   border: 1px solid transparent;
@@ -185,4 +212,14 @@ main:has(> .muse-workspace) {
   background: var(--color-cream);
   padding: 0.625rem 1rem;
   padding-bottom: max(0.625rem, env(safe-area-inset-bottom));
+}
+
+/* Reduced motion: no bounces or large movement inside the workspace. */
+@media (prefers-reduced-motion: reduce) {
+  .muse-workspace *,
+  .muse-workspace *::before,
+  .muse-workspace *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

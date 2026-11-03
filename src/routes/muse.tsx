@@ -2,26 +2,35 @@ import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-route
 import { z } from "zod";
 
 import { copilotCopyFor } from "@/modules/muse-copilot/copilot-copy";
-import type { CopilotContext, JourneyTask } from "@/modules/muse-copilot/journey/types";
+import {
+  journeyTasks,
+  type CopilotContext,
+  type JourneyTask,
+} from "@/modules/muse-copilot/journey/types";
 import { MuseShell } from "@/modules/muse-copilot/shell/muse-shell";
 import { localeSearchSchema, type Locale } from "@/shared/i18n";
 
 const rootRoute = getRouteApi("__root__");
 
-const journeyTaskSchema = z.enum(["scan", "plate", "find", "ask", "order"]);
+const journeyTaskSchema = z.enum(journeyTasks);
 
 /**
  * Muse deep links preserve the router locale convention (`lang`) and accept
  * shareable public identifiers only: task plus dish/venue/scan ids and the
  * coarse city/country. Scan ownership tokens never ride in the URL — the
- * server re-verifies ownership, so a shared link carries no private state.
- * Unknown `task` values fall back to the landing picker.
+ * scan id is only a uuid-shaped hint and the server re-verifies ownership,
+ * so a shared link carries no private state.
+ *
+ * `?task=ask` (or any valid slug) enters that task's conversation directly,
+ * with no intermediate chooser. Unknown `task` values fall back to the
+ * landing picker — never a blank page. An invalid `scan` is dropped the
+ * same way instead of failing the whole search parse.
  */
 const museSearchSchema = localeSearchSchema.extend({
-  task: journeyTaskSchema.catch("ask").optional(),
+  task: journeyTaskSchema.optional().catch(undefined),
   dish: z.string().trim().min(1).max(200).optional(),
   venue: z.string().trim().min(1).max(200).optional(),
-  scan: z.string().trim().min(1).max(200).optional(),
+  scan: z.string().uuid().optional().catch(undefined),
   city: z.string().trim().min(1).max(120).optional(),
   country: z.string().trim().min(1).max(120).optional(),
 });
@@ -81,9 +90,20 @@ function MuseRoute() {
       target.scan = context.scanId;
     }
 
-    void navigate({ to: "/muse", search: target });
+    // Tool switches and context syncs replace the history entry instead of
+    // pushing: task chips are in-place tool activation (typed MuseAction
+    // outcomes), not page navigations, so Back returns to the prior
+    // meaningful page rather than stepping through previous task chips.
+    // Genuine page changes (dish details, restaurant map) navigate normally
+    // from their own cards via OpenRoute and push history as usual.
+    void navigate({ to: "/muse", search: target, replace: true });
   };
 
+  // Keyed by session identity only: task/context/URL updates adopt in place
+  // through the shell effect, so unrelated route updates never remount the
+  // thread. Account switching remounts deliberately (thread storage is
+  // identity-scoped); language switching remounts the workspace through its
+  // storage key because the thread is language-scoped too.
   return (
     <MuseShell
       key={identity}

@@ -1,7 +1,6 @@
 import { useRouter } from "@tanstack/react-router";
 import { ChevronLeft, MapPin, RotateCcw, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { z } from "zod";
 
 import type { CopilotCopy } from "@/modules/muse-copilot/copilot-copy";
 import { AskPanel } from "@/modules/muse-copilot/flows/ask-flow";
@@ -15,8 +14,14 @@ import {
 } from "@/modules/muse-copilot/flows/conversation-feedback";
 import {
   ChatSendResult,
+  ExchangeStatus,
   buildTurnHistory,
+  persistThread,
+  restoreThread,
   sendCopilotChat,
+  sweepForeignThreads,
+  type ChatRetryRequest,
+  type StoredChatRetry,
 } from "@/modules/muse-copilot/flows/conversation-model";
 import {
   ConversationViewport,
@@ -34,23 +39,21 @@ import {
   type WorkspacePanelApi,
 } from "@/modules/muse-copilot/flows/task-panel";
 import {
+  MuseAction,
   MuseFailure,
+  museActionFromContract,
   type CopilotContext,
   type JourneyTask,
   type MuseContextChip,
   type MuseTurn,
+  type SuggestedAction,
   type TurnHistoryItem,
 } from "@/modules/muse-copilot/journey/types";
 import { WorkspaceHero } from "@/modules/muse-copilot/shell/muse-landing";
 import { TaskShortcutChips } from "@/modules/muse-copilot/shell/task-selector";
 import { readStoredPlace } from "@/modules/restaurant-discovery/location-storage";
-import { copilotCardSchema } from "@/server/muse-copilot/copilot-schemas";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const MAX_STORED_TURNS = 20;
-
-const MAX_STORED_CHARS = 2000;
 
 export interface MuseWorkspaceProps {
   readonly copy: CopilotCopy;
@@ -64,72 +67,30 @@ export interface MuseWorkspaceProps {
   readonly onStartOver: () => void;
 }
 
-interface StoredThread {
-  readonly turns: ReadonlyArray<MuseTurn>;
-  readonly labels: ReadonlyArray<readonly [string, string]>;
-  readonly draft: string;
+/** Options for one workspace exchange; defaults append a fresh user turn. */
+interface StartExchangeOptions {
+  readonly appendUser?: boolean | undefined;
+  /** Replace this assistant turn instead of appending (retry path). */
+  readonly replaceId?: string | undefined;
+  /** Serializable chat retry persisted for reload recovery (chat only). */
+  readonly chatRetry?: ChatRetryRequest | undefined;
+  /** AbortSignal source; the workspace aborts it on unmount/Start Over. */
+  readonly controller?: AbortController | undefined;
 }
 
-/**
- * Session storage boundary: the stored thread re-validates through Zod
- * (peer card schema included, so enrichment survives a reload). Failed
- * turns never persist — their retry thunk cannot cross a reload, so they
- * drop and the prior history stands on its own.
- */
-const storedThreadSchema = z.object({
-  turns: z
-    .array(
-      z.object({
-        id: z.string(),
-        role: z.enum(["user", "assistant"]),
-        text: z.string(),
-        cards: z.array(copilotCardSchema).default([]),
-        followUps: z.array(z.string()).default([]),
-        notice: z.string().nullable().default(null),
-        failed: z.boolean().default(false),
-        synthesized: z.boolean().default(false),
-      }),
-    )
-    .default([]),
-  labels: z.array(z.tuple([z.string(), z.string()])).default([]),
-  draft: z.string().default(""),
-});
+/** Retry replaces the failed assistant turn in place — never duplicates it. */
+const replaceOrAppendTurn = (
+  previous: ReadonlyArray<MuseTurn>,
+  id: string,
+  turn: MuseTurn,
+): ReadonlyArray<MuseTurn> => {
+  const index = previous.findIndex((entry) => entry.id === id);
 
-const restoreThread = (storageKey: string): StoredThread => {
-  try {
-    const raw = window.sessionStorage.getItem(`fj.muse-thread.v1.${storageKey}`);
-
-    if (raw === null) {
-      return { turns: [], labels: [], draft: "" };
-    }
-
-    const parsed = storedThreadSchema.safeParse(JSON.parse(raw));
-
-    if (!parsed.success) {
-      return { turns: [], labels: [], draft: "" };
-    }
-
-    const turns = parsed.data.turns
-      .filter((turn) => !turn.failed)
-      .slice(-MAX_STORED_TURNS)
-      .map((turn): MuseTurn => ({
-        id: turn.id,
-        role: turn.role,
-        text: turn.text.slice(0, MAX_STORED_CHARS),
-        cards: turn.cards,
-        followUps: turn.followUps,
-        notice: turn.notice,
-        failure: null,
-        synthesized: turn.synthesized,
-      }));
-
-    const labels = parsed.data.labels.slice(-MAX_STORED_TURNS);
-    const draft = parsed.data.draft.slice(0, MAX_STORED_CHARS);
-
-    return { turns, labels, draft };
-  } catch {
-    return { turns: [], labels: [], draft: "" };
+  if (index === -1) {
+    return [...previous, turn];
   }
+
+  return previous.map((entry, position) => (position === index ? turn : entry));
 };
 
 const stageForTask = (copy: CopilotCopy, task: JourneyTask): string => {
@@ -166,18 +127,54 @@ export function MuseWorkspace({
   const [turns, setTurns] = useState<ReadonlyArray<MuseTurn>>(() => initial.turns);
   const [labels, setLabels] = useState<ReadonlyMap<string, string>>(() => new Map(initial.labels));
   const [draft, setDraft] = useState(() => initial.draft);
-  const [busy, setBusy] = useState(false);
+
+  const [retryRequest, setRetryRequest] = useState<ChatRetryRequest | null>(() =>
+    initial.retry === null ? null : { message: initial.retry.message, task: initial.retry.task },
+  );
+
+  const [exchangeStatus, setExchangeStatus] = useState<ExchangeStatus>(() =>
+    initial.retry === null
+      ? ExchangeStatus.Idle()
+      : ExchangeStatus.AwaitingRetry({
+          assistantTurnId: initial.retry.assistantTurnId,
+          retryAfterSeconds: initial.retry.retryAfterSeconds,
+        }),
+  );
+
   const [stage, setStage] = useState<string | null>(null);
-  const [retryTurnId, setRetryTurnId] = useState<string | null>(null);
-  const [retryAfterSeconds, setRetryAfterSeconds] = useState<number | null>(null);
 
   const runId = useRef(0);
   const busyRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
   const turnsRef = useRef(turns);
   const retryInputRef = useRef<ExchangeInput | null>(null);
   const adoptedPlace = useRef(false);
   const photoRequestRef = useRef<PhotoRequestKind | null>(null);
+  /**
+   * Contract actions staged by the chat `work` closure for the turn it is
+   * about to publish. Exchanges are single-flight (`busyRef`), so the value
+   * set inside `work` is always consumed by the immediately following
+   * `publishAssistant` before any other exchange can run. Photo exchanges
+   * never stage actions, so they publish with an empty chip row.
+   */
+  const pendingActionsRef = useRef<ReadonlyArray<SuggestedAction> | null>(null);
   const router = useRouter();
+
+  // One exhaustive read of the exchange lifecycle: busy, retry turn, and
+  // Retry-After derive together, never as independent nullable states.
+  const statusView: {
+    readonly busy: boolean;
+    readonly retryTurnId: string | null;
+    readonly retryAfterSeconds: number | null;
+  } = ExchangeStatus.$match(exchangeStatus, {
+    Idle: () => ({ busy: false, retryTurnId: null, retryAfterSeconds: null }),
+    Sending: () => ({ busy: true, retryTurnId: null, retryAfterSeconds: null }),
+    AwaitingRetry: ({ assistantTurnId, retryAfterSeconds: retrySeconds }) => ({
+      busy: false,
+      retryTurnId: assistantTurnId,
+      retryAfterSeconds: retrySeconds,
+    }),
+  });
 
   // Mirror for history building inside async work closures. Assigned in an
   // effect (never during render) so the ref never drives rendering.
@@ -185,30 +182,53 @@ export function MuseWorkspace({
     turnsRef.current = turns;
   });
 
-  // Session-scoped persistence: text and peer-validated cards only — no
-  // photo bytes, no tokens, no ownership secrets.
+  // Identity isolation: drop other accounts' threads on mount (sign-out and
+  // account switching remount with a new key, which triggers this sweep).
+  // Back/forward and task switches keep the key, so the thread survives.
   useEffect(() => {
-    try {
-      const payload = JSON.stringify({
-        turns: turns.slice(-MAX_STORED_TURNS).map((turn) => ({
-          id: turn.id,
-          role: turn.role,
-          text: turn.text.slice(0, MAX_STORED_CHARS),
-          cards: turn.cards,
-          followUps: turn.followUps,
-          notice: turn.notice,
-          failed: turn.failure !== null,
-          synthesized: turn.synthesized,
-        })),
-        labels: [...labels.entries()].slice(-MAX_STORED_TURNS),
-        draft: draft.slice(0, MAX_STORED_CHARS),
-      });
+    sweepForeignThreads(storageKey);
+  }, [storageKey]);
 
-      window.sessionStorage.setItem(`fj.muse-thread.v1.${storageKey}`, payload);
-    } catch {
-      // Private mode or quota: the live thread still works for the session.
-    }
-  }, [turns, labels, draft, storageKey]);
+  // Cancellation: abort the in-flight request on unmount (Start Over
+  // remounts, so it cancels too) and invalidate its run so a late answer
+  // can never land on a newer question.
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      runId.current += 1;
+    },
+    [],
+  );
+
+  // Session-scoped persistence: text and peer-validated cards only — no
+  // photo bytes, object-store keys, tokens, or ownership secrets. Chat
+  // failures persist with their serializable retry; a reload restores them
+  // as retryable instead of silently dropping context.
+  useEffect(() => {
+    const retry: StoredChatRetry | null =
+      statusView.retryTurnId !== null && retryRequest !== null
+        ? {
+            ...retryRequest,
+            assistantTurnId: statusView.retryTurnId,
+            retryAfterSeconds: statusView.retryAfterSeconds,
+          }
+        : null;
+
+    persistThread(storageKey, {
+      turns,
+      labels: [...labels.entries()],
+      draft,
+      retry,
+    });
+  }, [
+    turns,
+    labels,
+    draft,
+    retryRequest,
+    storageKey,
+    statusView.retryTurnId,
+    statusView.retryAfterSeconds,
+  ]);
 
   // Adopt the previously stored city once, when the route carries none.
   useEffect(() => {
@@ -236,24 +256,38 @@ export function MuseWorkspace({
   }, [context.city, onUpdateContext]);
 
   const publishAssistant = useCallback(
-    (id: number, outcome: ExchangeOutcome): void => {
+    (
+      id: number,
+      outcome: ExchangeOutcome,
+      options?: {
+        readonly replaceId?: string | undefined;
+        readonly chatRetry?: ChatRetryRequest | undefined;
+      },
+    ): void => {
+      const consumePendingActions = (): ReadonlyArray<SuggestedAction> => {
+        const staged = pendingActionsRef.current;
+        pendingActionsRef.current = null;
+
+        return staged ?? [];
+      };
+
       ExchangeOutcome.$match(outcome, {
         ExchangeOk: (ok) => {
-          const assistantId = `a-${id}`;
+          const assistantId = options?.replaceId ?? `a-${id}`;
 
-          setTurns((previous) => [
-            ...previous,
-            {
+          setTurns((previous) =>
+            replaceOrAppendTurn(previous, assistantId, {
               id: assistantId,
               role: "assistant",
               text: ok.text,
               cards: ok.cards,
               followUps: ok.followUps,
+              actions: consumePendingActions(),
               notice: ok.notice,
               failure: null,
               synthesized: ok.synthesized,
-            },
-          ]);
+            }),
+          );
 
           if (ok.cards.length > 0) {
             setLabels((previous) => {
@@ -285,26 +319,28 @@ export function MuseWorkspace({
             }
           }
 
-          setRetryTurnId(null);
-          setRetryAfterSeconds(null);
+          setRetryRequest(null);
           retryInputRef.current = null;
+          setExchangeStatus(ExchangeStatus.Idle());
         },
         ExchangeFailed: (failed) => {
-          const assistantId = `a-${id}`;
+          // Retry reuses this turn id, so the failed turn is replaced in
+          // place instead of accumulating one failure turn per attempt.
+          const assistantId = options?.replaceId ?? `a-${id}`;
 
-          setTurns((previous) => [
-            ...previous,
-            {
+          setTurns((previous) =>
+            replaceOrAppendTurn(previous, assistantId, {
               id: assistantId,
               role: "assistant",
               text: "",
               cards: [],
               followUps: [],
+              actions: [],
               notice: null,
               failure: failed.failure,
               synthesized: false,
-            },
-          ]);
+            }),
+          );
 
           const seconds = MuseFailure.$match(failed.failure, {
             RateLimited: ({ retryAfterSeconds: retrySeconds }) => retrySeconds,
@@ -315,12 +351,19 @@ export function MuseWorkspace({
             Disabled: () => null,
           });
 
-          setRetryTurnId(assistantId);
-          setRetryAfterSeconds(seconds);
+          // Only chat retries are serializable (photo Files cannot cross a
+          // reload); photo failures stay retryable in-session via the closure
+          // below and become context-preserving history after a reload.
+          setRetryRequest(options?.chatRetry ?? null);
+          setExchangeStatus(
+            ExchangeStatus.AwaitingRetry({
+              assistantTurnId: assistantId,
+              retryAfterSeconds: seconds,
+            }),
+          );
         },
       });
 
-      setBusy(false);
       busyRef.current = false;
       setStage(null);
     },
@@ -328,7 +371,7 @@ export function MuseWorkspace({
   );
 
   const startExchange = useCallback(
-    (input: ExchangeInput, appendUser = true): void => {
+    (input: ExchangeInput, options?: StartExchangeOptions): void => {
       if (busyRef.current) {
         return;
       }
@@ -338,9 +381,17 @@ export function MuseWorkspace({
       const id = runId.current + 1;
       runId.current = id;
 
+      // Stale-request rejection: only the latest attempt may publish; a
+      // late answer to an older question is dropped, never attached to the
+      // newer thread.
       const alive = (): boolean => runId.current === id;
 
-      if (appendUser) {
+      if (options?.controller !== undefined) {
+        abortRef.current?.abort();
+        abortRef.current = options.controller;
+      }
+
+      if (options?.appendUser !== false) {
         setTurns((previous) => [
           ...previous,
           {
@@ -349,6 +400,7 @@ export function MuseWorkspace({
             text: input.userText,
             cards: [],
             followUps: [],
+            actions: [],
             notice: null,
             failure: null,
             synthesized: false,
@@ -356,10 +408,12 @@ export function MuseWorkspace({
         ]);
       }
 
-      setBusy(true);
+      // The resend key is the assistant-turn id this attempt resolves; a
+      // retry reuses it (replaceId), so the attempt is idempotent — no
+      // duplicate user turn, no forked failure turns.
+      setExchangeStatus(ExchangeStatus.Sending({ resendKey: options?.replaceId ?? `a-${id}` }));
       setStage(input.stage);
-      setRetryTurnId(null);
-      setRetryAfterSeconds(null);
+      setRetryRequest(options?.chatRetry ?? null);
 
       retryInputRef.current = input;
 
@@ -375,52 +429,97 @@ export function MuseWorkspace({
         }
 
         if (alive()) {
-          publishAssistant(id, outcome);
+          publishAssistant(id, outcome, {
+            replaceId: options?.replaceId,
+            chatRetry: options?.chatRetry,
+          });
         }
       })();
     },
     [publishAssistant],
   );
 
-  const retryFailed = useCallback((): void => {
-    const input = retryInputRef.current;
-
-    if (input !== null) {
-      startExchange(input, false);
-    }
-  }, [startExchange]);
-
-  const sendText = useCallback(
-    (text: string, taskOverride?: JourneyTask): void => {
-      const sendTask = taskOverride ?? task;
+  const sendChatExchange = useCallback(
+    (message: string, sendTask: JourneyTask, replaceId?: string): void => {
+      const controller = new AbortController();
+      // History and context rebuild at send time (and again at retry time),
+      // so a retry revalidates against the current thread instead of
+      // replaying a stale snapshot.
       const history: ReadonlyArray<TurnHistoryItem> = buildTurnHistory(turnsRef.current);
       const requestContext = context;
 
-      startExchange({
-        task: sendTask,
-        userText: text,
-        stage: stageForTask(copy, sendTask),
-        work: async () => {
-          const result = await sendCopilotChat(
-            { message: text, task: sendTask, context: requestContext },
-            history,
-          );
+      startExchange(
+        {
+          task: sendTask,
+          userText: message,
+          stage: stageForTask(copy, sendTask),
+          work: async () => {
+            const result = await sendCopilotChat(
+              { message, task: sendTask, context: requestContext },
+              history,
+              { signal: controller.signal },
+            );
 
-          return ChatSendResult.$match(result, {
-            ChatOk: ({ output }) =>
-              ExchangeOutcome.ExchangeOk({
-                text: output.reply,
-                cards: output.cards,
-                followUps: output.followUps,
-                notice: null,
-                synthesized: output.synthesized,
-              }),
-            ChatFailed: ({ failure }) => ExchangeOutcome.ExchangeFailed({ failure }),
-          });
+            return ChatSendResult.$match(result, {
+              ChatOk: ({ output }) => {
+                pendingActionsRef.current = output.actions.map((action): SuggestedAction => ({
+                  label: action.label,
+                  action: museActionFromContract(action),
+                }));
+
+                return ExchangeOutcome.ExchangeOk({
+                  text: output.reply,
+                  cards: output.cards,
+                  followUps: output.followUps,
+                  notice: null,
+                  synthesized: output.synthesized,
+                });
+              },
+              ChatFailed: ({ failure }) => ExchangeOutcome.ExchangeFailed({ failure }),
+            });
+          },
         },
-      });
+        {
+          appendUser: replaceId === undefined,
+          replaceId,
+          chatRetry: { message, task: sendTask },
+          controller,
+        },
+      );
     },
-    [context, copy, startExchange, task],
+    [context, copy, startExchange],
+  );
+
+  const retryFailed = useCallback((): void => {
+    const failedId = ExchangeStatus.$match(exchangeStatus, {
+      Idle: () => null,
+      Sending: () => null,
+      AwaitingRetry: ({ assistantTurnId }) => assistantTurnId,
+    });
+
+    if (failedId === null) {
+      return;
+    }
+
+    // Chat retries rebuild fresh (revalidated history/context); photo
+    // retries reuse the in-session closure, which itself reuses the owned
+    // scan instead of uploading again.
+    if (retryRequest !== null) {
+      sendChatExchange(retryRequest.message, retryRequest.task, failedId);
+    } else {
+      const input = retryInputRef.current;
+
+      if (input !== null) {
+        startExchange(input, { appendUser: false, replaceId: failedId });
+      }
+    }
+  }, [exchangeStatus, retryRequest, sendChatExchange, startExchange]);
+
+  const sendText = useCallback(
+    (text: string, taskOverride?: JourneyTask): void => {
+      sendChatExchange(text, taskOverride ?? task);
+    },
+    [sendChatExchange, task],
   );
 
   const publishNote = useCallback((text: string): void => {
@@ -435,6 +534,7 @@ export function MuseWorkspace({
         text,
         cards: [],
         followUps: [],
+        actions: [],
         notice: null,
         failure: null,
         synthesized: false,
@@ -459,7 +559,7 @@ export function MuseWorkspace({
       copy,
       context,
       task,
-      busy,
+      busy: statusView.busy,
       signedIn,
       onUpdateContext,
       startExchange,
@@ -482,7 +582,7 @@ export function MuseWorkspace({
       },
     }),
     [
-      busy,
+      statusView.busy,
       changeDraft,
       context,
       copy,
@@ -493,6 +593,61 @@ export function MuseWorkspace({
       startExchange,
       task,
     ],
+  );
+
+  /**
+   * Typed action dispatch (plan §17): every action chip and card action
+   * produces one `MuseAction` handled exhaustively here. AskQuestion sends
+   * text in the current thread; OpenRoute pushes a genuine history entry;
+   * tool activation and task switches stay in place so Back never steps
+   * through previous tool selections. Defined after `api` because OpenTool
+   * photo capture routes through it.
+   */
+  const handleAction = useCallback(
+    (action: MuseAction): void => {
+      MuseAction.$match(action, {
+        AskQuestion: ({ question }) => {
+          sendText(question);
+        },
+        OpenRoute: ({ search, to }) => {
+          const query = new URLSearchParams(search).toString();
+          router.history.push(query === "" ? to : `${to}?${query}`);
+        },
+        OpenTool: ({ tool }) => {
+          if (tool === "camera" || tool === "gallery") {
+            api.requestPhoto(tool);
+          } else if (tool === "location") {
+            onSelectTask("find");
+          } else if (tool === "scanner") {
+            onSelectTask("scan");
+          } else {
+            onSelectTask("order");
+          }
+        },
+        SetContext: (patch) => {
+          onUpdateContext(patch);
+        },
+        BrowseDishes: () => {
+          void router.navigate({ to: "/dishes", search: { lang: context.language } });
+        },
+        FindRestaurants: ({ dishId }) => {
+          if (dishId !== undefined) {
+            onUpdateContext({ dishId });
+          }
+
+          onSelectTask("find");
+        },
+        ResumeScan: ({ scanId }) => {
+          onUpdateContext({ scanId });
+          onSelectTask("scan");
+        },
+        OpenOrder: ({ scanId, venueId }) => {
+          onUpdateContext({ venueId, scanId });
+          onSelectTask("order");
+        },
+      });
+    },
+    [api, context.language, onSelectTask, onUpdateContext, router, sendText],
   );
 
   const chips: ReadonlyArray<MuseContextChip> = useMemo(() => {
@@ -555,16 +710,16 @@ export function MuseWorkspace({
   }
 
   const viewportProps: ConversationViewportProps = {
-    busy,
+    busy: statusView.busy,
     copy,
     language: context.language,
+    onPickAction: handleAction,
     onPickFollowUp: sendText,
-    onRetry: retryTurnId === null ? null : retryFailed,
-    onSelectTask,
+    onRetry: statusView.retryTurnId === null ? null : retryFailed,
     onUpdateContext,
-    pendingStage: <ProcessingIndicator stage={busy ? stage : null} />,
-    retryAfterSeconds,
-    retryTurnId,
+    pendingStage: <ProcessingIndicator stage={statusView.busy ? stage : null} />,
+    retryAfterSeconds: statusView.retryAfterSeconds,
+    retryTurnId: statusView.retryTurnId,
     signIn: { lang: context.language, returnTo: "/muse" },
     turns,
   };
@@ -572,6 +727,8 @@ export function MuseWorkspace({
   const goBack = (): void => {
     if (typeof window !== "undefined" && window.history.length > 1) {
       router.history.back();
+    } else {
+      void router.navigate({ to: "/", search: { lang: context.language } });
     }
   };
 
@@ -623,7 +780,7 @@ export function MuseWorkspace({
         </div>
       </header>
 
-      <TaskShortcutChips active={task} copy={copy} onSelect={onSelectTask} />
+      <TaskShortcutChips active={task} context={context} copy={copy} onSelect={onSelectTask} />
 
       <div className="muse-workspace-card">
         {chips.length === 0 ? null : (
@@ -650,7 +807,7 @@ export function MuseWorkspace({
             attach={
               showPhotoButtons ? (
                 <PhotoAttachButtons
-                  busy={busy}
+                  busy={statusView.busy}
                   cameraLabel={copy.photoCameraLabel}
                   galleryLabel={copy.photoGalleryLabel}
                   onCamera={() => {
@@ -662,7 +819,7 @@ export function MuseWorkspace({
                 />
               ) : undefined
             }
-            busy={busy}
+            busy={statusView.busy}
             copy={copy}
             draft={draft}
             followUp={turns.length > 0}

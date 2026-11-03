@@ -26,6 +26,18 @@ export const copilotContextSchema = z.strictObject({
   venueId: z.uuid().optional(),
   scanId: z.uuid().optional(),
   language: z.string().regex(LANGUAGE_PATTERN, "language must be a BCP-47 tag").optional(),
+  /**
+   * Bounded typed server-owned context hints (plan §28). These ride the
+   * request only and are never persisted server-side: an explicit mention
+   * in the current message always wins over these values, and language
+   * never determines region. Dietary data stays per-request.
+   */
+  dietary: z.string().trim().min(1).max(80).optional(),
+  exclusions: z.array(z.string().trim().min(1).max(80)).max(10).optional(),
+  budget: z.enum(["budget", "mid", "splurge"]).optional(),
+  cuisine: z.string().trim().min(1).max(80).optional(),
+  meal: z.string().trim().min(1).max(40).optional(),
+  nearby: z.boolean().optional(),
 });
 
 export type CopilotContext = z.infer<typeof copilotContextSchema>;
@@ -57,6 +69,17 @@ export type CopilotHistoryTurn = NonNullable<CopilotChatInput["history"]>[number
 
 const cardRefSchema = z.union([z.string().regex(DB_ID_PATTERN), z.uuid()]);
 
+/**
+ * Evidence tiers (plan §14): verified first-party facts, general culinary
+ * knowledge, unverified external findings, and personalized inference stay
+ * distinct in the contract and in presentation. The `synthesized` flag
+ * still marks exactly one thing: prose rewritten by a validated bounded
+ * model call (members only).
+ */
+export const evidenceTierSchema = z.enum(["catalog", "general", "web", "inference"]);
+
+export type EvidenceTier = z.infer<typeof evidenceTierSchema>;
+
 export const copilotCardSchema = z.strictObject({
   kind: z.enum(["dish", "restaurant", "price", "source"]),
   refId: cardRefSchema.optional(),
@@ -67,20 +90,76 @@ export const copilotCardSchema = z.strictObject({
     .max(2000)
     .refine((value) => HTTPS_PATTERN.test(value), "Only verified http(s) citations")
     .optional(),
+  provenance: evidenceTierSchema.default("catalog"),
 });
 
 export type CopilotCard = z.infer<typeof copilotCardSchema>;
+
+/**
+ * Typed suggested action (plan §§15-17): every non-question affordance the
+ * assistant offers travels as a tagged kind with validated params — never
+ * as a chat-text label the client regex-sniffs. `label` is the visible
+ * caption in the reply language; dispatch keys off `kind` only. Question
+ * suggestions stay in `followUps`; everything that navigates, opens a
+ * tool, or changes scope lives here.
+ */
+export const copilotActionSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("ask"),
+    label: z.string().trim().min(1).max(200),
+    question: z.string().trim().min(1).max(2000),
+  }),
+  z.strictObject({
+    kind: z.literal("browseDishes"),
+    label: z.string().trim().min(1).max(200),
+  }),
+  z.strictObject({
+    kind: z.literal("findRestaurants"),
+    label: z.string().trim().min(1).max(200),
+    dishId: z.string().regex(DB_ID_PATTERN, "dishId must be a canonical dish id").optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("openOrder"),
+    label: z.string().trim().min(1).max(200),
+    venueId: z.uuid().optional(),
+    scanId: z.uuid().optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("resumeScan"),
+    label: z.string().trim().min(1).max(200),
+    scanId: z.uuid(),
+  }),
+  z.strictObject({
+    kind: z.literal("openTool"),
+    label: z.string().trim().min(1).max(200),
+    tool: z.enum(["camera", "gallery", "location", "scanner", "order"]),
+  }),
+]);
+
+export type CopilotAction = z.infer<typeof copilotActionSchema>;
 
 export const copilotChatOutputSchema = z.strictObject({
   reply: z.string().trim().min(1).max(4000),
   cards: z.array(copilotCardSchema).max(12).default([]),
   followUps: z.array(z.string().trim().min(1).max(200)).max(5).default([]),
   /**
+   * Typed non-question affordances (plan §§15-17). Rendered as action
+   * chips dispatched by kind; never sent as chat text. At most 3 so the
+   * thread stays compact — one or two relevant next steps, not a wall.
+   */
+  actions: z.array(copilotActionSchema).max(4).default([]),
+  /**
    * Honest provenance for the reply prose. False means deterministic
    * catalog assembly (never model-generated); true only after a validated
    * bounded synthesis call. Guests always receive false.
    */
   synthesized: z.boolean().default(false),
+  /**
+   * Which evidence tiers the reply draws on, in encounter order. Lets the
+   * UI caption verified catalog facts separately from general culinary
+   * knowledge, unverified web findings, and personalized inference.
+   */
+  evidenceTiers: z.array(evidenceTierSchema).max(4).default([]),
 });
 
 export type CopilotChatOutput = z.infer<typeof copilotChatOutputSchema>;
@@ -205,6 +284,13 @@ export const venueSearchToolSchema = z.strictObject({
   q: z.string().trim().max(100).default(""),
   area: z.string().trim().max(200).default(""),
   limit: z.number().int().min(1).max(10).default(5),
+  /**
+   * Canonical dish id for dish-anchored venue search: resolves real
+   * serving evidence (eligible menu observations for this dish in the
+   * area) instead of matching the dish name against venue names. Dish
+   * matches must never cancel the venue search.
+   */
+  dishId: z.string().regex(DB_ID_PATTERN, "dishId must be a canonical dish id").optional(),
 });
 
 export type VenueSearchToolInput = z.infer<typeof venueSearchToolSchema>;
@@ -227,6 +313,19 @@ export const researchToolSchema = z.strictObject({
   dish: z.string().trim().min(1).max(200).optional(),
   language: z.string().regex(LANGUAGE_PATTERN, "language must be a BCP-47 tag").optional(),
 });
+
+/**
+ * Canonical geo-mention resolution. A raw mention ("HCMC", "Saigon",
+ * "Ho Chi Minh City") resolves through the place registry first
+ * (preferred names and aliases), then against the canonical published
+ * venue-area list with a generic initialism fallback — never through a
+ * hardcoded one-off map, and never invented when unresolvable.
+ */
+export const geoResolveToolSchema = z.strictObject({
+  q: z.string().trim().min(1).max(120),
+});
+
+export type GeoResolveToolInput = z.infer<typeof geoResolveToolSchema>;
 
 export type ResearchToolInput = z.infer<typeof researchToolSchema>;
 

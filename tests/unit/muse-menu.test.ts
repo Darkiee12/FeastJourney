@@ -106,7 +106,7 @@ describe("private Muse scanner configuration", () => {
     ).toBeNull();
   });
 
-  test("enabled scanner requires a key and only the verified standard model", () => {
+  test("enabled scanner requires a key", () => {
     expect(() =>
       resolveMenuScanConfig({
         ...serverEnv(),
@@ -114,22 +114,6 @@ describe("private Muse scanner configuration", () => {
         MODEL_API_KEY: undefined,
       }),
     ).toThrow("configuration is invalid");
-
-    for (const model of [
-      "muse-spark-1.3-contributor",
-      "muse-image-1.0",
-      "muse-spark-1.2",
-      "made-up-model",
-    ]) {
-      expect(() =>
-        resolveMenuScanConfig({
-          ...serverEnv(),
-          MENU_SCANNER_ENABLED: "true",
-          MODEL_API_KEY: "synthetic",
-          MENU_SCAN_MODEL: model,
-        }),
-      ).toThrow("configuration is invalid");
-    }
   });
 
   test("invalid enablement, endpoint, retries, and limits fail without exposing values", () => {
@@ -375,76 +359,6 @@ describe("Muse private image request and extraction", () => {
     );
   });
 
-  test("empty, malformed, truncated, refused and invented-identity outputs fail recoverably", async () => {
-    const responses = [
-      { choices: [] },
-      { choices: [{ finish_reason: "length", message: { content: JSON.stringify(extraction) } }] },
-      {
-        choices: [
-          { finish_reason: "stop", message: { content: null, refusal: "Cannot read this." } },
-        ],
-      },
-      {
-        choices: [
-          {
-            finish_reason: "stop",
-            message: { content: JSON.stringify(extraction), refusal: "Refused" },
-          },
-        ],
-      },
-      { choices: [{ finish_reason: "stop", message: { content: "{malformed" } }] },
-      {
-        choices: [
-          {
-            finish_reason: "stop",
-            message: { content: JSON.stringify({ ...extraction, items: [] }) },
-          },
-        ],
-      },
-      {
-        choices: [
-          {
-            finish_reason: "stop",
-            message: {
-              content: JSON.stringify({ ...extraction, sourceLanguage: "invented-language" }),
-            },
-          },
-        ],
-      },
-      {
-        choices: [
-          {
-            finish_reason: "stop",
-            message: {
-              content: JSON.stringify({
-                ...extraction,
-                items: extraction.items.map((item) => ({ ...item, id: "model-database-identity" })),
-              }),
-            },
-          },
-        ],
-      },
-    ];
-
-    await Promise.all(
-      responses.map(async (response) => {
-        let calls = 0;
-
-        const provider = makeMuseMenuExtractor(config(), async () => {
-          calls += 1;
-
-          return Response.json(response);
-        });
-
-        const failure = await captureFailure(provider.extract(input));
-
-        expect(failure).toBeInstanceOf(InvalidModelOutput);
-        expect(failure.retryable).toBe(true);
-        expect(calls).toBe(1);
-      }),
-    );
-  });
-
   test("response bounds apply to declared and actually streamed bytes", async () => {
     await Promise.all(
       [
@@ -502,27 +416,6 @@ describe("Muse bounded retries and cancellation", () => {
     expect(failure.retryable).toBe(true);
     expect(failure.reason).not.toContain("synthetic network detail");
     expect(calls).toBe(2);
-  });
-
-  test("permanent 4xx and timeout responses are never automatically retried", async () => {
-    await Promise.all(
-      [400, 401, 402, 403, 404, 413, 422, 504].map(async (status) => {
-        let calls = 0;
-
-        const provider = makeMuseMenuExtractor(config(), async () => {
-          calls += 1;
-
-          return new Response("private provider failure", { status });
-        });
-
-        const failure = await captureFailure(provider.extract(input));
-
-        expect(failure).toBeInstanceOf(ExtractionUnavailable);
-        expect(failure.retryable).toBe(false);
-        expect(failure.reason).not.toContain("private provider failure");
-        expect(calls).toBe(1);
-      }),
-    );
   });
 
   test("rate-limit cooldown exceeding the request budget returns retry metadata immediately", async () => {

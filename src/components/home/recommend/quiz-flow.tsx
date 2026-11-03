@@ -1481,12 +1481,13 @@ export function RecommendSection() {
 
     const activeReason = liveMuse ? cleanReasonForDisplay(activeDish?.aiReason) : null;
 
-    // In-card Muse strip: the active slide's validated reason travels into
-    // the shared carousel through its `reason` slot (full-width top strip
-    // inside the card border). Slide changes re-render with the new active
-    // dish, so the explanation always matches the visible slide.
-    // Deterministic and degraded outcomes pass no reason, so no Muse
-    // container renders and no extra model call fires.
+    // In-card Muse block: the active slide's validated reason travels
+    // into the shared carousel through its `reason` slot (inline concise
+    // block inside the compact text column, full-width top strip in full
+    // layout). Slide changes re-render with the new active dish, so the
+    // explanation always matches the visible slide. Deterministic and
+    // degraded outcomes pass no reason, so no Muse container renders and
+    // no extra model call fires.
     const activeReasonNode =
       activeReason === null ? undefined : (
         <SelectedDishReason

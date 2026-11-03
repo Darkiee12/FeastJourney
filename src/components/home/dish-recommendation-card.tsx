@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { Match } from "effect";
-import { ArrowUpRightIcon, StoreIcon } from "lucide-react";
+import { ArrowUpRightIcon, StoreIcon, UtensilsCrossedIcon } from "lucide-react";
 
 import { dishRestaurantsSearch } from "@/components/dish/dish-actions";
 import { dishCarouselTitle, toCarouselPublishedImage } from "@/components/dish/dish-carousel";
@@ -218,6 +218,17 @@ export function DishCardActions({
 const dishInitialFor = (title: string): string => title.slice(0, 1).toUpperCase();
 
 /**
+ * Typed explicit presentation variant for recommendation cards. `full`
+ * is the featured vertical card (desktop grids); `sheet-compact` is the
+ * dense horizontal thumbnail row for bottom sheets — the same
+ * thumbnail-plus-text-plus-footer contract as the compact carousel,
+ * sharing its DTO, provenance, and actions without duplicating any
+ * carousel state. The rail (`RecommendationRail`) stays the third,
+ * selection-only surface.
+ */
+export type DishRecommendationPresentation = "full" | "sheet-compact";
+
+/**
  * Ground-up vertical recommendation card. Strict top-to-bottom hierarchy:
  * image, full-width dish name (natural word-boundary wrap, never
  * `break-all`), alternate name only when distinct, cuisine/origin label,
@@ -231,6 +242,7 @@ export function DishRecommendationCard({
   dish,
   favoriteStatus,
   lang,
+  presentation = "full",
   provenance,
   returnTo,
   session,
@@ -239,6 +251,7 @@ export function DishRecommendationCard({
   readonly dish: RankedDishSummary;
   readonly favoriteStatus: FavoriteStatusQuery;
   readonly lang: Locale;
+  readonly presentation?: DishRecommendationPresentation | undefined;
   readonly provenance: CardProvenance;
   readonly returnTo: string;
   readonly session: SessionState;
@@ -257,6 +270,96 @@ export function DishRecommendationCard({
     dish.descriptionLanguage !== lang
       ? dish.descriptionLanguage
       : undefined;
+
+  // Sheet-compact: dense thumbnail row for bottom sheets. Fixed square
+  // thumbnail (same 80–104px footprint as the compact carousel), flexible
+  // text column with one region line, clamped title/description, the
+  // provenance-gated reason only, and the single shared footer. Missing
+  // photos use the same neutral icon placeholder as the carousel — text
+  // is always visible, never pushed under a full-width image.
+  if (presentation === "sheet-compact") {
+    return (
+      <article className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border-soft bg-white">
+        <div className="flex gap-3 p-3">
+          <div
+            className="relative h-20 w-20 flex-none overflow-hidden rounded-xl bg-cream min-[400px]:h-24 min-[400px]:w-24 sm:h-[104px] sm:w-[104px]"
+            title={dish.image?.attribution ?? undefined}
+          >
+            {dish.image === null || dish.image === undefined ? (
+              <span
+                aria-hidden="true"
+                className="grid h-full w-full place-items-center bg-cream text-muted"
+              >
+                <UtensilsCrossedIcon aria-hidden="true" className="size-7 flex-none" />
+              </span>
+            ) : (
+              <DishMedia
+                image={toCarouselPublishedImage(dish.image, dish.id)}
+                className="absolute inset-0 h-full w-full"
+                unavailableLabel={copy.carouselPhotoSoon}
+                loadingLabel={title}
+              />
+            )}
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            {regions !== null ? (
+              <p
+                title={regions}
+                className="truncate text-[11px] font-bold tracking-[0.14em] text-food-orange-strong uppercase"
+              >
+                {regions}
+              </p>
+            ) : null}
+            <h3 className="font-display line-clamp-2 min-h-[2.5em] min-w-0 text-lg leading-snug text-balance break-words text-ink">
+              <Link
+                to="/dishes/$dishId"
+                params={{ dishId: dish.slug }}
+                search={{ lang }}
+                className="underline decoration-food-orange/60 underline-offset-4 hover:text-food-orange-strong"
+              >
+                {title}
+              </Link>
+            </h3>
+            {alternate !== null ? (
+              <p
+                lang={alternate.languageTag}
+                title={alternate.name}
+                className="truncate text-[13px] font-semibold text-ink"
+              >
+                {alternate.name}
+              </p>
+            ) : null}
+            <div className="line-clamp-3 min-w-0">
+              <MuseReasonBlock
+                copy={copy}
+                dish={dish}
+                liveMuse={provenance.kind === "muse-ranked"}
+              />
+            </div>
+            {description !== null ? (
+              <p
+                lang={descriptionLanguage}
+                className="line-clamp-2 min-h-[2.6em] text-[13px] leading-relaxed break-words text-pretty text-ink"
+              >
+                {description}
+              </p>
+            ) : null}
+          </div>
+        </div>
+        <div className="border-t border-border-soft px-3 py-2.5">
+          <DishCardActions
+            copy={copy}
+            dishId={dish.id}
+            dishSlug={dish.slug}
+            lang={lang}
+            returnTo={returnTo}
+            session={session}
+            status={statusForDish(favoriteStatus, dish.id)}
+          />
+        </div>
+      </article>
+    );
+  }
 
   return (
     <article className="flex h-full min-w-0 flex-col overflow-hidden rounded-2xl border border-border-soft bg-white transition hover:-translate-y-0.5 hover:border-food-orange motion-reduce:transition-none motion-reduce:hover:translate-y-0">
@@ -348,10 +451,40 @@ export function DishRecommendationCard({
 /**
  * Loading skeleton mirroring the recommendation card: fixed media block,
  * origin/title/reason/description lines, and three footer pills — so content
- * resolves without layout shift. Announced once via the caller's aria-busy
+ * resolves without layout shift. `sheet-compact` mirrors the dense
+ * thumbnail row instead. Announced once via the caller's aria-busy
  * region, not per card.
  */
-export function DishRecommendationCardSkeleton() {
+export function DishRecommendationCardSkeleton({
+  presentation = "full",
+}: {
+  readonly presentation?: DishRecommendationPresentation | undefined;
+} = {}) {
+  if (presentation === "sheet-compact") {
+    return (
+      <div
+        aria-hidden="true"
+        className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border-soft bg-white"
+      >
+        <div className="flex gap-3 p-3">
+          <div className="h-20 w-20 flex-none animate-pulse rounded-xl bg-border-soft motion-reduce:animate-none min-[400px]:h-24 min-[400px]:w-24 sm:h-[104px] sm:w-[104px]" />
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5 py-0.5">
+            <div className="h-2.5 w-1/3 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
+            <div className="h-6 w-3/4 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
+            <div className="h-6 w-2/5 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
+            <div className="h-3.5 w-full animate-pulse rounded bg-cream motion-reduce:animate-none" />
+            <div className="h-3.5 w-5/6 animate-pulse rounded bg-cream motion-reduce:animate-none" />
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 border-t border-border-soft px-3 py-2.5">
+          <div className="h-11 w-24 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+          <div className="h-11 w-28 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+          <div className="h-11 w-24 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       aria-hidden="true"

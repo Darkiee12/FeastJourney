@@ -1,6 +1,7 @@
 import { Data } from "effect";
 
-import type { CopilotCard } from "@/server/muse-copilot/copilot-schemas";
+import type { CopilotAction, CopilotCard } from "@/server/muse-copilot/copilot-schemas";
+import type { Locale } from "@/shared/i18n";
 
 /**
  * The five Muse tasks. The names double as flow-module slugs:
@@ -20,7 +21,7 @@ export type JourneyTask = (typeof journeyTasks)[number];
 export interface CopilotContext {
   readonly city?: string | undefined;
   readonly country?: string | undefined;
-  readonly language: "en" | "vi";
+  readonly language: Locale;
   readonly dishId?: string | undefined;
   readonly venueId?: string | undefined;
   readonly scanId?: string | undefined;
@@ -278,6 +279,100 @@ export const transition = (state: JourneyState, event: JourneyEvent): JourneySta
   });
 
 /**
+ * Frozen tool vocabulary for Muse shortcuts (plan §§4-5). Chips and cards
+ * activate tools as typed `MuseAction` outcomes handled in place — never as
+ * route pushes — so switching tools never spams browser history and never
+ * renders an unrelated form panel above the transcript.
+ */
+export const museTools = ["camera", "gallery", "location", "scanner", "order"] as const;
+
+export type MuseTool = (typeof museTools)[number];
+
+const museToolSet: ReadonlySet<string> = new Set(museTools);
+
+/** Boundary guard for tool slugs arriving as untrusted strings. */
+export const isMuseTool = (value: string): value is MuseTool => museToolSet.has(value);
+
+/**
+ * Frozen cross-feature action contract (plan §17). Every task shortcut, card
+ * action, and follow-up that moves the journey produces one of these
+ * outcomes; consumers handle them exhaustively via `$match` — never by
+ * switching on raw strings or matching rendered label text. Member names are
+ * frozen: sibling lanes code against them.
+ *
+ * Tool activation (`OpenTool`) is handled in place by the workspace, not by
+ * pushing a route. Genuine page changes (dish details, the canonical
+ * restaurant map route) travel as `OpenRoute` and push history normally.
+ */
+export type MuseAction = Data.TaggedEnum<{
+  /** Send a question in the current conversation. */
+  AskQuestion: { readonly question: string };
+  /**
+   * Navigate to a real page. `search` is a plain router transport object
+   * (TanStack serializes it into the URL), not an application map — hence
+   * `Record` here rather than `ReadonlyMap`.
+   */
+  OpenRoute: { readonly to: string; readonly search: Record<string, string> };
+  /** Activate a workspace tool in place; no route push, no history entry. */
+  OpenTool: { readonly tool: MuseTool };
+  /** Merge shareable scope; omitted keys keep the current scope. */
+  SetContext: {
+    readonly city?: string | undefined;
+    readonly country?: string | undefined;
+    readonly dishId?: string | undefined;
+    readonly venueId?: string | undefined;
+    readonly scanId?: string | undefined;
+  };
+  /** Show the dish browser for the current scope. */
+  BrowseDishes: {};
+  /** Show restaurants, narrowed to `dishId` when present. */
+  FindRestaurants: { readonly dishId?: string | undefined };
+  /** Return to an owned scan; the server re-verifies ownership. */
+  ResumeScan: { readonly scanId: string };
+  /** Open the ordering workspace for a venue or an owned scan. */
+  OpenOrder: { readonly venueId?: string | undefined; readonly scanId?: string | undefined };
+}>;
+
+export const MuseAction = Data.taggedEnum<MuseAction>();
+
+/**
+ * One rendered action chip: the visible caption in the reply language plus
+ * the typed outcome it dispatches. Labels are display-only — dispatch keys
+ * off the `MuseAction` tag, never off the label text.
+ */
+export interface SuggestedAction {
+  readonly label: string;
+  readonly action: MuseAction;
+}
+
+/**
+ * Pure mapper from the frozen server action contract to the client outcome
+ * union. Exhaustive over the contract `kind` — a new contract kind fails
+ * compilation here instead of silently dropping the chip.
+ */
+export const museActionFromContract = (action: CopilotAction): MuseAction => {
+  switch (action.kind) {
+    case "ask":
+      return MuseAction.AskQuestion({ question: action.question });
+    case "browseDishes":
+      return MuseAction.BrowseDishes();
+    case "findRestaurants":
+      return MuseAction.FindRestaurants({ dishId: action.dishId });
+    case "openOrder":
+      return MuseAction.OpenOrder({ venueId: action.venueId, scanId: action.scanId });
+    case "resumeScan":
+      return MuseAction.ResumeScan({ scanId: action.scanId });
+    case "openTool":
+      return MuseAction.OpenTool({ tool: action.tool });
+    default: {
+      const exhaustive: never = action;
+
+      return exhaustive;
+    }
+  }
+};
+
+/**
  * Frozen turn-history contract (see plan §10): bounded recent conversation
  * context sent alongside the latest message. Chronological, capped turns
  * and per-turn length; never trusted server-side as evidence of database
@@ -339,6 +434,7 @@ export interface MuseTurn {
   readonly text: string;
   readonly cards: ReadonlyArray<CopilotCard>;
   readonly followUps: ReadonlyArray<string>;
+  readonly actions: ReadonlyArray<SuggestedAction>;
   readonly notice: string | null;
   readonly failure: MuseFailure | null;
   readonly synthesized: boolean;

@@ -81,6 +81,7 @@ export function ConversationComposer({
         }}
         placeholder={followUp ? copy.composerFollowUp : copy.composerPlaceholder}
         autoComplete="off"
+        enterKeyHint="send"
         className="max-h-36 min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-border-soft bg-white px-4 py-2.5 text-base leading-relaxed text-ink outline-none placeholder:text-muted focus-visible:border-brand-blue focus-visible:ring-2 focus-visible:ring-brand-blue/40 disabled:opacity-60"
       />
 

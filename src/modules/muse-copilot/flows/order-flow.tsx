@@ -16,6 +16,7 @@ import type {
   CopilotDraftOrderOutput,
 } from "@/server/muse-copilot/copilot-schemas";
 import { copilotDraftOrderFn } from "@/server/muse-copilot/copilot.functions";
+import type { Locale } from "@/shared/i18n";
 import { currencyDigits, formatMoney, isCurrency } from "@/shared/money";
 
 type MenuChannel = RestaurantSearch["channel"];
@@ -184,7 +185,7 @@ function OrderFlowBody({
   retryLabel,
 }: {
   readonly contextVenueId: string;
-  readonly language: "en" | "vi";
+  readonly language: Locale;
   readonly retryLabel: string;
 }): ReactNode {
   const strings = language === "vi" ? copy.vi : copy.en;
@@ -326,165 +327,169 @@ function OrderFlowBody({
   };
 
   return (
-    <div className="flex flex-col gap-3">
-      <RestaurantMenuPanel
-        channel={channel}
-        lang={language}
-        onChannelChange={changeChannel}
-        venueId={contextVenueId}
-        venueName={venueName}
-        countryCode={null}
-      />
-
-      <div className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-white px-4 py-3">
-        <div className="flex flex-col gap-1">
-          <label htmlFor="copilot-order-note" className="text-sm font-semibold text-ink">
-            {strings.noteLabel}
-          </label>
-
-          <input
-            id="copilot-order-note"
-            type="text"
-            value={note}
-            onChange={(event) => {
-              setNote(event.target.value);
-            }}
-            placeholder={strings.notePlaceholder}
-            autoComplete="off"
-            className="min-h-11 w-full rounded-xl border border-border-soft bg-white px-4 text-base text-ink outline-none placeholder:text-muted focus-visible:border-brand-blue focus-visible:ring-2 focus-visible:ring-brand-blue/40"
-          />
-        </div>
-
-        <button
-          type="button"
-          onClick={review}
-          disabled={preparing || controller.selections.length === 0}
-          className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {draft === null ? strings.review : strings.regenerate}
-        </button>
-
-        {controller.selections.length === 0 ? (
-          <p className="text-xs leading-relaxed text-muted">{strings.emptySelection}</p>
-        ) : null}
+    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+      <div className="min-w-0">
+        <RestaurantMenuPanel
+          channel={channel}
+          lang={language}
+          onChannelChange={changeChannel}
+          venueId={contextVenueId}
+          venueName={venueName}
+          countryCode={null}
+        />
       </div>
 
-      {preparing ? (
-        <p className="text-sm font-semibold text-ink" aria-live="polite">
-          {strings.preparing}
-        </p>
-      ) : null}
+      <div className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-4">
+        <div className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-white px-4 py-3">
+          <div className="flex flex-col gap-1">
+            <label htmlFor="copilot-order-note" className="text-sm font-semibold text-ink">
+              {strings.noteLabel}
+            </label>
 
-      {draftFailed ? (
-        <div
-          role="alert"
-          className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-white px-4 py-3"
-        >
-          <p className="text-sm font-semibold text-ink">{strings.draftFailed}</p>
+            <input
+              id="copilot-order-note"
+              type="text"
+              value={note}
+              onChange={(event) => {
+                setNote(event.target.value);
+              }}
+              placeholder={strings.notePlaceholder}
+              autoComplete="off"
+              className="min-h-11 w-full rounded-xl border border-border-soft bg-white px-4 text-base text-ink outline-none placeholder:text-muted focus-visible:border-brand-blue focus-visible:ring-2 focus-visible:ring-brand-blue/40"
+            />
+          </div>
 
           <button
             type="button"
             onClick={review}
-            className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark"
+            disabled={preparing || controller.selections.length === 0}
+            className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {retryLabel}
+            {draft === null ? strings.review : strings.regenerate}
           </button>
+
+          {controller.selections.length === 0 ? (
+            <p className="text-xs leading-relaxed text-muted">{strings.emptySelection}</p>
+          ) : null}
         </div>
-      ) : null}
 
-      {undraftable > 0 ? (
-        <p className="text-xs leading-relaxed text-muted">
-          {undraftable} {strings.skippedLines}
-        </p>
-      ) : null}
+        {preparing ? (
+          <p className="text-sm font-semibold text-ink" aria-live="polite">
+            {strings.preparing}
+          </p>
+        ) : null}
 
-      {draft === null ? null : (
-        <div className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-white px-4 py-3">
-          <p className="text-xs font-semibold text-muted">{strings.draftNote}</p>
+        {draftFailed ? (
+          <div
+            role="alert"
+            className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-white px-4 py-3"
+          >
+            <p className="text-sm font-semibold text-ink">{strings.draftFailed}</p>
 
-          {draft.warnings.length > 0 ? (
-            <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-ink">
-              {draft.warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
-          ) : null}
-
-          {draft.incomplete ? (
-            <p className="text-sm font-semibold break-words text-ink">{strings.incomplete}</p>
-          ) : null}
-
-          <ul className="flex flex-col gap-2">
-            {draft.lines
-              .filter((line) => pending.includes(line.itemKey))
-              .map((line) => {
-                const rendered =
-                  line.lineMinor !== null
-                    ? formatMinor(line.lineMinor, draft.currency, language)
-                    : null;
-
-                return (
-                  <li
-                    key={line.itemKey}
-                    className="flex flex-wrap items-center gap-2 rounded-xl bg-cream/60 px-3 py-2"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold break-words text-ink">
-                        {line.qty} × {line.name}
-                      </p>
-
-                      {rendered === null ? (
-                        <PriceUnavailable label={strings.lineUnavailable} />
-                      ) : (
-                        <p className="text-sm text-muted tabular-nums">{rendered}</p>
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        acceptLine(line.itemKey);
-                      }}
-                      className="inline-flex min-h-11 cursor-pointer items-center rounded-full bg-food-orange-strong px-4 text-sm font-bold text-white transition hover:bg-food-orange-dark"
-                    >
-                      {strings.accept}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        removeSelection(line.itemKey);
-                      }}
-                      className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-4 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
-                    >
-                      {strings.remove}
-                    </button>
-                  </li>
-                );
-              })}
-          </ul>
-
-          {pending.length > 1 ? (
             <button
               type="button"
-              onClick={acceptAll}
+              onClick={review}
               className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark"
             >
-              {strings.acceptAll}
+              {retryLabel}
             </button>
-          ) : null}
+          </div>
+        ) : null}
 
-          {accepted && pending.length === 0 ? (
-            <p className="text-sm font-semibold text-ink">{strings.accepted}</p>
-          ) : null}
+        {undraftable > 0 ? (
+          <p className="text-xs leading-relaxed text-muted">
+            {undraftable} {strings.skippedLines}
+          </p>
+        ) : null}
 
-          {draft.subtotalMinor !== null ? (
-            <p className="text-sm font-bold text-ink tabular-nums">
-              {formatMinor(draft.subtotalMinor, draft.currency, language)}
-            </p>
-          ) : null}
-        </div>
-      )}
+        {draft === null ? null : (
+          <div className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-white px-4 py-3">
+            <p className="text-xs font-semibold text-muted">{strings.draftNote}</p>
+
+            {draft.warnings.length > 0 ? (
+              <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-ink">
+                {draft.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            ) : null}
+
+            {draft.incomplete ? (
+              <p className="text-sm font-semibold break-words text-ink">{strings.incomplete}</p>
+            ) : null}
+
+            <ul className="flex flex-col gap-2">
+              {draft.lines
+                .filter((line) => pending.includes(line.itemKey))
+                .map((line) => {
+                  const rendered =
+                    line.lineMinor !== null
+                      ? formatMinor(line.lineMinor, draft.currency, language)
+                      : null;
+
+                  return (
+                    <li
+                      key={line.itemKey}
+                      className="flex flex-wrap items-center gap-2 rounded-xl bg-cream/60 px-3 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold break-words text-ink">
+                          {line.qty} × {line.name}
+                        </p>
+
+                        {rendered === null ? (
+                          <PriceUnavailable label={strings.lineUnavailable} />
+                        ) : (
+                          <p className="text-sm text-muted tabular-nums">{rendered}</p>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          acceptLine(line.itemKey);
+                        }}
+                        className="inline-flex min-h-11 cursor-pointer items-center rounded-full bg-food-orange-strong px-4 text-sm font-bold text-white transition hover:bg-food-orange-dark"
+                      >
+                        {strings.accept}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          removeSelection(line.itemKey);
+                        }}
+                        className="inline-flex min-h-11 cursor-pointer items-center rounded-full border-2 border-ink bg-white px-4 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
+                      >
+                        {strings.remove}
+                      </button>
+                    </li>
+                  );
+                })}
+            </ul>
+
+            {pending.length > 1 ? (
+              <button
+                type="button"
+                onClick={acceptAll}
+                className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark"
+              >
+                {strings.acceptAll}
+              </button>
+            ) : null}
+
+            {accepted && pending.length === 0 ? (
+              <p className="text-sm font-semibold text-ink">{strings.accepted}</p>
+            ) : null}
+
+            {draft.subtotalMinor !== null ? (
+              <p className="text-sm font-bold text-ink tabular-nums">
+                {formatMinor(draft.subtotalMinor, draft.currency, language)}
+              </p>
+            ) : null}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

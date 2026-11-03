@@ -7,46 +7,33 @@ import {
   classifyChatError,
   identifyPhoto,
 } from "@/modules/muse-copilot/flows/conversation-model";
+import {
+  PlatePhotoIssue,
+  describePlateVerdict,
+  validatePlatePhoto,
+} from "@/modules/muse-copilot/flows/plate-vision-adapter";
 import { ExchangeOutcome, type WorkspacePanelApi } from "@/modules/muse-copilot/flows/task-panel";
+import { isMenuReadingLanguage } from "@/modules/restaurant-discovery/menu-language";
 import { menuScanClient } from "@/modules/restaurant-discovery/menu-scan-client";
-import type {
-  CopilotCard,
-  CopilotIdentifyPhotoOutput,
-} from "@/server/muse-copilot/copilot-schemas";
 
 const uuidSchema = z.uuid();
 
-const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
-
-const SUPPORTED_TYPES: ReadonlySet<string> = new Set(["image/jpeg", "image/png", "image/webp"]);
-
-const fillName = (template: string, name: string): string => template.replace("{name}", name);
-
-const confidenceLabelFor = (
-  copy: WorkspacePanelApi["copy"],
-  confidence: "likely" | "possible" | "tentative",
-): string => {
-  if (confidence === "likely") {
-    return copy.confidenceLikely;
-  }
-
-  if (confidence === "possible") {
-    return copy.confidencePossible;
-  }
-
-  return copy.confidenceTentative;
-};
-
 /**
- * Know Your Plate (plan §13, addendum §§3/7). Single-image policy: one
- * JPEG/PNG/WebP photo up to 8 MiB, validated client-side for UX and
- * enforced server-side (never trust browser MIME claims). Guests see the
- * sign-in requirement before uploading — the vision operation only permits
- * signed-in owners, so advertising identification to guests would lie.
- * Uploads reuse the menu-scanner storage path; identification calls the
- * real `copilotIdentifyPhotoFn`, never catalog text search. The exchange
- * retry reuses the owned scan; a newly picked photo always mints a fresh
- * scan so retries never duplicate private storage.
+ * Know Your Plate (plan §13, addendum §§3/7). The composer's gallery/camera
+ * buttons open the native picker directly through the hidden inputs below —
+ * no intermediate form. A picked photo shows a compact preview for
+ * confirmation BEFORE any upload; the upload then reuses the existing
+ * private menu-scan storage path and identification calls the real
+ * `copilotIdentifyPhotoFn`, never catalog text search. The exchange retry
+ * reuses the owned scan; a newly picked photo always mints a fresh scan so
+ * retries never duplicate private storage and failures keep the photo for
+ * retry without re-upload.
+ *
+ * Guests see the sign-in requirement before uploading: the vision operation
+ * only permits signed-in owners, so advertising identification to guests
+ * would lie. The verdict stays tentative — careful confidence, visual
+ * evidence, canonical dish link, Explain/Find-nearby/None-of-these — and
+ * never claims ingredients, allergens, or origin from an image.
  */
 export function PlatePanel(api: WorkspacePanelApi): ReactNode {
   const {
@@ -60,6 +47,7 @@ export function PlatePanel(api: WorkspacePanelApi): ReactNode {
     startExchange,
   } = api;
 
+  const [picked, setPicked] = useState<File | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const photoUrlRef = useRef<string | null>(null);
   /** Latest upload per photo: exchange retries reuse the owned scan. */
@@ -79,8 +67,13 @@ export function PlatePanel(api: WorkspacePanelApi): ReactNode {
 
   // Composer capture buttons (gallery/camera) delegate here: consume a
   // pending request and open the matching native picker. Runs every render
-  // so a mode switch triggered by the button is honored on mount.
+  // so a mode switch triggered by the button is honored on mount. Skipped
+  // while an identification is in flight.
   useEffect(() => {
+    if (busy) {
+      return;
+    }
+
     const request = consumePhotoRequest();
 
     if (request === "gallery") {
@@ -100,70 +93,31 @@ export function PlatePanel(api: WorkspacePanelApi): ReactNode {
     setPhotoUrl(next);
   };
 
-  const presentCandidates = (output: CopilotIdentifyPhotoOutput) =>
-    ExchangeOutcome.ExchangeOk({
-      text:
-        output.candidates.length === 0
-          ? (output.unmatchedNote ?? copy.noEvidence)
-          : output.candidates
-              .map(
-                (candidate) =>
-                  `${candidate.name} — ${confidenceLabelFor(copy, candidate.confidence)}: ${candidate.visualEvidence}`,
-              )
-              .join("\n"),
-      cards: output.candidates.flatMap((candidate): ReadonlyArray<CopilotCard> =>
-        candidate.dishId === undefined
-          ? []
-          : [
-              {
-                kind: "dish",
-                refId: candidate.dishId,
-                title: candidate.name,
-                summary: candidate.visualEvidence,
-              },
-            ],
-      ),
-      followUps: followUpsFor(output),
-      notice: output.candidates.length === 0 ? copy.noEvidence : copy.plateCandidates,
+  const presentCandidates = (
+    output: Parameters<typeof describePlateVerdict>[0],
+  ): ExchangeOutcome => {
+    const verdict = describePlateVerdict(output, copy);
+
+    if (verdict.dishId !== undefined) {
+      onUpdateContext({ dishId: verdict.dishId });
+    }
+
+    return ExchangeOutcome.ExchangeOk({
+      text: verdict.text,
+      cards: verdict.cards,
+      followUps: verdict.followUps,
+      notice: verdict.notice,
       // Client-composed from validated candidates: deterministic assembly.
       synthesized: false,
     });
-
-  const followUpsFor = (output: CopilotIdentifyPhotoOutput): ReadonlyArray<string> => {
-    const first = output.candidates[0];
-
-    if (first === undefined) {
-      return [];
-    }
-
-    const dishCard = output.candidates.find((candidate) => candidate.dishId !== undefined);
-
-    if (dishCard?.dishId !== undefined) {
-      onUpdateContext({ dishId: dishCard.dishId });
-    }
-
-    return [
-      fillName(copy.plateFollowExplain, first.name),
-      fillName(copy.plateFollowFind, first.name),
-      copy.noneOfThese,
-    ];
   };
 
-  const identify = (photo: File): void => {
-    if (!SUPPORTED_TYPES.has(photo.type)) {
-      publishNote(copy.errorPhotoType);
-
+  const identify = (): void => {
+    if (picked === null || busy) {
       return;
     }
 
-    if (photo.size === 0 || photo.size > MAX_PHOTO_BYTES) {
-      publishNote(copy.errorPhotoLarge);
-
-      return;
-    }
-
-    setPreview(URL.createObjectURL(photo));
-
+    const photo = picked;
     const parsedVenue = uuidSchema.safeParse(context.venueId);
     const venueId = parsedVenue.success ? parsedVenue.data : null;
 
@@ -182,7 +136,7 @@ export function PlatePanel(api: WorkspacePanelApi): ReactNode {
         } else {
           try {
             const created = await menuScanClient.create({
-              targetLanguage: context.language,
+              targetLanguage: isMenuReadingLanguage(context.language) ? context.language : "en",
               venueId,
             });
 
@@ -211,13 +165,32 @@ export function PlatePanel(api: WorkspacePanelApi): ReactNode {
   };
 
   const pickPhoto = (event: { readonly target: HTMLInputElement }): void => {
-    const picked = event.target.files?.[0];
+    const file = event.target.files?.[0];
+    event.target.value = "";
 
-    if (picked !== undefined) {
-      identify(picked);
+    if (file === undefined) {
+      return;
     }
 
-    event.target.value = "";
+    const issue = validatePlatePhoto(file);
+
+    if (issue !== null) {
+      PlatePhotoIssue.$match(issue, {
+        PhotoUnsupportedType: () => {
+          publishNote(copy.errorPhotoType);
+        },
+        PhotoTooLarge: () => {
+          publishNote(copy.errorPhotoLarge);
+        },
+      });
+
+      return;
+    }
+
+    // A newly picked photo invalidates the previous upload binding.
+    lastUploadRef.current = null;
+    setPicked(file);
+    setPreview(URL.createObjectURL(file));
   };
 
   if (!signedIn) {
@@ -235,6 +208,9 @@ export function PlatePanel(api: WorkspacePanelApi): ReactNode {
       </div>
     );
   }
+
+  const pickerButton =
+    "inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-full border border-border-soft bg-white px-4 text-sm font-bold text-ink transition hover:border-food-orange-strong";
 
   return (
     <div className="flex flex-col gap-2">
@@ -263,12 +239,37 @@ export function PlatePanel(api: WorkspacePanelApi): ReactNode {
         }}
       />
 
-      {photoUrl === null ? null : (
-        <img
-          src={photoUrl}
-          alt=""
-          className="w-full rounded-2xl border border-border-soft object-cover"
-        />
+      <p className="text-sm leading-relaxed text-ink">{copy.suggestPlate}</p>
+
+      <p className="text-xs leading-relaxed text-muted">{copy.plateConstraints}</p>
+
+      <div className="flex flex-wrap gap-2">
+        <label htmlFor="muse-plate-photo" className={pickerButton}>
+          {copy.photoGalleryLabel}
+        </label>
+
+        <label htmlFor="muse-plate-camera" className={pickerButton}>
+          {copy.photoCameraLabel}
+        </label>
+      </div>
+
+      {photoUrl === null || picked === null ? null : (
+        <figure className="flex flex-col gap-2">
+          <img
+            src={photoUrl}
+            alt={copy.photoShared}
+            className="max-h-56 w-full rounded-2xl border border-border-soft object-cover"
+          />
+
+          <button
+            type="button"
+            onClick={identify}
+            disabled={busy}
+            className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? copy.thinkingPhoto : copy.plateIdentifyAction}
+          </button>
+        </figure>
       )}
     </div>
   );

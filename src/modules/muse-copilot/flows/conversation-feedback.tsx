@@ -1,6 +1,17 @@
 import { Link } from "@tanstack/react-router";
 import { Match } from "effect";
-import { LoaderCircle, TriangleAlertIcon } from "lucide-react";
+import {
+  ArrowUpRight,
+  Camera,
+  ClipboardList,
+  LoaderCircle,
+  MapPin,
+  ScanLine,
+  Sparkles,
+  TriangleAlertIcon,
+  UtensilsCrossed,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
@@ -13,12 +24,21 @@ import {
   type ResearchFinding,
 } from "@/components/research/research-findings";
 import type { CopilotCopy } from "@/modules/muse-copilot/copilot-copy";
-import { MuseFailure, type MuseContextChip } from "@/modules/muse-copilot/journey/types";
+import {
+  MuseAction,
+  MuseFailure,
+  type MuseContextChip,
+  type SuggestedAction,
+} from "@/modules/muse-copilot/journey/types";
 import type { ResearchOutcome } from "@/server/web-research/research-types";
+import type { Locale } from "@/shared/i18n";
 
 /**
- * Honest busy indicator. Renders only while work is actually in flight;
- * indeterminate spinner, never fake percentages or staged progress.
+ * Honest busy indicator: a reserved in-transcript pending assistant slot
+ * (avatar + dimensionally-stable skeleton + stage label) rendered only
+ * while real work is in flight. Indeterminate spinner, never fake
+ * percentages or staged progress; `min-h` keeps the thread from jumping
+ * when the slot mounts. Reduced-motion safe.
  */
 export function ProcessingIndicator({ stage }: { readonly stage: string | null }): ReactNode {
   if (stage === null || stage === "") {
@@ -26,15 +46,28 @@ export function ProcessingIndicator({ stage }: { readonly stage: string | null }
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-border-soft bg-white px-4 py-3 shadow-[0_8px_20px_rgba(3,10,30,0.1)]">
-      <LoaderCircle
+    <div className="flex items-start gap-2" aria-busy="true">
+      <span
         aria-hidden="true"
-        className="size-5 flex-none animate-spin text-food-orange-strong motion-reduce:animate-none"
-      />
+        className="flex size-7 flex-none items-center justify-center rounded-full bg-space-deep text-mango"
+      >
+        <Sparkles className="size-3.5" />
+      </span>
 
-      <output aria-live="polite" className="text-sm font-semibold text-ink">
-        {stage}
-      </output>
+      <div className="flex min-h-[92px] min-w-0 flex-1 flex-col justify-center gap-2 rounded-2xl rounded-bl-md border border-border-soft bg-white px-4 py-3 shadow-[0_1px_2px_rgba(3,10,30,0.08)]">
+        <div aria-hidden="true" className="flex items-center gap-2.5">
+          <LoaderCircle className="size-4 flex-none animate-spin text-food-orange-strong motion-reduce:animate-none" />
+
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <span className="h-2.5 w-3/4 animate-pulse rounded-full bg-space-deep/10 motion-reduce:animate-none" />
+            <span className="h-2.5 w-1/2 animate-pulse rounded-full bg-space-deep/10 motion-reduce:animate-none" />
+          </div>
+        </div>
+
+        <output aria-live="polite" className="text-sm font-semibold text-ink">
+          {stage}
+        </output>
+      </div>
     </div>
   );
 }
@@ -67,7 +100,7 @@ export function RecoverableError({
   readonly failure: MuseFailure;
   readonly onRetry: () => void;
   readonly retryAfterSeconds: number | null;
-  readonly signIn: { readonly lang: "en" | "vi"; readonly returnTo: string } | null;
+  readonly signIn: { readonly lang: Locale; readonly returnTo: string } | null;
 }): ReactNode {
   const retryLabel =
     retryAfterSeconds === null ? copy.retryAction : `${copy.retryAction} · ${retryAfterSeconds}s`;
@@ -113,15 +146,21 @@ export function RecoverableError({
         RateLimited: () => retryButton,
         Unavailable: () => retryButton,
         InvalidOutput: () => retryButton,
-        Disabled: () => retryButton,
+        // Disabled is not retryable: retrying would fail again. The copy
+        // above names a supported alternative instead.
+        Disabled: () => null,
       })}
     </div>
   );
 }
 
 /**
- * Follow-up suggestion chips from the assistant turn. Tapping one sends that
- * exact question; chips stay disabled while a request is in flight.
+ * Follow-up suggestion chips from the assistant turn. At most two compact
+ * chips (plan §12: no giant static grids once chatting); tapping one sends
+ * that exact question. Chips stay disabled while a request is in flight.
+ * Every chip sends text verbatim — there is no label sniffing here.
+ * Action routing (ask/open-route/open-tool/browse) belongs to Lane 1's
+ * frozen action union plus the workspace sender, not to these strings.
  */
 export function FollowUpChips({
   busy,
@@ -134,29 +173,106 @@ export function FollowUpChips({
   readonly items: ReadonlyArray<string>;
   readonly onPick: (text: string) => void;
 }): ReactNode {
-  if (items.length === 0) {
+  const visible = items.slice(0, 2);
+
+  if (visible.length === 0) {
     return null;
   }
 
   return (
     <ul className="flex flex-wrap gap-2" aria-label={copy.followUpsLabel}>
-      {items.map((item) => (
-        <li key={item}>
+      {visible.map((item) => (
+        <li key={item} className="min-w-0">
           <button
             type="button"
             disabled={busy}
             onClick={() => {
               onPick(item);
             }}
-            className="inline-flex min-h-11 cursor-pointer items-center rounded-full border border-border-soft bg-white px-4 text-sm font-semibold text-ink shadow-[0_4px_12px_rgba(3,10,30,0.08)] transition hover:border-food-orange-strong disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex max-w-full min-h-11 cursor-pointer items-center gap-1.5 rounded-full border border-border-soft bg-white px-4 text-sm font-semibold text-ink shadow-[0_1px_2px_rgba(3,10,30,0.08)] transition hover:border-food-orange-strong disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {item}
+            <ArrowUpRight aria-hidden="true" className="size-4 flex-none text-food-orange-strong" />
+
+            <span className="truncate">{item}</span>
           </button>
         </li>
       ))}
     </ul>
   );
 }
+
+/**
+ * Typed action chips from the assistant turn. At most three compact chips;
+ * each dispatches its `MuseAction` by tag — labels stay display-only.
+ * Chips stay disabled while a request is in flight.
+ */
+export function ActionChips({
+  busy,
+  items,
+  onPick,
+}: {
+  readonly busy: boolean;
+  readonly items: ReadonlyArray<SuggestedAction>;
+  readonly onPick: (action: MuseAction) => void;
+}): ReactNode {
+  const visible = items.slice(0, 3);
+
+  if (visible.length === 0) {
+    return null;
+  }
+
+  return (
+    <ul className="flex flex-wrap gap-2">
+      {visible.map((item, index) => {
+        const Icon = iconForMuseAction(item.action);
+
+        return (
+          <li key={`${item.label}-${index.toString()}`} className="min-w-0">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                onPick(item.action);
+              }}
+              aria-label={item.label}
+              className="inline-flex max-w-full min-h-11 cursor-pointer items-center gap-1.5 rounded-full border border-food-orange-strong/40 bg-food-orange-strong/10 px-4 text-sm font-semibold text-ink transition hover:border-food-orange-strong disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Icon aria-hidden="true" className="size-4 flex-none text-food-orange-strong" />
+
+              <span className="truncate">{item.label}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+const iconForMuseAction = (action: MuseAction): LucideIcon =>
+  MuseAction.$match(action, {
+    AskQuestion: () => ArrowUpRight,
+    BrowseDishes: () => UtensilsCrossed,
+    FindRestaurants: () => MapPin,
+    OpenOrder: () => ClipboardList,
+    ResumeScan: () => ScanLine,
+    OpenTool: ({ tool }) => {
+      if (tool === "camera" || tool === "gallery") {
+        return Camera;
+      }
+
+      if (tool === "location") {
+        return MapPin;
+      }
+
+      if (tool === "scanner") {
+        return ScanLine;
+      }
+
+      return ClipboardList;
+    },
+    OpenRoute: () => ArrowUpRight,
+    SetContext: () => ArrowUpRight,
+  });
 
 /**
  * Removable scope chips (plan §17): dish, venue, city, scan. Removal clears
@@ -255,7 +371,7 @@ export function ResearchFallback({
   load,
   onContinue,
 }: {
-  readonly language: "en" | "vi";
+  readonly language: Locale;
   readonly load: () => Promise<ResearchOutcome>;
   readonly onContinue?: (() => void) | undefined;
 }): ReactNode {
@@ -277,7 +393,6 @@ export function ResearchFallback({
 
     const alive = (): boolean => runId.current === id;
 
-    setState("preparing");
     setState("searching");
 
     void load().then(

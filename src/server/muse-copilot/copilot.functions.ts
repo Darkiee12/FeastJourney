@@ -124,6 +124,12 @@ const resolveScanPrincipal = (
  * server-only Effect modules load dynamically so browser bundles never
  * include database or provider code. Rate limiting runs before any identity
  * or database work; the actor always resolves from the verified session.
+ *
+ * Deadline coordination: chat runs under the service-owned overall budget
+ * (synthesis + research + tool rounds); photo derives from the vision
+ * budget plus scan-read overhead. Neither side is raised blindly.
+ * Business-call failures (timeout/defect) become safe Zod-shaped
+ * fallbacks; only thrown Responses (429/503) keep HTTP semantics.
  */
 export const copilotChatFn = createServerFn({ method: "POST" })
   .validator(copilotChatInputSchema)
@@ -150,7 +156,7 @@ export const copilotChatFn = createServerFn({ method: "POST" })
     await runApp(
       effects.Effect.flatMap(RateLimitPolicy, (policy) =>
         effects.Effect.flatMap(appConfig, (config) =>
-          policy.check("search", resolveIdentityFromHeaders(headers, config)).pipe(
+          policy.check("copilot-chat", resolveIdentityFromHeaders(headers, config)).pipe(
             effects.Effect.catchTag("RateLimitExceeded", (failure) =>
               effects.Effect.die(
                 new Response(
@@ -255,8 +261,10 @@ export const copilotChatFn = createServerFn({ method: "POST" })
       return {
         reply: "This answer could not be completed. Please try again.",
         cards: [],
-        followUps: ["Browse popular dishes"],
+        followUps: [],
+        actions: [{ kind: "browseDishes" as const, label: "Browse popular dishes" }],
         synthesized: false,
+        evidenceTiers: [],
       };
     });
 
@@ -264,6 +272,19 @@ export const copilotChatFn = createServerFn({ method: "POST" })
 
     try {
       return await run;
+    } catch (error) {
+      if (error instanceof Response) {
+        throw error;
+      }
+
+      return {
+        reply: "This answer could not be completed. Please try again.",
+        cards: [],
+        followUps: [],
+        actions: [{ kind: "browseDishes" as const, label: "Browse popular dishes" }],
+        synthesized: false,
+        evidenceTiers: [],
+      };
     } finally {
       chatInflight.delete(coherenceKey);
     }
@@ -274,7 +295,7 @@ export const copilotIdentifyPhotoFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const [
       effects,
-      { identifyFoodPhoto },
+      { identifyFoodPhoto, resolveCopilotVisionConfig },
       { Actor },
       { resolveSession },
       { runApp },
@@ -292,7 +313,7 @@ export const copilotIdentifyPhotoFn = createServerFn({ method: "POST" })
     await runApp(
       effects.Effect.flatMap(RateLimitPolicy, (policy) =>
         effects.Effect.flatMap(appConfig, (config) =>
-          policy.check("search", resolveIdentityFromHeaders(headers, config)).pipe(
+          policy.check("copilot-ai", resolveIdentityFromHeaders(headers, config)).pipe(
             effects.Effect.catchTag("RateLimitExceeded", (failure) =>
               effects.Effect.die(
                 new Response(
@@ -351,15 +372,39 @@ export const copilotIdentifyPhotoFn = createServerFn({ method: "POST" })
 
     const scanPrincipal = resolveScanPrincipal(headers, memberUserId, betterAuthUrl, createHash);
 
-    const output = await runApp(
-      identifyFoodPhoto(
-        { scanId: data.scanId, assetId: data.assetId, language: data.language },
-        scanPrincipal,
-      ),
-      "fn/copilot-photo/identify",
-      30000,
-      requestId,
-    );
+    // Coordinated deadline: the shared vision budget (fetch, bounded body,
+    // backoff, at most one retry) plus scan-read/validation overhead. The
+    // runApp race interrupts the vision fiber on expiry; interruption
+    // reaches the provider fetch through tryPromise's AbortSignal. Do not
+    // raise either side without the other.
+    const photoDeadlineMs = resolveCopilotVisionConfig(process.env).timeoutMs + 10_000;
+
+    let output;
+
+    try {
+      output = await runApp(
+        identifyFoodPhoto(
+          { scanId: data.scanId, assetId: data.assetId, language: data.language },
+          scanPrincipal,
+        ),
+        "fn/copilot-photo/identify",
+        photoDeadlineMs,
+        requestId,
+      );
+    } catch (error) {
+      // Transport boundary: request timeouts and unexpected defects become
+      // the safe Zod-shaped fallback, never a raw stack or provider body.
+      // Thrown Responses (429/503 dies) keep their HTTP semantics.
+      if (error instanceof Response) {
+        throw error;
+      }
+
+      output = {
+        candidates: [],
+        unmatchedNote: "This photo could not be analyzed. Try another image.",
+        status: "unavailable" as const,
+      };
+    }
 
     const checked = copilotIdentifyPhotoOutputSchema.safeParse(output);
 
@@ -396,7 +441,7 @@ export const copilotDraftOrderFn = createServerFn({ method: "POST" })
     await runApp(
       effects.Effect.flatMap(RateLimitPolicy, (policy) =>
         effects.Effect.flatMap(appConfig, (config) =>
-          policy.check("search", resolveIdentityFromHeaders(headers, config)).pipe(
+          policy.check("copilot-ai", resolveIdentityFromHeaders(headers, config)).pipe(
             effects.Effect.catchTag("RateLimitExceeded", (failure) =>
               effects.Effect.die(
                 new Response(
@@ -453,19 +498,35 @@ export const copilotDraftOrderFn = createServerFn({ method: "POST" })
       betterAuthUrl = "";
     }
 
-    const output = await runApp(
-      draftOrder({
-        venueId: data.venueId,
-        scanId: data.scanId,
-        items: data.items,
-        instructions: data.instructions,
-        actor,
-        scanPrincipal: resolveScanPrincipal(headers, memberUserId, betterAuthUrl, createHash),
-      }),
-      "fn/copilot-draft/order",
-      30000,
-      requestId,
-    );
+    let output;
+
+    try {
+      output = await runApp(
+        draftOrder({
+          venueId: data.venueId,
+          scanId: data.scanId,
+          items: data.items,
+          instructions: data.instructions,
+          actor,
+          scanPrincipal: resolveScanPrincipal(headers, memberUserId, betterAuthUrl, createHash),
+        }),
+        "fn/copilot-draft/order",
+        30000,
+        requestId,
+      );
+    } catch (error) {
+      if (error instanceof Response) {
+        throw error;
+      }
+
+      output = {
+        lines: [],
+        subtotalMinor: null,
+        currency: "",
+        incomplete: true,
+        warnings: ["This draft could not be completed. Please try again."],
+      };
+    }
 
     const checked = copilotDraftOrderOutputSchema.safeParse(output);
 

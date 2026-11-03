@@ -669,6 +669,10 @@ export function DiscoverySection({
               items={items}
               label={heading}
               lang={lang}
+              // Sheets render the dense thumbnail row: the full featured
+              // card needs a scroll past a full-width photo before any
+              // dish info shows, which the sheet has no room for.
+              layout={inSheet ? "compact" : "full"}
               resetKey={`${scopeKey ?? "pending"}:${rotation.toString()}`}
               session={session}
             />

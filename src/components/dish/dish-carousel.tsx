@@ -1,5 +1,11 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowUpRightIcon, ChevronLeftIcon, ChevronRightIcon, StoreIcon } from "lucide-react";
+import {
+  ArrowUpRightIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  StoreIcon,
+  UtensilsCrossedIcon,
+} from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -192,22 +198,36 @@ export interface DishCarouselProps {
   /**
    * Slide presentation. `full` is the featured stacked/side-by-side card
    * for desktop and discovery. `compact` is the drawer-first horizontal
-   * card (fixed thumbnail left, dish details right, arrows only) sized to
-   * fit a ~46dvh bottom sheet without scrolling. State, autoplay, swipe,
-   * and keyboard handling are identical in both.
+   * thumbnail row (fixed square thumbnail left, dish details right,
+   * arrows only) sized to fit a ~46dvh bottom sheet without scrolling.
+   * State, autoplay, swipe, and keyboard handling are identical in both.
+   * `compact` never renders the full-bleed photo, the overlay Save, or a
+   * second region line: one thumbnail, one footer Save, one region label.
    */
-  readonly layout?: "full" | "compact" | undefined;
+  readonly layout?: DishCarouselLayout | undefined;
   /**
    * Optional per-render reason/explanation node (the active dish's Muse
-   * reason). Rendered as a full-width top strip INSIDE every card —
-   * above the image and details, sharing the card border — with a
+   * reason). Rendered as a full-width top strip INSIDE every full-layout
+   * card — above the image and details, sharing the card border — with a
    * reserved height (fixed on desktop, three-line clamp on mobile), so
    * reason length never resizes the slide or stage across slide changes.
-   * Omit when unavailable: no empty strip is reserved, so deterministic
-   * and degraded results render no Muse container at all.
+   * In compact layout the same node renders inline inside the text
+   * column (concise, no reserved box). Omit when unavailable: no empty
+   * strip is reserved, so deterministic and degraded results render no
+   * Muse container at all.
    */
   readonly reason?: ReactNode | undefined;
 }
+
+/**
+ * Typed explicit presentation variant for dish surfaces. `full` is the
+ * featured card (desktop/discovery); `compact` is the sheet-compact
+ * thumbnail row (bottom sheets, quiz drawer results). The rail
+ * (`RecommendationRail`) is the third surface: a selection mirror with
+ * no state of its own. Callers pick one variant explicitly — no viewport
+ * sniffing inside components.
+ */
+export type DishCarouselLayout = "full" | "compact";
 
 /**
  * Shared featured-slide dish carousel: one large image+info slide at a
@@ -221,7 +241,8 @@ export interface DishCarouselProps {
  * `DishActions` row (Explore, Save, Find restaurants) with identical
  * order, icons, and targets in both layouts. Recommendation-specific
  * content (AI note, summary, warnings) stays with the caller, outside
- * this component, except for the reserved top-strip `reason` slot.
+ * this component, except for the reserved `reason` slot: a top strip in
+ * full layout, an inline concise block in the compact text column.
  */
 export function DishCarousel({
   activeIndex,
@@ -371,8 +392,6 @@ export function DishCarousel({
   };
 
   if (layout === "compact") {
-    const activeDish = items[safeIndex];
-
     return (
       <section aria-roledescription="carousel" aria-label={label} style={DISH_CAROUSEL_GEOMETRY}>
         <output aria-live="polite" className="sr-only">
@@ -380,9 +399,7 @@ export function DishCarousel({
         </output>
         <div className="mb-1.5 flex min-w-0 items-center gap-2">
           <p className="min-w-0 flex-1 truncate text-[11px] font-bold tracking-[0.14em] text-food-orange-strong uppercase">
-            {activeDish !== undefined && activeDish.regionNames.length > 0
-              ? activeDish.regionNames.slice(0, 2).join(" · ")
-              : label}
+            {label}
           </p>
           {total > 1 ? (
             <>
@@ -393,7 +410,7 @@ export function DishCarousel({
                 }}
                 onKeyDown={handleKeyDown}
                 aria-label={copy.carouselPrev}
-                className="inline-flex min-h-10 min-w-10 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-2 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
+                className="inline-flex min-h-11 min-w-11 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-2 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
               >
                 <ChevronLeftIcon aria-hidden="true" className="size-4 flex-none" />
               </button>
@@ -404,7 +421,7 @@ export function DishCarousel({
                 }}
                 onKeyDown={handleKeyDown}
                 aria-label={copy.carouselNext}
-                className="inline-flex min-h-10 min-w-10 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-2 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
+                className="inline-flex min-h-11 min-w-11 flex-none cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-2 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
               >
                 <ChevronRightIcon aria-hidden="true" className="size-4 flex-none" />
               </button>
@@ -436,11 +453,15 @@ export function DishCarousel({
                   : undefined;
 
               // Alternate name only when distinct: identical names never
-              // render twice. Region tags stay an unlabeled eyebrow — the
-              // data model does not confirm dish-origin semantics, so no
-              // "Origin:" prefix is asserted here.
+              // render twice.
               const nativeName =
                 dish.nativeName !== undefined && dish.nativeName !== title ? dish.nativeName : null;
+
+              // The ONLY region label in compact: the header above names
+              // the section, so the eyebrow here is the single
+              // cuisine/origin line per card.
+              const regions =
+                dish.regionNames.length > 0 ? dish.regionNames.slice(0, 2).join(" · ") : null;
 
               return (
                 <article
@@ -450,102 +471,91 @@ export function DishCarousel({
                   inert={shown ? undefined : true}
                   className="w-full flex-none overflow-hidden rounded-2xl border border-border-soft bg-white shadow-[0_12px_28px_rgba(194,65,12,0.08)]"
                 >
-                  {reason !== undefined ? (
-                    <div className="m-3 mb-0 rounded-xl border border-mango bg-cream px-3 py-2.5">
-                      {reason}
+                  <div className="flex gap-3 p-3">
+                    <div
+                      className="relative h-20 w-20 flex-none overflow-hidden rounded-xl bg-cream min-[400px]:h-24 min-[400px]:w-24 sm:h-[104px] sm:w-[104px]"
+                      title={dish.image?.attribution ?? undefined}
+                    >
+                      {dish.image === null || dish.image === undefined ? (
+                        <span
+                          aria-hidden="true"
+                          className="grid h-full w-full place-items-center bg-cream text-muted"
+                        >
+                          <UtensilsCrossedIcon aria-hidden="true" className="size-7 flex-none" />
+                        </span>
+                      ) : (
+                        <DishMedia
+                          image={toCarouselPublishedImage(dish.image, dish.id)}
+                          eager={slide === 0}
+                          sizes="(max-width: 400px) 96px, 120px"
+                          unavailableLabel={copy.carouselPhotoSoon}
+                          loadingLabel={title}
+                          className="absolute inset-0 h-full w-full"
+                        />
+                      )}
                     </div>
-                  ) : null}
-                  <div
-                    className="relative aspect-[16/10] w-full overflow-hidden bg-cream"
-                    title={dish.image?.attribution ?? undefined}
-                  >
-                    {dish.image === null || dish.image === undefined ? (
-                      <span
-                        aria-hidden="true"
-                        className="font-display grid h-full w-full place-items-center bg-gradient-to-br from-food-orange-strong to-mango text-6xl text-white"
-                      >
-                        {title.slice(0, 1).toUpperCase()}
-                      </span>
-                    ) : (
-                      <DishMedia
-                        image={toCarouselPublishedImage(dish.image, dish.id)}
-                        eager={slide === 0}
-                        sizes="(max-width: 640px) 100vw, 400px"
-                        unavailableLabel={copy.carouselPhotoSoon}
-                        loadingLabel={title}
-                        className="absolute inset-0 h-full w-full"
-                      />
-                    )}
-                    <div className="absolute top-2 right-2">
-                      <SaveDishButton
-                        compact
-                        dishId={dish.id}
-                        lang={lang}
-                        onSaveSheetOpenChange={onSaveSheetOpenChange}
-                        returnTo="/"
-                        session={session}
-                        status={statusForDish(favoriteStatus, dish.id)}
-                      />
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      {regions !== null ? (
+                        <p className="truncate text-[11px] font-bold tracking-[0.14em] text-food-orange-strong uppercase">
+                          {regions}
+                        </p>
+                      ) : null}
+                      <h3 className="font-display line-clamp-2 min-h-[2.5em] min-w-0 text-lg leading-snug text-balance break-words text-ink">
+                        {title}
+                      </h3>
+                      {nativeName !== null ? (
+                        <p
+                          lang={dish.nativeLanguageTag}
+                          className="truncate text-[13px] font-semibold text-ink"
+                        >
+                          {nativeName}
+                        </p>
+                      ) : null}
+                      {reason !== undefined ? <div className="min-w-0">{reason}</div> : null}
+                      {description !== null ? (
+                        <p
+                          lang={descriptionLanguage}
+                          className="line-clamp-2 min-h-[2.6em] text-[13px] leading-relaxed break-words text-ink"
+                        >
+                          {description}
+                        </p>
+                      ) : (
+                        <p className="min-h-[2.6em] text-[13px] text-muted italic">
+                          {copy.carouselNoDescription}
+                        </p>
+                      )}
                     </div>
                   </div>
-                  <div className="flex min-w-0 flex-col gap-1.5 p-4">
-                    {dish.regionNames.length > 0 ? (
-                      <p className="truncate text-xs font-bold tracking-[0.14em] text-food-orange-strong uppercase">
-                        {dish.regionNames.slice(0, 2).join(" · ")}
-                      </p>
-                    ) : null}
-                    <h3 className="font-display min-w-0 text-2xl leading-tight text-balance break-words text-ink">
-                      {title}
-                    </h3>
-                    {nativeName !== null ? (
-                      <p
-                        lang={dish.nativeLanguageTag}
-                        className="truncate text-sm font-semibold text-ink"
-                      >
-                        {nativeName}
-                      </p>
-                    ) : null}
-                    {description !== null ? (
-                      <p
-                        lang={descriptionLanguage}
-                        className="line-clamp-3 text-[0.95rem] leading-relaxed break-words text-ink"
-                      >
-                        {description}
-                      </p>
-                    ) : (
-                      <p className="text-sm text-muted italic">{copy.carouselNoDescription}</p>
-                    )}
-                    <div className="mt-1 flex flex-wrap items-center gap-2 pt-1">
-                      <SaveDishButton
-                        dishId={dish.id}
-                        lang={lang}
-                        onSaveSheetOpenChange={onSaveSheetOpenChange}
-                        returnTo="/"
-                        session={session}
-                        status={statusForDish(favoriteStatus, dish.id)}
-                      />
-                      <Link
-                        to="/restaurants"
-                        search={dishRestaurantsSearch(dish.id, dish.slug, lang)}
-                        tabIndex={shown ? undefined : -1}
-                        aria-label={copy.recFindRestaurants}
-                        title={copy.recFindRestaurants}
-                        className="inline-flex min-h-11 items-center gap-1.5 rounded-full border-2 border-ink bg-white px-4 text-sm font-bold text-ink transition hover:bg-ink hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
-                      >
-                        <StoreIcon aria-hidden="true" className="size-4 flex-none" />
-                        {copy.recFindRestaurants}
-                      </Link>
-                      <Link
-                        to="/dishes/$dishId"
-                        params={{ dishId: dish.slug }}
-                        search={{ lang }}
-                        tabIndex={shown ? undefined : -1}
-                        className="inline-flex min-h-11 items-center gap-1.5 rounded-full border-2 border-food-orange-strong bg-food-orange-strong px-4 text-sm font-bold text-white transition hover:bg-food-orange-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
-                      >
-                        <ArrowUpRightIcon aria-hidden="true" className="size-4 flex-none" />
-                        {copy.recViewDish}
-                      </Link>
-                    </div>
+                  <div className="flex flex-wrap items-center gap-2 border-t border-border-soft px-3 py-2.5">
+                    <SaveDishButton
+                      dishId={dish.id}
+                      lang={lang}
+                      onSaveSheetOpenChange={onSaveSheetOpenChange}
+                      returnTo="/"
+                      session={session}
+                      status={statusForDish(favoriteStatus, dish.id)}
+                    />
+                    <Link
+                      to="/restaurants"
+                      search={dishRestaurantsSearch(dish.id, dish.slug, lang)}
+                      tabIndex={shown ? undefined : -1}
+                      aria-label={copy.recFindRestaurants}
+                      title={copy.recFindRestaurants}
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-full border-2 border-ink bg-white px-4 text-sm font-bold text-ink transition hover:bg-ink hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                    >
+                      <StoreIcon aria-hidden="true" className="size-4 flex-none" />
+                      {copy.recFindRestaurants}
+                    </Link>
+                    <Link
+                      to="/dishes/$dishId"
+                      params={{ dishId: dish.slug }}
+                      search={{ lang }}
+                      tabIndex={shown ? undefined : -1}
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-full border-2 border-food-orange-strong bg-food-orange-strong px-4 text-sm font-bold text-white transition hover:bg-food-orange-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                    >
+                      <ArrowUpRightIcon aria-hidden="true" className="size-4 flex-none" />
+                      {copy.recViewDish}
+                    </Link>
                   </div>
                 </article>
               );
@@ -700,32 +710,35 @@ export function DishCarousel({
 }
 
 /**
- * Compact loading skeleton mirroring the compact drawer card footprint:
- * fixed thumbnail block plus text lines and action circles at the same
- * padding, so content resolves without layout shift. Announced once via
- * the caller's loading region, not here.
+ * Compact loading skeleton mirroring the compact thumbnail-row card: label
+ * bar plus arrows, a fixed square thumbnail with title/region/description
+ * lines, and three footer pills at the same padding — so content resolves
+ * without layout shift. Announced once via the caller's loading region,
+ * not here.
  */
 export function DishCarouselCompactSkeleton(): ReactNode {
   return (
     <div aria-hidden="true" style={DISH_CAROUSEL_GEOMETRY}>
-      <div className="mb-2 flex items-center gap-2">
+      <div className="mb-1.5 flex items-center gap-2">
         <div className="h-2.5 min-w-0 flex-1 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
-        <div className="h-10 w-10 flex-none animate-pulse rounded-full bg-border-soft motion-reduce:animate-none" />
-        <div className="h-10 w-10 flex-none animate-pulse rounded-full bg-border-soft motion-reduce:animate-none" />
+        <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-border-soft motion-reduce:animate-none" />
+        <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-border-soft motion-reduce:animate-none" />
       </div>
-      <div className="w-full overflow-hidden rounded-2xl border border-border-soft bg-white p-3">
-        <div className="flex gap-3">
-          <div className="h-28 w-28 flex-none animate-pulse rounded-xl bg-border-soft motion-reduce:animate-none min-[400px]:h-32 min-[400px]:w-32 max-[359px]:h-24 max-[359px]:w-24" />
-          <div className="flex min-w-0 flex-1 flex-col gap-2 py-0.5" aria-hidden="true">
-            <div className="flex min-w-0 flex-nowrap items-start gap-2">
-              <div className="h-6 min-w-0 flex-1 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
-              <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
-              <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
-              <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
-            </div>
-            <div className="h-3.5 w-1/2 animate-pulse rounded bg-cream motion-reduce:animate-none" />
+      <div className="w-full overflow-hidden rounded-2xl border border-border-soft bg-white">
+        <div className="flex gap-3 p-3">
+          <div className="h-20 w-20 flex-none animate-pulse rounded-xl bg-border-soft motion-reduce:animate-none min-[400px]:h-24 min-[400px]:w-24 sm:h-[104px] sm:w-[104px]" />
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5 py-0.5">
+            <div className="h-2.5 w-1/3 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
+            <div className="h-6 w-3/4 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
+            <div className="h-6 w-2/5 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
             <div className="h-3.5 w-full animate-pulse rounded bg-cream motion-reduce:animate-none" />
+            <div className="h-3.5 w-5/6 animate-pulse rounded bg-cream motion-reduce:animate-none" />
           </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-border-soft px-3 py-2.5">
+          <div className="h-11 w-24 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+          <div className="h-11 w-28 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+          <div className="h-11 w-24 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
         </div>
       </div>
     </div>
