@@ -1770,3 +1770,281 @@ export const adminUpdateDishPlacesFn = createServerFn({ method: "POST" })
         }),
     );
   });
+
+/**
+ * Taxonomy administration transport: curator-managed cuisines and
+ * ingredients without code deploys.
+ *
+ * Every function enforces `food:import` at the server boundary (the grant
+ * seeded to curator, admin, and owner); the domain service re-checks the
+ * same grant per request, so a missing transport check still fails closed.
+ * Writes are audit-logged in-transaction by the service. Reads carry no
+ * additional policy beyond the boundary gate.
+ */
+const loadTaxonomyAdminServer = async () => {
+  const [effects, server, taxonomy, authorization, session, actor, currentActor, runtime] =
+    await Promise.all([
+      import("effect"),
+      import("@tanstack/react-start/server"),
+      import("@/modules/food-discovery/server/operations/taxonomy-admin-service"),
+      import("@/modules/user/server/operations/authorization"),
+      import("@/server/auth/session"),
+      import("@/server/auth/actor"),
+      import("@/server/auth/current-actor"),
+      import("@/server/runtime"),
+    ]);
+
+  return { effects, server, taxonomy, authorization, session, actor, currentActor, runtime };
+};
+
+const taxonomyListQuerySchema = z.object({
+  query: z.string().trim().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+const taxonomySlugSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .regex(
+    /^[a-z0-9]+(-[a-z0-9]+)*$/,
+    "slug must be lowercase alphanumeric words joined by single hyphens",
+  );
+
+const taxonomyNameSchema = z.string().trim().min(1).max(300);
+
+const taxonomyLanguageTagSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(20)
+  .regex(/^[a-z]{2,3}(-[A-Za-z]{2,8})?$/, "language tag must look like en or en-US");
+
+const taxonomyCuisineEntrySchema = z.object({
+  slug: taxonomySlugSchema.optional(),
+  name: taxonomyNameSchema,
+});
+
+const taxonomyBulkCuisinesSchema = z.object({
+  entries: z.array(taxonomyCuisineEntrySchema).min(1).max(100),
+});
+
+const taxonomyIngredientEntrySchema = z.object({
+  name: taxonomyNameSchema,
+  languageTag: taxonomyLanguageTagSchema.optional(),
+});
+
+const taxonomyBulkIngredientsSchema = z.object({
+  entries: z.array(taxonomyIngredientEntrySchema).min(1).max(100),
+});
+
+export const listCuisinesFn = createServerFn({ method: "GET" })
+  .validator(taxonomyListQuerySchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadTaxonomyAdminServer();
+    const { effects, server, taxonomy, session, actor, currentActor, runtime } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/taxonomy-cuisines", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["import"] }),
+      "fn/admin/taxonomy-cuisines",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(taxonomy.TaxonomyAdminService, (service) =>
+          service.listCuisines({ query: data.query, limit: data.limit, offset: data.offset }),
+        ).pipe(effects.Effect.provide(taxonomy.TaxonomyAdminServiceLive)),
+      ),
+      "fn/admin/taxonomy-cuisines",
+      15000,
+      requestId,
+    );
+  });
+
+export const createCuisineFn = createServerFn({ method: "POST" })
+  .validator(taxonomyCuisineEntrySchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadTaxonomyAdminServer();
+    const { effects, server, taxonomy, session, actor, currentActor, runtime } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/taxonomy-cuisine-create", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["import"] }),
+      "fn/admin/taxonomy-cuisine-create",
+      15000,
+      requestId,
+    );
+
+    const created = await runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(taxonomy.TaxonomyAdminService, (service) =>
+          service.createCuisine(
+            { slug: data.slug, name: data.name },
+            { requestId, sessionId: trusted.sessionId },
+          ),
+        ).pipe(effects.Effect.provide(taxonomy.TaxonomyAdminServiceLive)),
+      ),
+      "fn/admin/taxonomy-cuisine-create",
+      15000,
+      requestId,
+    );
+
+    return { cuisine: created };
+  });
+
+export const bulkCreateCuisinesFn = createServerFn({ method: "POST" })
+  .validator(taxonomyBulkCuisinesSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadTaxonomyAdminServer();
+    const { effects, server, taxonomy, session, actor, currentActor, runtime } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/taxonomy-cuisines-bulk", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["import"] }),
+      "fn/admin/taxonomy-cuisines-bulk",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(taxonomy.TaxonomyAdminService, (service) =>
+          service.bulkCreateCuisines(
+            {
+              entries: data.entries.map((entry) => ({ slug: entry.slug, name: entry.name })),
+            },
+            { requestId, sessionId: trusted.sessionId },
+          ),
+        ).pipe(effects.Effect.provide(taxonomy.TaxonomyAdminServiceLive)),
+      ),
+      "fn/admin/taxonomy-cuisines-bulk",
+      60000,
+      requestId,
+    );
+  });
+
+export const listIngredientsFn = createServerFn({ method: "GET" })
+  .validator(taxonomyListQuerySchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadTaxonomyAdminServer();
+    const { effects, server, taxonomy, session, actor, currentActor, runtime } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/taxonomy-ingredients", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["import"] }),
+      "fn/admin/taxonomy-ingredients",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(taxonomy.TaxonomyAdminService, (service) =>
+          service.listIngredients({ query: data.query, limit: data.limit, offset: data.offset }),
+        ).pipe(effects.Effect.provide(taxonomy.TaxonomyAdminServiceLive)),
+      ),
+      "fn/admin/taxonomy-ingredients",
+      15000,
+      requestId,
+    );
+  });
+
+export const createIngredientFn = createServerFn({ method: "POST" })
+  .validator(taxonomyIngredientEntrySchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadTaxonomyAdminServer();
+    const { effects, server, taxonomy, session, actor, currentActor, runtime } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/taxonomy-ingredient-create", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["import"] }),
+      "fn/admin/taxonomy-ingredient-create",
+      15000,
+      requestId,
+    );
+
+    const created = await runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(taxonomy.TaxonomyAdminService, (service) =>
+          service.createIngredient(
+            { name: data.name, languageTag: data.languageTag },
+            { requestId, sessionId: trusted.sessionId },
+          ),
+        ).pipe(effects.Effect.provide(taxonomy.TaxonomyAdminServiceLive)),
+      ),
+      "fn/admin/taxonomy-ingredient-create",
+      15000,
+      requestId,
+    );
+
+    return { ingredient: created };
+  });
+
+export const bulkCreateIngredientsFn = createServerFn({ method: "POST" })
+  .validator(taxonomyBulkIngredientsSchema)
+  .handler(async ({ data }) => {
+    const loaded = await loadTaxonomyAdminServer();
+    const { effects, server, taxonomy, session, actor, currentActor, runtime } = loaded;
+
+    const headers = server.getRequestHeaders();
+    const requestId = crypto.randomUUID();
+
+    await requireSurface(loaded, headers, "fn/admin/taxonomy-ingredients-bulk", requestId);
+
+    const trusted = await runtime.runApp(
+      session.requirePermission(headers, { resource: "food", actions: ["import"] }),
+      "fn/admin/taxonomy-ingredients-bulk",
+      15000,
+      requestId,
+    );
+
+    return runtime.runApp(
+      currentActor.withActor(
+        actor.Actor.Member({ userId: trusted.userId }),
+        effects.Effect.flatMap(taxonomy.TaxonomyAdminService, (service) =>
+          service.bulkCreateIngredients(
+            {
+              entries: data.entries.map((entry) => ({
+                name: entry.name,
+                languageTag: entry.languageTag,
+              })),
+            },
+            { requestId, sessionId: trusted.sessionId },
+          ),
+        ).pipe(effects.Effect.provide(taxonomy.TaxonomyAdminServiceLive)),
+      ),
+      "fn/admin/taxonomy-ingredients-bulk",
+      60000,
+      requestId,
+    );
+  });

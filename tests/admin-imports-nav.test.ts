@@ -43,7 +43,7 @@ describe("adminNavEntries", () => {
     expect(adminNavEntries(NO_ADMIN_CAPABILITIES, copy)).toEqual([]);
   });
 
-  test("exposes all eight sections with dashboard exact", () => {
+  test("exposes all nine sections with dashboard exact", () => {
     const entries = adminNavEntries(full, copy);
 
     expect(entries.map((entry) => entry.to)).toEqual([
@@ -55,6 +55,7 @@ describe("adminNavEntries", () => {
       "/admin/reviews",
       "/admin/users",
       "/admin/roles",
+      "/admin/taxonomy",
     ]);
     expect(entries[0]?.exact).toBe(true);
     expect(entries.slice(1).every((entry) => !entry.exact)).toBe(true);
@@ -69,10 +70,13 @@ describe("adminNavEntries", () => {
     ]);
   });
 
-  test("importer-only sees only imports", () => {
+  test("importer-only sees imports and taxonomy", () => {
     const importer: AdminCapabilities = { ...NO_ADMIN_CAPABILITIES, imports: true };
 
-    expect(adminNavEntries(importer, copy).map((entry) => entry.to)).toEqual(["/admin/imports"]);
+    expect(adminNavEntries(importer, copy).map((entry) => entry.to)).toEqual([
+      "/admin/imports",
+      "/admin/taxonomy",
+    ]);
   });
 
   test("labels come from the active locale copy", () => {

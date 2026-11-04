@@ -29,6 +29,7 @@ import { Route as AdminRestaurantImportsRouteImport } from './routes/admin.resta
 import { Route as AdminRestaurantsRouteImport } from './routes/admin.restaurants'
 import { Route as AdminReviewsRouteImport } from './routes/admin.reviews'
 import { Route as AdminRolesRouteImport } from './routes/admin.roles'
+import { Route as AdminTaxonomyRouteImport } from './routes/admin.taxonomy'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as ApiMenuScansRouteImport } from './routes/api/menu-scans'
 import { Route as DishesIndexRouteImport } from './routes/dishes.index'
@@ -171,6 +172,11 @@ const AdminReviewsRoute = AdminReviewsRouteImport.update({
 const AdminRolesRoute = AdminRolesRouteImport.update({
   id: '/roles',
   path: '/roles',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminTaxonomyRoute = AdminTaxonomyRouteImport.update({
+  id: '/taxonomy',
+  path: '/taxonomy',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminUsersRoute = AdminUsersRouteImport.update({
@@ -419,6 +425,7 @@ export interface FileRoutesByFullPath {
   '/admin/restaurants': typeof AdminRestaurantsRoute
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
+  '/admin/taxonomy': typeof AdminTaxonomyRoute
   '/admin/users': typeof AdminUsersRoute
   '/api/menu-scans': typeof ApiMenuScansRoute
   '/dishes/$dishId': typeof DishesDishIdRoute
@@ -481,6 +488,7 @@ export interface FileRoutesByTo {
   '/admin/restaurants': typeof AdminRestaurantsRoute
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
+  '/admin/taxonomy': typeof AdminTaxonomyRoute
   '/admin/users': typeof AdminUsersRoute
   '/api/menu-scans': typeof ApiMenuScansRoute
   '/dishes/$dishId': typeof DishesDishIdRoute
@@ -547,6 +555,7 @@ export interface FileRoutesById {
   '/admin/restaurants': typeof AdminRestaurantsRoute
   '/admin/reviews': typeof AdminReviewsRoute
   '/admin/roles': typeof AdminRolesRoute
+  '/admin/taxonomy': typeof AdminTaxonomyRoute
   '/admin/users': typeof AdminUsersRoute
   '/api/menu-scans': typeof ApiMenuScansRoute
   '/dishes/$dishId': typeof DishesDishIdRoute
@@ -614,6 +623,7 @@ export interface FileRouteTypes {
     | '/admin/restaurants'
     | '/admin/reviews'
     | '/admin/roles'
+    | '/admin/taxonomy'
     | '/admin/users'
     | '/api/menu-scans'
     | '/dishes/$dishId'
@@ -676,6 +686,7 @@ export interface FileRouteTypes {
     | '/admin/restaurants'
     | '/admin/reviews'
     | '/admin/roles'
+    | '/admin/taxonomy'
     | '/admin/users'
     | '/api/menu-scans'
     | '/dishes/$dishId'
@@ -741,6 +752,7 @@ export interface FileRouteTypes {
     | '/admin/restaurants'
     | '/admin/reviews'
     | '/admin/roles'
+    | '/admin/taxonomy'
     | '/admin/users'
     | '/api/menu-scans'
     | '/dishes/$dishId'
@@ -961,6 +973,13 @@ declare module '@tanstack/react-router' {
       path: '/roles'
       fullPath: '/admin/roles'
       preLoaderRoute: typeof AdminRolesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/taxonomy': {
+      id: '/admin/taxonomy'
+      path: '/taxonomy'
+      fullPath: '/admin/taxonomy'
+      preLoaderRoute: typeof AdminTaxonomyRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/users': {
@@ -1313,6 +1332,7 @@ interface AdminRouteChildren {
   AdminRestaurantsRoute: typeof AdminRestaurantsRoute
   AdminReviewsRoute: typeof AdminReviewsRoute
   AdminRolesRoute: typeof AdminRolesRoute
+  AdminTaxonomyRoute: typeof AdminTaxonomyRoute
   AdminUsersRoute: typeof AdminUsersRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
@@ -1325,6 +1345,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminRestaurantsRoute: AdminRestaurantsRoute,
   AdminReviewsRoute: AdminReviewsRoute,
   AdminRolesRoute: AdminRolesRoute,
+  AdminTaxonomyRoute: AdminTaxonomyRoute,
   AdminUsersRoute: AdminUsersRoute,
   AdminIndexRoute: AdminIndexRoute,
 }
