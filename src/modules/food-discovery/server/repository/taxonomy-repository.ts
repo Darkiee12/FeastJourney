@@ -3,10 +3,13 @@ import { Context, Effect, Layer } from "effect";
 import categoryFindBySlugs from "@/modules/food-discovery/server/repository/sql/category-find-by-slugs.sql";
 import categoryListWithNames from "@/modules/food-discovery/server/repository/sql/category-list-with-names.sql";
 import cuisineFindBySlug from "@/modules/food-discovery/server/repository/sql/cuisine-find-by-slug.sql";
+import cuisineInsert from "@/modules/food-discovery/server/repository/sql/cuisine-insert.sql";
 import cuisineListWithNames from "@/modules/food-discovery/server/repository/sql/cuisine-list-with-names.sql";
+import cuisineNameInsert from "@/modules/food-discovery/server/repository/sql/cuisine-name-insert.sql";
 import sourceProviderFindBySlug from "@/modules/food-discovery/server/repository/sql/source-provider-find-by-slug.sql";
 import sourceRecordUpsert from "@/modules/food-discovery/server/repository/sql/source-record-upsert.sql";
 import type { Database } from "@/server/database/client";
+import { PersistenceConflict, classifyDatabaseError } from "@/server/database/errors";
 import { type DatabaseError, runQuery } from "@/server/database/query";
 
 export type CategoryListRow = (typeof categoryListWithNames)["~reylo"]["element"];
@@ -36,6 +39,16 @@ export class TaxonomyRepository extends Context.Service<
       DatabaseError,
       Database
     >;
+    readonly insertCuisine: (
+      slug: string,
+    ) => Effect.Effect<{ readonly id: bigint; readonly slug: string }, DatabaseError, Database>;
+    readonly insertCuisineName: (input: {
+      readonly cuisineId: bigint;
+      readonly languageTag: string;
+      readonly name: string;
+      readonly isPreferred: boolean;
+      readonly searchKey: string;
+    }) => Effect.Effect<void, DatabaseError, Database>;
   }
 >()("feastjourney/food-discovery/TaxonomyRepository") {}
 
@@ -59,6 +72,50 @@ export const TaxonomyRepositoryLive = Layer.succeed(TaxonomyRepository, {
       return yield* runQuery("taxonomy/cuisine-by-slug", (sql) =>
         cuisineFindBySlug.run(sql, { slug }),
       );
+    }),
+  insertCuisine: (slug) =>
+    Effect.gen(function* () {
+      const outcome = yield* runQuery("taxonomy/cuisine-insert", (sql) =>
+        cuisineInsert.try(sql, { slug }),
+      );
+
+      if (outcome.error !== undefined) {
+        if (outcome.error.condition === "unique_violation") {
+          return yield* new PersistenceConflict({
+            operation: "taxonomy/cuisine-insert",
+            constraint: outcome.error.constraint ?? undefined,
+          });
+        }
+
+        return yield* classifyDatabaseError("taxonomy/cuisine-insert", outcome.error.cause);
+      }
+
+      return { id: outcome.value.id, slug: outcome.value.slug };
+    }),
+  insertCuisineName: (input) =>
+    Effect.gen(function* () {
+      const outcome = yield* runQuery("taxonomy/cuisine-name-insert", (sql) =>
+        cuisineNameInsert.try(sql, {
+          cuisine_id: input.cuisineId,
+          language_tag: input.languageTag,
+          name: input.name,
+          is_preferred: input.isPreferred,
+          search_key: input.searchKey,
+        }),
+      );
+
+      if (outcome.error !== undefined) {
+        if (outcome.error.condition === "unique_violation") {
+          return yield* new PersistenceConflict({
+            operation: "taxonomy/cuisine-name-insert",
+            constraint: outcome.error.constraint ?? undefined,
+          });
+        }
+
+        return yield* classifyDatabaseError("taxonomy/cuisine-name-insert", outcome.error.cause);
+      }
+
+      return yield* Effect.void;
     }),
 });
 
