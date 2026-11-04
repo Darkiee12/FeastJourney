@@ -49,9 +49,14 @@ import { menuScanConfig } from "@/server/integrations/menu-scan-config";
 import {
   ExtractionUnavailable,
   InvalidModelOutput,
+  MENU_SCAN_COMBINED_IMAGE_BYTES,
   MenuExtractor,
 } from "@/server/integrations/muse-menu";
-import { PrivateMenuStorage, validateMenuImage } from "@/server/integrations/private-menu-storage";
+import {
+  MAX_IMAGE_BYTES,
+  PrivateMenuStorage,
+  validateMenuImage,
+} from "@/server/integrations/private-menu-storage";
 
 /** Constructed only by the verified session/capability transport boundary. */
 export interface ScanPrincipal {
@@ -66,6 +71,49 @@ export class ScanConflict extends Data.TaggedError("ScanConflict")<{ readonly re
 export class ScanInputError extends Data.TaggedError("ScanInputError")<{
   readonly reason: string;
 }> {}
+
+/**
+ * Resolve the operator's menu-scanner configuration with logging.
+ * Disabled resolves to null (callers fail closed with "disabled"); an
+ * invalid explicit configuration logs field + reason server-side (never
+ * values) and fails as a provider outage at the transport boundary.
+ */
+export const resolveScannerOrFail = Effect.fn("menu.scannerConfig")(function* () {
+  try {
+    return menuScanConfig();
+  } catch (error) {
+    yield* Effect.logError("Menu scanner configuration invalid").pipe(
+      Effect.annotateLogs({
+        reason: error instanceof Error ? error.message : "unknown",
+      }),
+    );
+
+    return yield* new ExtractionUnavailable({
+      reason: "Menu analysis is unavailable. Please retry later.",
+      retryable: false,
+      category: "unavailable",
+    });
+  }
+});
+
+/**
+ * Upload caps for attachMenuPhoto. Derived from the operator's MENU_SCAN_*
+ * configuration when the scanner resolves; historical defaults otherwise.
+ */
+export const resolveUploadCaps = () => {
+  try {
+    const scanner = menuScanConfig();
+
+    if (scanner !== null) {
+      return { maxImages: scanner.maxImages, maxImageBytes: scanner.maxImageBytes };
+    }
+  } catch {
+    // Misconfigured scanner: fall back to defaults for uploads; extraction
+    // itself fails loudly at its own boundary with field + reason.
+  }
+
+  return { maxImages: 6, maxImageBytes: MAX_IMAGE_BYTES };
+};
 
 export const requireOwnedMenuScan = Effect.fn("menu.requireOwned")(function* (
   principal: ScanPrincipal,
@@ -193,13 +241,24 @@ export const attachMenuPhoto = Effect.fn("menu.attachPhoto")(function* (
 ) {
   yield* withTransaction("menu/authorize-upload", requireOwnedMenuScan(principal, scanId));
 
-  if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > 6) {
+  // Upload caps derive from the operator's MENU_SCAN_* configuration so an
+  // explicit value is honored end to end. When the scanner is disabled or
+  // misconfigured, uploads keep the historical defaults; extraction itself
+  // still fails loudly at its own boundary. The 24 MiB combined bound stays
+  // fixed: it is the provider's inline-payload transport limit, not an
+  // operator ceiling (see MENU_SCAN_COMBINED_IMAGE_BYTES).
+  const uploadCaps = resolveUploadCaps();
+
+  if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > uploadCaps.maxImages) {
     return yield* new ScanInputError({
-      reason: "Menu pages must be numbered between one and six.",
+      reason:
+        uploadCaps.maxImages === 1
+          ? "Menu pages must be numbered one."
+          : `Menu pages must be numbered between one and ${uploadCaps.maxImages}.`,
     });
   }
 
-  const image = yield* validateMenuImage(bytes, mediaType);
+  const image = yield* validateMenuImage(bytes, mediaType, uploadCaps.maxImageBytes);
   const key = `menu/${scanId}/${randomUUID()}`;
 
   const asset = yield* withTransaction(
@@ -216,9 +275,12 @@ export const attachMenuPhoto = Effect.fn("menu.attachPhoto")(function* (
         assetTotals.run(sql, { session_id: scanId }),
       );
 
-      if (totals.count >= 6 || (totals.bytes ?? 0) + image.byteLength > 25165824)
+      if (
+        totals.count >= uploadCaps.maxImages ||
+        (totals.bytes ?? 0) + image.byteLength > MENU_SCAN_COMBINED_IMAGE_BYTES
+      )
         return yield* new ScanInputError({
-          reason: "Use at most six photographs and 24 MiB in total.",
+          reason: `Use at most ${uploadCaps.maxImages} photographs and 24 MiB in total.`,
         });
 
       const existing = yield* runQuery("menu/upload-pages", (sql) =>
@@ -246,7 +308,7 @@ export const attachMenuPhoto = Effect.fn("menu.attachPhoto")(function* (
     (reserved) =>
       Effect.gen(function* () {
         yield* storage.put(key, image.bytes);
-        const stored = yield* storage.read(key);
+        const stored = yield* storage.read(key, uploadCaps.maxImageBytes);
 
         if (
           stored.byteLength !== image.byteLength ||
@@ -327,7 +389,7 @@ export const readMenuPhoto = Effect.fn("menu.readPhoto")(function* (
 
   const storage = yield* PrivateMenuStorage;
 
-  return yield* storage.read(asset.object_key);
+  return yield* storage.read(asset.object_key, resolveUploadCaps().maxImageBytes);
 });
 
 interface PlaceMenuEvidence {
@@ -402,6 +464,15 @@ const resolvePlaceMenuEvidence = Effect.fn("menu.resolvePlaceEvidence")(function
   return evidence;
 });
 
+/**
+ * Orchestration margin (seconds) added to the operator's MENU_SCAN_TIMEOUT_MS
+ * when sizing the extraction lease. Covers asset reads, document assembly
+ * and revision writes around the provider call, plus clock slack. A fixed
+ * technical margin, documented here — not an operator ceiling and not a
+ * bound on the provider budget itself.
+ */
+const MENU_EXTRACTION_LEASE_MARGIN_S = 120;
+
 export const extractMenu = Effect.fn("menu.extractScan")(function* (
   principal: ScanPrincipal,
   scanId: string,
@@ -411,15 +482,7 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
   // Revision provenance records the actual configured model, so resolve it
   // before any lease or inference. A disabled or misconfigured scanner fails
   // here; the live extractor enforces the same boundary before any provider call.
-  const scanner = yield* Effect.try({
-    try: menuScanConfig,
-    catch: () =>
-      new ExtractionUnavailable({
-        reason: "Menu analysis is unavailable. Please retry later.",
-        retryable: false,
-        category: "unavailable",
-      }),
-  });
+  const scanner = yield* resolveScannerOrFail();
 
   if (scanner === null)
     return yield* new ExtractionUnavailable({
@@ -428,176 +491,232 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
       category: "unavailable",
     });
 
-  const token = yield* withTransaction(
-    "menu/claim-extraction",
+  // Mask only the lease-to-worker handoff: cancellation must not leave a
+  // committed lease without a worker. Provider work remains interruptible.
+  yield* Effect.uninterruptible(
     Effect.gen(function* () {
-      const scan = yield* requireOwnedMenuScan(principal, scanId);
+      const token = yield* withTransaction(
+        "menu/claim-extraction",
+        Effect.gen(function* () {
+          const scan = yield* requireOwnedMenuScan(principal, scanId);
 
-      if (scan.current_revision !== null) return null;
+          if (scan.current_revision !== null) return null;
 
-      const assets = yield* runQuery("menu/required-assets", (sql) =>
-        assetsQuery.run(sql, { session_id: scanId }),
+          const assets = yield* runQuery("menu/required-assets", (sql) =>
+            assetsQuery.run(sql, { session_id: scanId }),
+          );
+
+          if (assets.length === 0 || assets.some((asset) => asset.status !== "ready"))
+            return yield* new ScanConflict({
+              reason: "Wait for every menu photograph to finish uploading.",
+            });
+
+          yield* runQuery("menu/extraction-guard", (sql) => extractionGuard.run(sql));
+          const lease = randomUUID();
+
+          // Lease lifetime derives from the operator's provider budget plus a
+          // documented orchestration margin (asset reads, revision writes,
+          // clock slack) — never a fixed 90 seconds. attempts/concurrency caps
+          // stay in SQL: they are abuse/resource protections for this
+          // guest-accessible endpoint, not operator ceilings.
+          const leaseSeconds = Math.ceil(scanner.timeoutMs / 1000) + MENU_EXTRACTION_LEASE_MARGIN_S;
+
+          const claimed = yield* runQuery("menu/claim-extraction", (sql) =>
+            claimExtraction.run(sql, { id: scanId, token: lease, lease_seconds: leaseSeconds }),
+          );
+
+          if (claimed === null) {
+            // The owned row is locked throughout this transaction. An active
+            // lease cannot be claimed again; return its view for polling instead.
+            // Expired leases still pass through the SQL retry/concurrency guards.
+            if (scan.status === "processing") return null;
+
+            return yield* new ScanConflict({
+              reason:
+                "The analysis retry or concurrency limit was reached. Please try again later.",
+            });
+          }
+
+          return lease;
+        }),
       );
 
-      if (assets.length === 0 || assets.some((asset) => asset.status !== "ready"))
-        return yield* new ScanConflict({
-          reason: "Wait for every menu photograph to finish uploading.",
-        });
+      if (token === null) return;
 
-      yield* runQuery("menu/extraction-guard", (sql) => extractionGuard.run(sql));
-      const lease = randomUUID();
-
-      const claimed = yield* runQuery("menu/claim-extraction", (sql) =>
-        claimExtraction.run(sql, { id: scanId, token: lease }),
-      );
-
-      if (claimed === null)
-        return yield* new ScanConflict({
-          reason:
-            "Analysis is already running or its retry limit was reached. Please try again later.",
-        });
-
-      return lease;
-    }),
-  );
-
-  if (token === null) return yield* getMenuScan(principal, scanId);
-
-  return yield* Effect.acquireUseRelease(
-    Effect.succeed(token),
-    (lease) =>
-      Effect.gen(function* () {
-        const state = yield* getMenuScan(principal, scanId);
-
-        const assets = yield* runQuery("menu/extraction-assets", (sql) =>
-          privateAssets.run(sql, { session_id: scanId }),
-        );
-
-        const storage = yield* PrivateMenuStorage;
-
-        const images = yield* Effect.forEach(
-          assets,
-          (asset) =>
-            Effect.gen(function* () {
-              const bytes = yield* storage.read(asset.object_key);
-
-              if (
-                asset.media_type === null ||
-                asset.checksum === null ||
-                asset.byte_length !== bytes.byteLength ||
-                createHash("sha256").update(bytes).digest("hex") !== asset.checksum
-              ) {
-                return yield* new ScanInputError({
-                  reason: "A menu photograph could not be verified. Please upload it again.",
-                });
-              }
-
-              return { assetId: asset.id, bytes, mediaType: asset.media_type };
-            }),
-          { concurrency: 2 },
-        );
-
-        const extractor = yield* MenuExtractor;
-
-        // Currency context merges existing scan fields only: the linked
-        // venue (venue_id/venue_name already on the scan row) outranks the
-        // coarse visitor country. The visitor-selected menu city id resolves
-        // server-side: curated presets and `geo:` names via the sync map
-        // (unknown ids are dropped, never trusted as geography), while
-        // `place:` registry ids resolve through the place catalog to a
-        // coarse city display name plus country ISO (unknown/missing records
-        // degrade to null). Preset and `geo:` ids keep today's behavior with
-        // menuCountry unset on this path. No new persistence, no raw GPS or
-        // street addresses, and language is never treated as location.
-        const targetLanguage = menuScanDocumentSchema.shape.targetLanguage.parse(
-          state.scan.target_language,
-        );
-
-        const placeEvidence = yield* resolvePlaceMenuEvidence(
-          location?.menuCityId ?? null,
-          targetLanguage,
-        );
-
-        const currencyContext: CurrencyContext = normalizeCurrencyContext({
-          venueName: state.scan.venue_name,
-          menuCity: placeEvidence.menuCity ?? resolveMenuCityId(location?.menuCityId ?? null),
-          menuCountry: placeEvidence.menuCountry,
-          trustedCountry: location?.trustedCountry ?? null,
-        });
-
-        const extraction = yield* extractor.extract({
-          images,
-          targetLanguage,
-          requestId,
-          currencyContext,
-        });
-
-        const document: MenuScanDocument = {
-          ...extraction,
-          schemaVersion: 1,
-          targetLanguage: menuScanDocumentSchema.shape.targetLanguage.parse(
-            state.scan.target_language,
-          ),
-          pages: assets.map((asset) => ({ assetId: asset.id, pageNumber: asset.page_number })),
-          items: extraction.items.map((item) =>
-            Object.assign({}, item, {
-              id: randomUUID(),
-              variants: item.variants.map((variant) =>
-                Object.assign({}, variant, { id: randomUUID() }),
-              ),
-            }),
-          ),
-        };
-
-        if (!menuDocumentFitsStorage(document)) {
-          return yield* new InvalidModelOutput({
-            reason: "The extracted menu is too large. Retry with fewer pages.",
-            retryable: false,
-            category: "truncated",
-          });
-        }
-
-        yield* withTransaction(
-          "menu/complete-extraction",
+      // Async extraction: the lease claim above is the only request-bound work.
+      // The provider call runs detached so no HTTP/server-function/proxy budget
+      // bounds it — only MENU_SCAN_TIMEOUT_MS does, whatever the operator sets.
+      // The client polls getMenuScan until the document lands or the scan fails;
+      // a retry while processing returns the current view without another worker.
+      // Lease expiry plus the attempt/concurrency caps
+      // in scan-claim.sql recover crashed or abandoned runs for retry.
+      const runExtraction = Effect.acquireUseRelease(
+        Effect.succeed(token),
+        (lease) =>
           Effect.gen(function* () {
-            yield* requireOwnedMenuScan(principal, scanId);
+            const state = yield* getMenuScan(principal, scanId);
 
-            const complete = yield* runQuery("menu/complete-extraction", (sql) =>
-              completeExtraction.run(sql, { id: scanId, token: lease }),
+            const assets = yield* runQuery("menu/extraction-assets", (sql) =>
+              privateAssets.run(sql, { session_id: scanId }),
             );
 
-            if (complete === null) {
-              yield* new ScanConflict({
-                reason: "The analysis lease expired. Please retry.",
+            const storage = yield* PrivateMenuStorage;
+
+            const images = yield* Effect.forEach(
+              assets,
+              (asset) =>
+                Effect.gen(function* () {
+                  const bytes = yield* storage.read(asset.object_key, scanner.maxImageBytes);
+
+                  if (
+                    asset.media_type === null ||
+                    asset.checksum === null ||
+                    asset.byte_length !== bytes.byteLength ||
+                    createHash("sha256").update(bytes).digest("hex") !== asset.checksum
+                  ) {
+                    return yield* new ScanInputError({
+                      reason: "A menu photograph could not be verified. Please upload it again.",
+                    });
+                  }
+
+                  return { assetId: asset.id, bytes, mediaType: asset.media_type };
+                }),
+              { concurrency: 2 },
+            );
+
+            const extractor = yield* MenuExtractor;
+
+            // Currency context merges existing scan fields only: the linked
+            // venue (venue_id/venue_name already on the scan row) outranks the
+            // coarse visitor country. The visitor-selected menu city id resolves
+            // server-side: curated presets and `geo:` names via the sync map
+            // (unknown ids are dropped, never trusted as geography), while
+            // `place:` registry ids resolve through the place catalog to a
+            // coarse city display name plus country ISO (unknown/missing records
+            // degrade to null). Preset and `geo:` ids keep today's behavior with
+            // menuCountry unset on this path. No new persistence, no raw GPS or
+            // street addresses, and language is never treated as location.
+            const targetLanguage = menuScanDocumentSchema.shape.targetLanguage.parse(
+              state.scan.target_language,
+            );
+
+            const placeEvidence = yield* resolvePlaceMenuEvidence(
+              location?.menuCityId ?? null,
+              targetLanguage,
+            );
+
+            const currencyContext: CurrencyContext = normalizeCurrencyContext({
+              venueName: state.scan.venue_name,
+              menuCity: placeEvidence.menuCity ?? resolveMenuCityId(location?.menuCityId ?? null),
+              menuCountry: placeEvidence.menuCountry,
+              trustedCountry: location?.trustedCountry ?? null,
+            });
+
+            const extraction = yield* extractor.extract({
+              images,
+              targetLanguage,
+              requestId,
+              currencyContext,
+            });
+
+            const document: MenuScanDocument = {
+              ...extraction,
+              schemaVersion: 1,
+              targetLanguage: menuScanDocumentSchema.shape.targetLanguage.parse(
+                state.scan.target_language,
+              ),
+              pages: assets.map((asset) => ({ assetId: asset.id, pageNumber: asset.page_number })),
+              items: extraction.items.map((item) =>
+                Object.assign({}, item, {
+                  id: randomUUID(),
+                  variants: item.variants.map((variant) =>
+                    Object.assign({}, variant, { id: randomUUID() }),
+                  ),
+                }),
+              ),
+            };
+
+            if (!menuDocumentFitsStorage(document)) {
+              return yield* new InvalidModelOutput({
+                reason: "The extracted menu is too large. Retry with fewer pages.",
+                retryable: false,
+                category: "truncated",
               });
             }
 
-            yield* runQuery("menu/model-revision", (sql) =>
-              insertRevision.run(sql, {
-                session_id: scanId,
-                revision: 1,
-                document,
-                origin: "model",
-                model: scanner.model,
-                user_id: principal.userId,
+            yield* withTransaction(
+              "menu/complete-extraction",
+              Effect.gen(function* () {
+                yield* requireOwnedMenuScan(principal, scanId);
+
+                const complete = yield* runQuery("menu/complete-extraction", (sql) =>
+                  completeExtraction.run(sql, { id: scanId, token: lease }),
+                );
+
+                if (complete === null) {
+                  yield* new ScanConflict({
+                    reason: "The analysis lease expired. Please retry.",
+                  });
+                }
+
+                yield* runQuery("menu/model-revision", (sql) =>
+                  insertRevision.run(sql, {
+                    session_id: scanId,
+                    revision: 1,
+                    document,
+                    origin: "model",
+                    model: scanner.model,
+                    user_id: principal.userId,
+                  }),
+                );
               }),
             );
+
+            return yield* getMenuScan(principal, scanId);
           }),
-        );
+        (held, exit) => {
+          // Success already completed the session; only a failed or interrupted
+          // extraction releases the lease for expiry or retry. Matches
+          // attachMenuPhoto, which also skips cleanup on success. requestId is
+          // in scope: a worker interruption is
+          // observable as this log line, distinct from a provider timeout
+          // failure logged by the extractor itself.
+          if (Exit.isSuccess(exit)) return Effect.void;
 
-        return yield* getMenuScan(principal, scanId);
-      }),
-    (lease, exit) => {
-      // Success already completed the session; only a failed or interrupted
-      // extraction releases the lease for expiry or retry. Matches
-      // attachMenuPhoto, which also skips cleanup on success.
-      if (Exit.isSuccess(exit)) return Effect.void;
+          return Effect.gen(function* () {
+            yield* Effect.logWarning("Menu extraction lease released after failure").pipe(
+              Effect.annotateLogs({ requestId, scanId }),
+            );
 
-      return runQuery("menu/release-extraction", (sql) =>
-        failExtraction.run(sql, { id: scanId, token: lease }),
-      ).pipe(Effect.catch(() => Effect.logWarning("Menu analysis lease release requires expiry")));
-    },
+            yield* runQuery("menu/release-extraction", (sql) =>
+              failExtraction.run(sql, { id: scanId, token: held }),
+            ).pipe(
+              Effect.catch(() => Effect.logWarning("Menu analysis lease release requires expiry")),
+            );
+          });
+        },
+      );
+
+      yield* Effect.forkDetach(
+        Effect.gen(function* () {
+          // Own a fresh scope rather than retaining the request's resource scope.
+          // forkDetach inherits provider/config services and outlives the request.
+          const outcome = yield* Effect.exit(Effect.scoped(runExtraction));
+
+          if (Exit.isFailure(outcome)) {
+            yield* Effect.logError("Menu extraction background run failed").pipe(
+              Effect.annotateLogs({ requestId, scanId }),
+            );
+          }
+        }),
+        { uninterruptible: false },
+      );
+    }),
   );
+
+  // No provider wait in the HTTP request. Fast workers may already have
+  // completed; otherwise the client receives processing and starts polling.
+  return yield* getMenuScan(principal, scanId);
 });
 
 /**

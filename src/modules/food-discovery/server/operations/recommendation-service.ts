@@ -5,6 +5,10 @@ import type {
   MealOccasion,
   RecommendationMood,
 } from "@/modules/food-discovery/recommendation.constants";
+import {
+  buildAgentEligibility,
+  type AgentEligibility,
+} from "@/modules/food-discovery/server/agent/eligibility";
 import type { DishCardImage, DishSummary } from "@/modules/food-discovery/server/domain/dish";
 import { InvalidLocale } from "@/modules/food-discovery/server/domain/errors";
 import { isDbIdString, isLanguageTag } from "@/modules/food-discovery/server/domain/ids";
@@ -1482,7 +1486,23 @@ export const RecommendationServiceLive = Layer.effect(
           }
         }
 
-        const ranking = resolveRankingConfig(serverEnv());
+        // resolveRankingConfig throws on an explicitly set invalid numeric
+        // value (field + reason, never values); map it onto the same loud
+        // misconfigured path as a missing key or bad model shape.
+        let ranking: RankingConfig;
+
+        try {
+          ranking = resolveRankingConfig(serverEnv());
+        } catch (error) {
+          const reason =
+            error instanceof Error ? error.message : "MODEL_* configuration is invalid";
+
+          yield* Effect.logError("Recommendation ranking misconfigured").pipe(
+            Effect.annotateLogs({ backend: "muse", reason }),
+          );
+
+          return yield* new RecommendationMisconfigured({ reason });
+        }
 
         // Member-only Muse: guests always take the deterministic path even
         // when a provider is configured, so unauthenticated traffic can never
@@ -1544,3 +1564,323 @@ export const RecommendationServiceLive = Layer.effect(
     return RecommendationService.of({ recommend });
   }),
 );
+
+/**
+ * Agent-path pool snapshot: everything the orchestrator run needs beyond
+ * provider config. The pool is the already-eligible candidate list in
+ * deterministic SQL order (scope, cuisine filter, and SQL exclusions
+ * applied); eligibility is the frozen snapshot tool executors narrow.
+ */
+export interface AgentPoolSnapshot {
+  readonly pool: ReadonlyArray<RecommendationCandidateRow>;
+  readonly eligibility: AgentEligibility;
+  /** Warnings accumulated before the agent ran (unresolvable exclusions, scope fallbacks). */
+  readonly warnings: ReadonlyArray<string>;
+  readonly servedScope: RecommendationServedScope;
+}
+
+/**
+ * Agent-path pool resolution (additive; the deterministic `recommend` flow
+ * above is untouched). Mirrors its eligibility inputs — locale validation,
+ * the unified exclusion loop with identical warning strings, and the same
+ * scope dispatch (precise nearby bands, city with honest country fallback,
+ * country, worldwide) with the same deterministic ordering — but stops at
+ * the pool instead of ranking, so the agent loop can explore and select.
+ *
+ * Returns null when the pool is empty or eligibility is malformed: the
+ * caller then takes the deterministic path (honest Empty, no model spend)
+ * instead of running the agent on nothing.
+ */
+export const resolveAgentPool = (
+  input: RecommendDishesInput,
+  candidateLimit: number,
+): Effect.Effect<AgentPoolSnapshot | null, RecommendationError, Database | IngredientRepository> =>
+  Effect.gen(function* () {
+    if (!isLanguageTag(input.locale)) {
+      return yield* new InvalidLocale({ locale: input.locale });
+    }
+
+    const ingredients = yield* IngredientRepository;
+
+    const resolveExclusionTerm = (
+      term: string,
+      locale: string,
+    ): Effect.Effect<
+      { readonly id: bigint; readonly name: string } | null,
+      DatabaseError,
+      Database
+    > =>
+      Effect.gen(function* () {
+        const key = normalizeSearchKey(term);
+
+        if (key.length === 0) {
+          return null;
+        }
+
+        const primary = yield* ingredients.resolveByKey(key, locale, 1);
+        const direct = primary[0];
+
+        if (direct !== undefined) {
+          return { id: direct.ingredientId, name: direct.name };
+        }
+
+        if (locale === "en") {
+          return null;
+        }
+
+        const fallback = yield* ingredients.resolveByKey(key, "en", 1);
+        const resolved = fallback[0];
+
+        return resolved === undefined ? null : { id: resolved.ingredientId, name: resolved.name };
+      });
+
+    const warnings: Array<string> = [];
+    const excluded = new Set<bigint>();
+    const canonicalExclusions: Array<string> = [];
+
+    for (const term of input.excludedIngredients) {
+      const resolved = yield* resolveExclusionTerm(term, input.locale);
+
+      if (resolved === null) {
+        warnings.push(
+          `Could not match exclusion "${term}" to a known ingredient; it was not applied as a filter.`,
+        );
+      } else {
+        excluded.add(resolved.id);
+
+        if (!canonicalExclusions.includes(resolved.name)) {
+          canonicalExclusions.push(resolved.name);
+        }
+      }
+    }
+
+    const toSnapshot = (
+      rows: ReadonlyArray<RecommendationCandidateRow>,
+      scopeWarnings: ReadonlyArray<string>,
+      servedScope: RecommendationServedScope,
+    ): AgentPoolSnapshot | null => {
+      const eligibility = buildAgentEligibility({
+        scope: servedScope,
+        cuisine: input.cuisine,
+        excludedIds: [...excluded].map((id) => id.toString()),
+        canonicalExclusions,
+        locale: input.locale,
+        meal: input.meal,
+        regionLabel: coarseRegionOf(input),
+      });
+
+      if (eligibility === null) {
+        return null;
+      }
+
+      return { pool: rows, eligibility, warnings: scopeWarnings, servedScope };
+    };
+
+    const scope = resolveLocationScope(input);
+
+    return yield* LocationScope.$match(scope, {
+      Precise: (precise) =>
+        Effect.gen(function* () {
+          const nearby = yield* findNearbyDishCandidates({
+            cuisine: input.cuisine ?? null,
+            excludedIds: [...excluded],
+            latitude: precise.latitude,
+            limit: candidateLimit,
+            locale: input.locale,
+            longitude: precise.longitude,
+            meal: input.meal,
+          });
+
+          if (nearby.rows.length === 0) {
+            return null;
+          }
+
+          const sortedAll = rankPreciseDeterministic(nearby.rows, input);
+
+          const scopedWarnings =
+            precise.accuracy !== null && precise.accuracy > POOR_ACCURACY_M
+              ? [
+                  ...warnings,
+                  `Location accuracy is coarse (±${Math.round(precise.accuracy).toString()} m); nearby results cover a wider area.`,
+                ]
+              : warnings;
+
+          return toSnapshot(sortedAll, scopedWarnings, "nearby");
+        }),
+      City: (city) =>
+        Effect.gen(function* () {
+          if (!isDbIdString(city.placeId)) {
+            return null;
+          }
+
+          const candidates: ReadonlyArray<RecommendationCandidateRow> = yield* runQuery(
+            "dish/recommendation-candidates-place",
+            (sql) =>
+              dishRecommendationCandidatesPlace.run(sql, {
+                place_id: BigInt(city.placeId),
+                cuisine: input.cuisine ?? null,
+                excluded_ids: [...excluded],
+                locale: input.locale,
+                meal: input.meal,
+                limit: candidateLimit,
+              }),
+          );
+
+          if (candidates.length > 0) {
+            return toSnapshot(rankAllDeterministic(candidates, input), warnings, "city");
+          }
+
+          if (city.countryHint === null) {
+            return null;
+          }
+
+          const countryInput = {
+            ...input,
+            location: { kind: "destination", country: city.countryHint } as const,
+          };
+
+          const countryCandidates: ReadonlyArray<RecommendationCandidateRow> = yield* runQuery(
+            "dish/recommendation-candidates",
+            (sql) =>
+              dishRecommendationCandidates.run(sql, {
+                cuisine: input.cuisine ?? null,
+                country: city.countryHint,
+                excluded_ids: [...excluded],
+                locale: input.locale,
+                meal: input.meal,
+                limit: candidateLimit,
+              }),
+          );
+
+          if (countryCandidates.length === 0) {
+            return null;
+          }
+
+          const countryName = yield* countryDisplayName(city.countryHint, input.locale);
+
+          return toSnapshot(
+            rankAllDeterministic(countryCandidates, countryInput),
+            [
+              ...warnings,
+              `No dishes from this city yet — showing dishes from across ${countryName} instead.`,
+            ],
+            "country",
+          );
+        }),
+      Country: () =>
+        Effect.gen(function* () {
+          const candidates: ReadonlyArray<RecommendationCandidateRow> = yield* runQuery(
+            "dish/recommendation-candidates",
+            (sql) =>
+              dishRecommendationCandidates.run(sql, {
+                cuisine: input.cuisine ?? null,
+                country: scopeCountryOf(input),
+                excluded_ids: [...excluded],
+                locale: input.locale,
+                meal: input.meal,
+                limit: candidateLimit,
+              }),
+          );
+
+          if (candidates.length === 0) {
+            return null;
+          }
+
+          return toSnapshot(rankAllDeterministic(candidates, input), warnings, "country");
+        }),
+      Worldwide: () =>
+        Effect.gen(function* () {
+          const candidates: ReadonlyArray<RecommendationCandidateRow> = yield* runQuery(
+            "dish/recommendation-candidates",
+            (sql) =>
+              dishRecommendationCandidates.run(sql, {
+                cuisine: input.cuisine ?? null,
+                country: scopeCountryOf(input),
+                excluded_ids: [...excluded],
+                locale: input.locale,
+                meal: input.meal,
+                limit: candidateLimit,
+              }),
+          );
+
+          if (candidates.length === 0) {
+            return null;
+          }
+
+          return toSnapshot(rankAllDeterministic(candidates, input), warnings, "worldwide");
+        }),
+    });
+  });
+
+const rowsForIds = (
+  pool: ReadonlyArray<RecommendationCandidateRow>,
+  ids: ReadonlyArray<string>,
+): Array<RecommendationCandidateRow> => {
+  const byId = new Map(pool.map((candidate) => [candidate.id, candidate] as const));
+  const rows: Array<RecommendationCandidateRow> = [];
+
+  for (const id of ids) {
+    const row = byId.get(id);
+
+    if (row !== undefined) {
+      rows.push(row);
+    }
+  }
+
+  return rows;
+};
+
+/**
+ * Hydrate an agent Selected outcome into the shared wire outcome shape:
+ * same bounded card enrichment as the deterministic path, ID-keyed reason
+ * association (never positional), LiveMuse provenance, snapshot warnings.
+ */
+export const hydrateAgentSelected = (
+  snapshot: AgentPoolSnapshot,
+  ids: ReadonlyArray<string>,
+  reasons: ReadonlyArray<string>,
+): Effect.Effect<RecommendationOutcome, DatabaseError, Database> =>
+  Effect.gen(function* () {
+    const rankedRows = rowsForIds(snapshot.pool, ids);
+
+    const dishes = yield* enrichRows(
+      rankedRows,
+      rankedRows.map((row) => toSummary(row)),
+      snapshot.eligibility.locale,
+    );
+
+    return RecommendationOutcome.ReadyMuse({
+      dishes: zipReasons(dishes, ids, reasons),
+      warnings: [...snapshot.warnings],
+      ranking: RankingProvenance.LiveMuse(),
+      servedScope: snapshot.servedScope,
+    });
+  });
+
+/**
+ * Hydrate an agent DeterministicFallback outcome: same enrichment over the
+ * fallback ids, snapshot warnings plus the orchestrator's honest warning,
+ * and degraded provenance carrying the mapped cause.
+ */
+export const hydrateAgentFallback = (
+  snapshot: AgentPoolSnapshot,
+  ids: ReadonlyArray<string>,
+  cause: DegradedCause,
+  warning: string,
+): Effect.Effect<RecommendationOutcome, DatabaseError, Database> =>
+  Effect.gen(function* () {
+    const rankedRows = rowsForIds(snapshot.pool, ids);
+
+    const dishes = yield* enrichRows(
+      rankedRows,
+      rankedRows.map((row) => toSummary(row)),
+      snapshot.eligibility.locale,
+    );
+
+    return RecommendationOutcome.ReadyDeterministic({
+      dishes,
+      warnings: [...snapshot.warnings, warning],
+      ranking: RankingProvenance.DegradedMuse({ cause }),
+      servedScope: snapshot.servedScope,
+    });
+  });

@@ -115,7 +115,7 @@ describe("private Muse scanner configuration", () => {
     ).toThrow("configuration is invalid");
   });
 
-  test("invalid enablement, endpoint, retries, and limits fail without exposing values", () => {
+  test("invalid enablement, endpoint, and non-positive budgets fail without exposing values", () => {
     expect(() => resolveMenuScanConfig({ ...serverEnv(), MENU_SCANNER_ENABLED: "yes" })).toThrow(
       "true or false",
     );
@@ -124,10 +124,6 @@ describe("private Muse scanner configuration", () => {
       { MODEL_BASE_URL: "http://api.meta.ai/v1" },
       { MODEL_BASE_URL: "https://private:credential@example.invalid/v1" },
       { MENU_SCAN_TIMEOUT_MS: "0" },
-      { MENU_SCAN_RETRIES: "2" },
-      { MENU_SCAN_MAX_IMAGES: "7" },
-      { MENU_SCAN_MAX_IMAGE_BYTES: "8388609" },
-      { MENU_SCAN_MAX_RESPONSE_BYTES: "9000000" },
       { MENU_SCAN_MAX_COMPLETION_TOKENS: "0" },
     ];
 

@@ -98,6 +98,7 @@ interface MenuExtractionFailureAnnotations {
   readonly failure: string;
   readonly category: MuseFailureCategory;
   readonly retryable: boolean;
+  readonly timeoutMs: number;
   status?: number | undefined;
   finish?: string | undefined;
   issues?: string | undefined;
@@ -109,6 +110,12 @@ interface MenuExtractionFailureAnnotations {
 // every node is strictObject/enum/nullable/scalar with additionalProperties
 // false, so strict mode accepts the document. Do not weaken Zod to accept
 // arbitrary model output.
+// Combined inline-image payload bound (24 MiB raw bytes, ~32 MiB base64
+// JSON). Genuine provider transport limit, documented not configured:
+// the extraction endpoint accepts images inline only, so a larger combined
+// payload is rejected upstream no matter what the operator sets.
+export const MENU_SCAN_COMBINED_IMAGE_BYTES = 25165824;
+
 export const MENU_EXTRACTION_RESPONSE_FORMAT = {
   type: "json_schema",
   json_schema: {
@@ -370,7 +377,10 @@ export function makeMuseMenuExtractor(
       function* (input: MenuExtractionInput) {
         if (input.images.length === 0 || input.images.length > config.maxImages) {
           return yield* new ExtractionUnavailable({
-            reason: "Choose between one and six menu photographs.",
+            reason:
+              config.maxImages === 1
+                ? "Choose one menu photograph."
+                : `Choose between one and ${config.maxImages} menu photographs.`,
             retryable: false,
             category: "unavailable",
           });
@@ -398,8 +408,12 @@ export function makeMuseMenuExtractor(
           ids.add(image.assetId);
         }
 
-        // Keep the base64 JSON request comfortably below the provider inline limit.
-        if (totalBytes > 25165824) {
+        // Combined base64 JSON payload bound. The provider accepts images
+        // inline only; past this size the request is rejected upstream
+        // regardless of configuration, so this is a genuine provider
+        // transport limit, not an operator ceiling: MENU_SCAN_MAX_IMAGE_BYTES
+        // still flows through exactly as configured per image.
+        if (totalBytes > MENU_SCAN_COMBINED_IMAGE_BYTES) {
           return yield* new ExtractionUnavailable({
             reason: "The menu photographs exceed the combined image limit.",
             retryable: false,
@@ -530,6 +544,7 @@ export function makeMuseMenuExtractor(
                 model: config.model,
                 category: failure.category,
                 waitMs: backoffMs,
+                timeoutMs: config.timeoutMs,
               }),
             );
             yield* Effect.sleep(Duration.millis(backoffMs));
@@ -546,8 +561,10 @@ export function makeMuseMenuExtractor(
           // This deadline covers fetch, body consumption, backoff and the retry.
           // Interruption reaches fetch through tryPromise's AbortSignal; the
           // timed-out source is interrupted before the fallback runs.
-          // Timeout budget: 45s model max < 60s server operation < 65s browser
-          // extraction. Keep coordinated; do not raise limits.
+          // Timeout chain (all derived, no fixed ceilings): this provider
+          // budget is exactly MENU_SCAN_TIMEOUT_MS; the HTTP transport never
+          // bounds extraction (async accept + status polling); the browser
+          // polls the scan view until the document lands or the scan fails.
           (operation) =>
             Effect.timeoutOrElse(operation, {
               duration: Duration.millis(config.timeoutMs),
@@ -571,6 +588,7 @@ export function makeMuseMenuExtractor(
           Effect.annotateLogs({
             requestId: input.requestId,
             model: config.model,
+            timeoutMs: config.timeoutMs,
             pageCount: input.images.length,
             itemCount: result.items.length,
             elapsedMs,
@@ -589,6 +607,7 @@ export function makeMuseMenuExtractor(
                 failure: failure._tag,
                 category: failure.category,
                 retryable: failure.retryable,
+                timeoutMs: config.timeoutMs,
               };
 
               if (Predicate.isTagged(failure, "ExtractionUnavailable")) {

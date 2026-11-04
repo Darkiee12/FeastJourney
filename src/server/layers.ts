@@ -94,6 +94,12 @@ export const AppLive = Layer.mergeAll(
   RestaurantPhotoFullLive,
 );
 
+// Stream agent composition: handleRecommendStream's agentPipeline runs on
+// AppLive's ambient Database, IngredientRepository, DishRelationsRepository,
+// and RecommendationService. Its AgentModelClient layer is built per request
+// from the resolved Muse config (never a singleton holding per-user state)
+// and CurrentActor stays per-request via withActor at the transport edge.
+
 export type AppServices =
   | MenuExtractor
   | PrivateMenuStorage

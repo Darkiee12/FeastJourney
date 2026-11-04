@@ -13,6 +13,7 @@ import {
 } from "@/modules/restaurant-discovery/server/operations/admin";
 import {
   loadMenuScanDocument,
+  resolveUploadCaps,
   ScanConflict,
   ScanInputError,
   ScanNotFound,
@@ -118,7 +119,7 @@ export const readContributionAsset = Effect.fn("menu.readContributionAsset")(fun
 
   const storage = yield* PrivateMenuStorage;
 
-  return yield* storage.read(asset.object_key);
+  return yield* storage.read(asset.object_key, resolveUploadCaps().maxImageBytes);
 });
 
 export const reviewMenuContribution = Effect.fn("menu.reviewContribution")(function* (

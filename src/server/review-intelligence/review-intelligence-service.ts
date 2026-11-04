@@ -581,7 +581,22 @@ export const ReviewIntelligenceLive: Layer.Layer<
   ReviewIntelligence,
   Effect.gen(function* () {
     const client = yield* ReviewIntelligenceClient;
-    const config = resolveReviewIntelligenceConfig(process.env);
+
+    let config: ReviewIntelligenceConfig;
+
+    try {
+      config = resolveReviewIntelligenceConfig(process.env);
+    } catch (error) {
+      // Invalid operator configuration fails loudly in server logs (field
+      // + reason, never values) and fail-closed at the transport.
+      yield* Effect.logError("Review intelligence configuration invalid").pipe(
+        Effect.annotateLogs({
+          reason: error instanceof Error ? error.message : "unknown",
+        }),
+      );
+
+      throw error;
+    }
 
     return makeReviewIntelligence({
       client,

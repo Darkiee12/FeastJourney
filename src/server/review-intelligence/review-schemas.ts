@@ -42,10 +42,6 @@ export const REVIEW_INTELLIGENCE_ENABLED_VALUE = "true";
 
 export const REVIEW_INTELLIGENCE_DEFAULT_TIMEOUT_MS = 20000;
 
-export const REVIEW_INTELLIGENCE_MIN_TIMEOUT_MS = 5000;
-
-export const REVIEW_INTELLIGENCE_MAX_TIMEOUT_MS = 60000;
-
 export const REVIEW_INTELLIGENCE_MAX_RESPONSE_BYTES = 24 * 1024;
 
 /** Minimum meaningful published reviews required before summarizing. */
@@ -216,21 +212,26 @@ export interface ReviewIntelligenceConfig {
   readonly maxResponseBytes: number;
 }
 
-const parseBoundedTimeoutMs = (raw: string | undefined): number => {
+/**
+ * Operator-owned timeout: a valid explicitly configured value flows through
+ * exactly as set; the default applies only when unset. No upper bound —
+ * upstream provider limits surface as provider failures. An explicitly set
+ * non-positive-integer fails loudly naming field + reason.
+ */
+const parseOperatorTimeoutMs = (raw: string | undefined): number => {
   if (raw === undefined) {
     return REVIEW_INTELLIGENCE_DEFAULT_TIMEOUT_MS;
   }
 
   const parsed = Number.parseInt(raw, 10);
 
-  if (Number.isNaN(parsed)) {
-    return REVIEW_INTELLIGENCE_DEFAULT_TIMEOUT_MS;
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(
+      `REVIEW_INTELLIGENCE_TIMEOUT_MS must be a positive safe integer of milliseconds or unset (unset uses ${REVIEW_INTELLIGENCE_DEFAULT_TIMEOUT_MS}).`,
+    );
   }
 
-  return Math.min(
-    Math.max(Math.floor(parsed), REVIEW_INTELLIGENCE_MIN_TIMEOUT_MS),
-    REVIEW_INTELLIGENCE_MAX_TIMEOUT_MS,
-  );
+  return parsed;
 };
 
 /**
@@ -248,6 +249,6 @@ export const resolveReviewIntelligenceConfig = (
   apiKey: env["MODEL_API_KEY"] ?? "",
   baseUrl: env["MODEL_BASE_URL"] ?? DEFAULT_MODEL_BASE_URL,
   modelId: REVIEW_INTELLIGENCE_MODEL_ID,
-  timeoutMs: parseBoundedTimeoutMs(env["REVIEW_INTELLIGENCE_TIMEOUT_MS"]),
+  timeoutMs: parseOperatorTimeoutMs(env["REVIEW_INTELLIGENCE_TIMEOUT_MS"]),
   maxResponseBytes: REVIEW_INTELLIGENCE_MAX_RESPONSE_BYTES,
 });

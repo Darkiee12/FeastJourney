@@ -35,7 +35,7 @@ import {
   type VenueDetailToolInput,
   type VenueSearchToolInput,
 } from "@/server/muse-copilot/copilot-schemas";
-import { resolveResearchConfig } from "@/server/web-research/research-config";
+import { resolveResearchConfig, type ResearchConfig } from "@/server/web-research/research-config";
 import { WebResearch } from "@/server/web-research/research-service";
 import { ResearchOutcome } from "@/server/web-research/research-types";
 import { isAmount, isCurrency } from "@/shared/money";
@@ -59,19 +59,31 @@ export type CopilotScanEnv = Database;
 
 export type CopilotResearchEnv = WebResearch;
 
-const TOOL_TIMEOUT_MS = 15000;
+/**
+ * Per-tool backstop: one catalog/tool call never runs longer than this.
+ * Internal orchestration budget (not an operator ceiling); the research
+ * tool derives a larger bound from WEB_RESEARCH_TIMEOUT_MS so an explicit
+ * provider budget is never defeated by this default.
+ */
+export const TOOL_TIMEOUT_MS = 15000;
+
+/** Cache/service overhead margin (ms) added to the operator's research budget for the tool backstop. */
+const RESEARCH_TOOL_OVERHEAD_MS = 10000;
 
 const withToolTimeout = <A, R>(
   effect: Effect.Effect<A, never, R>,
   operation: string,
+  timeoutMs: number = TOOL_TIMEOUT_MS,
 ): Effect.Effect<A | null, never, R> =>
   Effect.raceFirst(
     Effect.map(effect, (value): A | null => value),
-    Effect.succeed<A | null>(null).pipe(Effect.delay(Duration.millis(TOOL_TIMEOUT_MS))),
+    Effect.succeed<A | null>(null).pipe(Effect.delay(Duration.millis(timeoutMs))),
   ).pipe(
     Effect.tap((value) =>
       value === null
-        ? Effect.logWarning("Copilot tool timed out").pipe(Effect.annotateLogs({ operation }))
+        ? Effect.logWarning("Copilot tool timed out").pipe(
+            Effect.annotateLogs({ operation, timeoutMs }),
+          )
         : Effect.void,
     ),
   );
@@ -522,7 +534,22 @@ export const researchTool = Effect.fn("copilot.tool.research")(function* (
     });
   }
 
-  const config = resolveResearchConfig(process.env);
+  let config: ResearchConfig;
+
+  try {
+    config = resolveResearchConfig(process.env);
+  } catch (error) {
+    // Invalid operator configuration fails loudly in server logs (field +
+    // reason, never values) while the chat keeps its deterministic reply.
+    yield* Effect.logError("Copilot research configuration invalid").pipe(
+      Effect.annotateLogs({
+        operation: "research",
+        reason: error instanceof Error ? error.message : "unknown",
+      }),
+    );
+
+    return ResearchLookup.ResearchUnavailable({ reason: "Web research is misconfigured." });
+  }
 
   if (!config.enabled) {
     yield* Effect.logInfo("Copilot research skipped").pipe(
@@ -575,7 +602,15 @@ export const researchTool = Effect.fn("copilot.tool.research")(function* (
     },
   );
 
-  const result = yield* withToolTimeout(program, "research");
+  // The research tool wraps a provider call whose budget is the operator's
+  // WEB_RESEARCH_TIMEOUT_MS: the tool backstop derives from it (plus cache
+  // and service overhead) so it can never defeat an explicit value, while
+  // still bounding a hung tool fiber.
+  const result = yield* withToolTimeout(
+    program,
+    "research",
+    config.timeoutMs + RESEARCH_TOOL_OVERHEAD_MS,
+  );
 
   if (result === null) {
     return ResearchLookup.ResearchUnavailable({ reason: "Web research timed out. Please retry." });

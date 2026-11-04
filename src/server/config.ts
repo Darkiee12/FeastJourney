@@ -21,6 +21,19 @@ export interface AppConfig {
   // Optional so existing AppConfig literals (incl. tests) keep compiling;
   // Config.withDefault below is the real source of this value.
   readonly recommendTimeoutMs?: number | undefined;
+  // Agentic recommendation mode (workstream B, additive only): flag plus
+  // loop budgets. Optional for the same reason; withDefault supplies the
+  // documented values at runtime. Effect Config.Int rejects trailing junk
+  // ("20000oops" fails); unset uses the documented fallback, explicit
+  // values flow through exactly as configured with no silent clamp.
+  readonly recommendAgentEnabled?: boolean | undefined;
+  readonly recommendAgentMaxRounds?: number | undefined;
+  readonly recommendAgentMaxToolCalls?: number | undefined;
+  readonly recommendAgentDetailsPerCall?: number | undefined;
+  readonly recommendAgentCandidatePoolCap?: number | undefined;
+  readonly recommendAgentFinalLimit?: number | undefined;
+  readonly recommendAgentTimeoutMs?: number | undefined;
+  readonly recommendAgentDeadlineMs?: number | undefined;
 }
 
 const csv = (raw: string): ReadonlyArray<string> =>
@@ -51,4 +64,25 @@ export const appConfig: Config.Config<AppConfig> = Config.unwrap({
   // or the provider call can never complete. Default 120s per operator
   // choice; local dev only — tighten for production.
   recommendTimeoutMs: Config.Int("RECOMMEND_TIMEOUT_MS").pipe(Config.withDefault(120000)),
+  // Agentic loop budgets. Defaults mirror the documented agent bounds
+  // (3 rounds, 8 tool calls, 10 details per call, 60 candidate cap, 10
+  // final; 20s per provider call, 90s total orchestration) so the agent can
+  // never outlive the 120s recommend operation budget above. Unset uses
+  // these fallbacks; explicit values flow through exactly as configured.
+  recommendAgentEnabled: Config.Boolean("RECOMMEND_AGENT_ENABLED").pipe(Config.withDefault(false)),
+  recommendAgentMaxRounds: Config.Int("RECOMMEND_AGENT_MAX_ROUNDS").pipe(Config.withDefault(3)),
+  recommendAgentMaxToolCalls: Config.Int("RECOMMEND_AGENT_MAX_TOOL_CALLS").pipe(
+    Config.withDefault(8),
+  ),
+  recommendAgentDetailsPerCall: Config.Int("RECOMMEND_AGENT_DETAILS_PER_CALL").pipe(
+    Config.withDefault(10),
+  ),
+  recommendAgentCandidatePoolCap: Config.Int("RECOMMEND_AGENT_CANDIDATE_POOL_CAP").pipe(
+    Config.withDefault(60),
+  ),
+  recommendAgentFinalLimit: Config.Int("RECOMMEND_AGENT_FINAL_LIMIT").pipe(Config.withDefault(10)),
+  recommendAgentTimeoutMs: Config.Int("MODEL_AGENT_TIMEOUT_MS").pipe(Config.withDefault(20000)),
+  recommendAgentDeadlineMs: Config.Int("RECOMMEND_AGENT_DEADLINE_MS").pipe(
+    Config.withDefault(90000),
+  ),
 });

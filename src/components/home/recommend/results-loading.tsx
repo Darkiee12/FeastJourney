@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 
 import { DishCarouselCompactSkeleton, DishCarouselSkeleton } from "@/components/dish/dish-carousel";
+import type { AgentPresenceInput } from "@/components/home/recommend/agent-progress";
+import { agentPresenceStatusText, MusePresence } from "@/components/home/recommend/muse-presence";
 import type { Messages } from "@/shared/i18n";
 
 /**
@@ -51,7 +53,20 @@ export interface ResultsLoadingSkeletonProps {
    * loading state reserves exactly the successful compact result's space.
    */
   readonly compact?: boolean | undefined;
+  /**
+   * Live agentic progress for the Muse presence. Absent (or not live)
+   * renders the long-standing neutral skeleton: pulse placeholders with
+   * the single sr-only `recLoading` line and zero Muse branding, so
+   * deterministic, degraded, guest, and cached states never claim curation.
+   * The overlay is absolutely positioned over the skeleton media frame, so
+   * arrival never shifts layout.
+   */
+  readonly presence?: AgentPresenceInput | undefined;
 }
+
+/** Presence visibility: only a live run on an active backend stage shows Muse copy. */
+const presenceVisibleFor = (presence: AgentPresenceInput | undefined): boolean =>
+  presence !== undefined && presence.live && presence.stage !== null;
 
 /**
  * Visibility for the rail skeleton cards: the first three always show, the
@@ -103,13 +118,19 @@ function RailSkeletonCard({ visibility }: { readonly visibility: string }): Reac
  * - "More recommendations" heading (real text, stable across the swap)
  *   plus 3–5 rail thumbnail placeholders matching real card geometry;
  * - no mode/warning content: nothing renders an AI or deterministic label
- *   before the backend responds. No visible status line: the pulse
- *   skeletons carry the pending state visually, so the generic
- *   `recLoading` copy appears exactly once (sr-only).
+ *   before the backend responds. Without live progress there is no visible
+ *   status line: the pulse skeletons carry the pending state visually, so
+ *   the generic `recLoading` copy appears exactly once (sr-only). With a
+ *   live agentic stream, one Muse presence overlays the featured media
+ *   frame (absolutely positioned — zero layout shift) with the title and
+ *   the current backend stage's line, and the sr-only line switches to the
+ *   same text so the caller's live region announces each genuine stage
+ *   exactly once.
  *
  * Accessibility: the composition adds no live region, status, alert, or
  * interactive element of its own. Everything decorative is `aria-hidden`;
- * the single `sr-only` status line reuses `recLoading` so the caller's
+ * the single `sr-only` status line carries `recLoading` while neutral and
+ * the live title-plus-stage text while streaming, so the caller's
  * `aria-live="polite" aria-busy` wrapper (quiz-flow `renderOutcome`)
  * announces loading exactly once. All motion is the shared subtle
  * `animate-pulse` with `motion-reduce:animate-none` — one speed, off under
@@ -119,23 +140,44 @@ export function ResultsLoadingSkeleton({
   compact = false,
   copy,
   dishCount,
+  presence,
 }: ResultsLoadingSkeletonProps): ReactNode {
   const count = clampResultsLoadingCount(dishCount);
   const cards = Array.from({ length: count }, (_, index) => index);
 
+  const showPresence = presenceVisibleFor(presence);
+
+  const statusText = agentPresenceStatusText(
+    copy,
+    presence?.stage ?? null,
+    presence?.live ?? false,
+  );
+
   if (compact) {
     return (
-      <div>
-        <p className="sr-only">{copy.recLoading}</p>
+      <div className="relative">
+        <p className="sr-only">{statusText}</p>
         <DishCarouselCompactSkeleton />
+        {showPresence ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-3">
+            <MusePresence compact copy={copy} live stage={presence?.stage ?? null} />
+          </div>
+        ) : null}
       </div>
     );
   }
 
   return (
-    <div>
-      <p className="sr-only">{copy.recLoading}</p>
-      <DishCarouselSkeleton />
+    <div className="relative">
+      <p className="sr-only">{statusText}</p>
+      <div className="relative">
+        <DishCarouselSkeleton />
+        {showPresence ? (
+          <div className="pointer-events-none absolute inset-x-0 top-0 flex h-[var(--dish-feature-media-mobile,clamp(180px,48vw,240px))] items-center justify-center p-4 md:right-auto md:bottom-0 md:h-auto md:w-[45%]">
+            <MusePresence copy={copy} live stage={presence?.stage ?? null} />
+          </div>
+        ) : null}
+      </div>
       <div aria-hidden="true" className="mt-4 flex flex-wrap items-center gap-3">
         <div className="h-11 w-11 animate-pulse rounded-full bg-border-soft motion-reduce:animate-none" />
         <div className="h-11 w-11 animate-pulse rounded-full bg-border-soft motion-reduce:animate-none" />

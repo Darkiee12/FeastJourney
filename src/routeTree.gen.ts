@@ -57,6 +57,7 @@ import { Route as ApiV1DishesIdRouteImport } from './routes/api/v1/dishes.$id'
 import { Route as ApiV1IngredientsIdRouteImport } from './routes/api/v1/ingredients.$id'
 import { Route as ApiV1MenuPagesPageIdRouteImport } from './routes/api/v1/menu-pages.$pageId'
 import { Route as ApiV1PlacesIdRouteImport } from './routes/api/v1/places.$id'
+import { Route as ApiV1RecommendationsStreamRouteImport } from './routes/api/v1/recommendations.stream'
 import { Route as ApiV1AdminDishesIdRouteImport } from './routes/api/v1/admin.dishes.$id'
 import { Route as ApiV1AdminImportsApplyRouteImport } from './routes/api/v1/admin.imports.apply'
 import { Route as ApiV1AdminImportsValidateRouteImport } from './routes/api/v1/admin.imports.validate'
@@ -314,6 +315,12 @@ const ApiV1PlacesIdRoute = ApiV1PlacesIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => ApiV1PlacesRoute,
 } as any)
+const ApiV1RecommendationsStreamRoute =
+  ApiV1RecommendationsStreamRouteImport.update({
+    id: '/api/v1/recommendations/stream',
+    path: '/api/v1/recommendations/stream',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiV1AdminDishesIdRoute = ApiV1AdminDishesIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -454,6 +461,7 @@ export interface FileRoutesByFullPath {
   '/api/v1/ingredients/$id': typeof ApiV1IngredientsIdRoute
   '/api/v1/menu-pages/$pageId': typeof ApiV1MenuPagesPageIdRoute
   '/api/v1/places/$id': typeof ApiV1PlacesIdRouteWithChildren
+  '/api/v1/recommendations/stream': typeof ApiV1RecommendationsStreamRoute
   '/api/v1/admin/dishes/$id': typeof ApiV1AdminDishesIdRouteWithChildren
   '/api/v1/admin/imports/apply': typeof ApiV1AdminImportsApplyRoute
   '/api/v1/admin/imports/validate': typeof ApiV1AdminImportsValidateRoute
@@ -517,6 +525,7 @@ export interface FileRoutesByTo {
   '/api/v1/ingredients/$id': typeof ApiV1IngredientsIdRoute
   '/api/v1/menu-pages/$pageId': typeof ApiV1MenuPagesPageIdRoute
   '/api/v1/places/$id': typeof ApiV1PlacesIdRouteWithChildren
+  '/api/v1/recommendations/stream': typeof ApiV1RecommendationsStreamRoute
   '/api/v1/admin/dishes/$id': typeof ApiV1AdminDishesIdRouteWithChildren
   '/api/v1/admin/imports/apply': typeof ApiV1AdminImportsApplyRoute
   '/api/v1/admin/imports/validate': typeof ApiV1AdminImportsValidateRoute
@@ -584,6 +593,7 @@ export interface FileRoutesById {
   '/api/v1/ingredients/$id': typeof ApiV1IngredientsIdRoute
   '/api/v1/menu-pages/$pageId': typeof ApiV1MenuPagesPageIdRoute
   '/api/v1/places/$id': typeof ApiV1PlacesIdRouteWithChildren
+  '/api/v1/recommendations/stream': typeof ApiV1RecommendationsStreamRoute
   '/api/v1/admin/dishes/$id': typeof ApiV1AdminDishesIdRouteWithChildren
   '/api/v1/admin/imports/apply': typeof ApiV1AdminImportsApplyRoute
   '/api/v1/admin/imports/validate': typeof ApiV1AdminImportsValidateRoute
@@ -652,6 +662,7 @@ export interface FileRouteTypes {
     | '/api/v1/ingredients/$id'
     | '/api/v1/menu-pages/$pageId'
     | '/api/v1/places/$id'
+    | '/api/v1/recommendations/stream'
     | '/api/v1/admin/dishes/$id'
     | '/api/v1/admin/imports/apply'
     | '/api/v1/admin/imports/validate'
@@ -715,6 +726,7 @@ export interface FileRouteTypes {
     | '/api/v1/ingredients/$id'
     | '/api/v1/menu-pages/$pageId'
     | '/api/v1/places/$id'
+    | '/api/v1/recommendations/stream'
     | '/api/v1/admin/dishes/$id'
     | '/api/v1/admin/imports/apply'
     | '/api/v1/admin/imports/validate'
@@ -781,6 +793,7 @@ export interface FileRouteTypes {
     | '/api/v1/ingredients/$id'
     | '/api/v1/menu-pages/$pageId'
     | '/api/v1/places/$id'
+    | '/api/v1/recommendations/stream'
     | '/api/v1/admin/dishes/$id'
     | '/api/v1/admin/imports/apply'
     | '/api/v1/admin/imports/validate'
@@ -827,6 +840,7 @@ export interface RootRouteChildren {
   ApiV1AdminDishesRoute: typeof ApiV1AdminDishesRouteWithChildren
   ApiV1AdminReviewQueueRoute: typeof ApiV1AdminReviewQueueRoute
   ApiV1MenuPagesPageIdRoute: typeof ApiV1MenuPagesPageIdRoute
+  ApiV1RecommendationsStreamRoute: typeof ApiV1RecommendationsStreamRoute
   ApiV1AdminImportsApplyRoute: typeof ApiV1AdminImportsApplyRoute
   ApiV1AdminImportsValidateRoute: typeof ApiV1AdminImportsValidateRoute
   ApiV1DishImagesMediaIdVersionWidthRoute: typeof ApiV1DishImagesMediaIdVersionWidthRoute
@@ -1171,6 +1185,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1PlacesIdRouteImport
       parentRoute: typeof ApiV1PlacesRoute
     }
+    '/api/v1/recommendations/stream': {
+      id: '/api/v1/recommendations/stream'
+      path: '/api/v1/recommendations/stream'
+      fullPath: '/api/v1/recommendations/stream'
+      preLoaderRoute: typeof ApiV1RecommendationsStreamRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/v1/admin/dishes/$id': {
       id: '/api/v1/admin/dishes/$id'
       path: '/$id'
@@ -1504,6 +1525,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiV1AdminDishesRoute: ApiV1AdminDishesRouteWithChildren,
   ApiV1AdminReviewQueueRoute: ApiV1AdminReviewQueueRoute,
   ApiV1MenuPagesPageIdRoute: ApiV1MenuPagesPageIdRoute,
+  ApiV1RecommendationsStreamRoute: ApiV1RecommendationsStreamRoute,
   ApiV1AdminImportsApplyRoute: ApiV1AdminImportsApplyRoute,
   ApiV1AdminImportsValidateRoute: ApiV1AdminImportsValidateRoute,
   ApiV1DishImagesMediaIdVersionWidthRoute:

@@ -12,16 +12,10 @@ import { RESEARCH_MODEL_ID } from "@/server/integrations/meta-responses";
 export const WEB_RESEARCH_ENABLED_VALUE = "true";
 
 export const RESEARCH_DEFAULT_TIMEOUT_MS = 20000;
-export const RESEARCH_MIN_TIMEOUT_MS = 5000;
-export const RESEARCH_MAX_TIMEOUT_MS = 60000;
 
 export const RESEARCH_DEFAULT_MAX_SOURCES = 6;
-export const RESEARCH_MIN_MAX_SOURCES = 1;
-export const RESEARCH_MAX_MAX_SOURCES = 10;
 
 export const RESEARCH_DEFAULT_MAX_RESULTS = 5;
-export const RESEARCH_MIN_MAX_RESULTS = 1;
-export const RESEARCH_MAX_MAX_RESULTS = 8;
 
 export const RESEARCH_DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 export const RESEARCH_DEFAULT_NEGATIVE_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -39,11 +33,18 @@ export interface ResearchConfig {
   readonly negativeCacheTtlMs: number;
 }
 
-const parseBoundedInt = (
+/**
+ * Operator-owned positive integers flow through exactly as configured; the
+ * default applies only when the variable is unset. There is intentionally
+ * no upper bound — upstream provider limits are the provider's
+ * responsibility and surface as provider failures, never as silent
+ * rewrites. An explicitly set value that is not a positive safe integer
+ * fails loudly naming field + reason.
+ */
+const parseOperatorPositiveInt = (
   raw: string | undefined,
+  field: string,
   fallback: number,
-  min: number,
-  max: number,
 ): number => {
   if (raw === undefined) {
     return fallback;
@@ -51,11 +52,11 @@ const parseBoundedInt = (
 
   const parsed = Number.parseInt(raw, 10);
 
-  if (Number.isNaN(parsed)) {
-    return fallback;
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(`${field} must be a positive safe integer or unset (unset uses ${fallback}).`);
   }
 
-  return Math.min(Math.max(Math.floor(parsed), min), max);
+  return parsed;
 };
 
 const parseTtlMs = (raw: string | undefined, fallback: number): number => {
@@ -83,23 +84,20 @@ export const resolveResearchConfig = (env: Record<string, string | undefined>): 
   apiKey: env["MODEL_API_KEY"] ?? "",
   baseUrl: env["MODEL_BASE_URL"] ?? DEFAULT_MODEL_BASE_URL,
   modelId: RESEARCH_MODEL_ID,
-  timeoutMs: parseBoundedInt(
+  timeoutMs: parseOperatorPositiveInt(
     env["WEB_RESEARCH_TIMEOUT_MS"],
+    "WEB_RESEARCH_TIMEOUT_MS",
     RESEARCH_DEFAULT_TIMEOUT_MS,
-    RESEARCH_MIN_TIMEOUT_MS,
-    RESEARCH_MAX_TIMEOUT_MS,
   ),
-  maxSources: parseBoundedInt(
+  maxSources: parseOperatorPositiveInt(
     env["WEB_RESEARCH_MAX_SOURCES"],
+    "WEB_RESEARCH_MAX_SOURCES",
     RESEARCH_DEFAULT_MAX_SOURCES,
-    RESEARCH_MIN_MAX_SOURCES,
-    RESEARCH_MAX_MAX_SOURCES,
   ),
-  maxResults: parseBoundedInt(
+  maxResults: parseOperatorPositiveInt(
     env["WEB_RESEARCH_MAX_RESULTS"],
+    "WEB_RESEARCH_MAX_RESULTS",
     RESEARCH_DEFAULT_MAX_RESULTS,
-    RESEARCH_MIN_MAX_RESULTS,
-    RESEARCH_MAX_MAX_RESULTS,
   ),
   cacheTtlMs: parseTtlMs(env["WEB_RESEARCH_CACHE_TTL_MS"], RESEARCH_DEFAULT_CACHE_TTL_MS),
   negativeCacheTtlMs: parseTtlMs(

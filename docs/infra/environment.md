@@ -41,6 +41,10 @@ fast when a required value is missing; see `.env.example` for the full list):
   `RECOMMENDATION_PROVIDER`, `MODEL_API_KEY`, `MODEL_MODEL_ID`,
   `MODEL_BASE_URL`, `MODEL_TIMEOUT_MS`, `MODEL_CANDIDATE_LIMIT`,
   `MODEL_OUTPUT_LIMIT`, `MODEL_MAX_TOKENS`, `OWNER_EMAIL`,
+  `RECOMMEND_AGENT_ENABLED`, `RECOMMEND_AGENT_MAX_ROUNDS`,
+  `RECOMMEND_AGENT_MAX_TOOL_CALLS`, `RECOMMEND_AGENT_DETAILS_PER_CALL`,
+  `RECOMMEND_AGENT_CANDIDATE_POOL_CAP`, `RECOMMEND_AGENT_FINAL_LIMIT`,
+  `MODEL_AGENT_TIMEOUT_MS`, `RECOMMEND_AGENT_DEADLINE_MS`,
   `MENU_SCANNER_ENABLED`, `MENU_SCAN_*`, `WEB_RESEARCH_ENABLED`,
   `WEB_RESEARCH_*`, `REVIEW_INTELLIGENCE_ENABLED`,
   `REVIEW_INTELLIGENCE_TIMEOUT_MS`, `COPILOT_VISION_ENABLED`,
@@ -54,6 +58,26 @@ fast when a required value is missing; see `.env.example` for the full list):
 - Swarm adds separated Garage bootstrap/admin identity: `GARAGE_RPC_SECRET`, `GARAGE_BOOTSTRAP_ACCESS_KEY`, `GARAGE_BOOTSTRAP_SECRET_KEY` (Garage service only; never given to the app). See `infra/.env.production.example` and [object storage](object-storage.md) for provisioning (`garage-provision.sh`), rotation, and backup contracts.
 - `S3_ENDPOINT_PUBLIC`: browser-valid presigned hostname, deliberately unset until an approved loopback mapping or reverse proxy exists. Do not sign browser URLs for `garage:3900` or rewrite signed hostnames afterward.
 - `AI_PROVIDER`, `AI_API_KEY`, `PLACES_API_KEY`, `APP_BASE_URL` and optional `LOG_LEVEL` are **not** application variables: no code reads them. The implemented equivalents are `RECOMMENDATION_PROVIDER`, `MODEL_*`, and `BETTER_AUTH_URL`. Do not reintroduce the old names.
+
+## Operator configuration principle
+
+The deployment operator owns environment configuration. Every operator-set
+value in `MODEL_*`, `MENU_SCAN_*`, `COPILOT_VISION_*`, `WEB_RESEARCH_*`,
+`REVIEW_INTELLIGENCE_*`, `RECOMMEND_AGENT_*`, `REQUEST_TIMEOUT_MS`,
+`RECOMMEND_TIMEOUT_MS`, and
+rate-limit/storage knobs flows through exactly as configured: defaults apply
+only when a variable is unset, and there are intentionally no upper bounds.
+Explicitly set invalid values (non-positive timeouts, negative retries,
+unusable URLs, wrong model shapes) fail loudly with field + reason in server
+logs — never silently clamped or replaced, and never with credentials.
+Derived budgets stay intentional and documented: the chat backstop derives
+from the synthesis budget plus tool budgets, the photo deadline from the
+vision budget, the extraction lease from the scan budget, and the browser
+polls the scan view instead of holding one long request. Provider-side limits
+remain the provider's responsibility and surface as provider failures.
+Genuine technical limits (provider inline-payload size, decode-bomb guards,
+guest-endpoint attempt/concurrency caps, proxy timeouts) are documented at
+their use sites, not silently applied to operator values.
 
 **Important:** local Compose intentionally publishes no database port, so a host `DATABASE_URL=postgres://localhost:5432/...` is **not** reachable without a separate, explicitly approved dev access arrangement. Never solve this by exposing 0.0.0.0:5432.
 

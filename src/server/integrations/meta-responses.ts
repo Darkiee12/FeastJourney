@@ -106,11 +106,36 @@ export interface MetaResponsesClientConfig {
 
 export const normalizeMetaResponsesBaseUrl = (value: string): string => value.replace(/\/+$/, "");
 
+/**
+ * Operator-owned research timeout: a valid explicitly configured value
+ * flows through exactly as set; the default applies only when unset. No
+ * upper bound — upstream provider limits surface as provider failures.
+ * An explicitly set non-positive-integer fails loudly naming field +
+ * reason instead of silently falling back.
+ */
+const resolveMetaResponsesTimeoutMs = (): number => {
+  const raw = process.env["WEB_RESEARCH_TIMEOUT_MS"];
+
+  if (raw === undefined) {
+    return META_RESPONSES_DEFAULT_TIMEOUT_MS;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(
+      `WEB_RESEARCH_TIMEOUT_MS must be a positive safe integer of milliseconds or unset (unset uses ${META_RESPONSES_DEFAULT_TIMEOUT_MS}).`,
+    );
+  }
+
+  return parsed;
+};
+
 export const defaultMetaResponsesConfig = (): MetaResponsesClientConfig => ({
   apiKey: process.env["MODEL_API_KEY"] ?? "",
   baseUrl: normalizeMetaResponsesBaseUrl(process.env["MODEL_BASE_URL"] ?? DEFAULT_MODEL_BASE_URL),
   modelId: RESEARCH_MODEL_ID,
-  timeoutMs: META_RESPONSES_DEFAULT_TIMEOUT_MS,
+  timeoutMs: resolveMetaResponsesTimeoutMs(),
   maxResponseBytes: META_RESPONSES_MAX_BYTES,
 });
 

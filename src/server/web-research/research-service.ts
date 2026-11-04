@@ -438,7 +438,22 @@ export const WebResearchLive: Layer.Layer<WebResearch, never, MetaResponsesClien
   WebResearch,
   Effect.gen(function* () {
     const client = yield* MetaResponsesClient;
-    const config = resolveResearchConfig(process.env);
+
+    let config: ResearchConfig;
+
+    try {
+      config = resolveResearchConfig(process.env);
+    } catch (error) {
+      // Invalid operator configuration fails loudly in server logs (field
+      // + reason, never values) and fail-closed at the transport.
+      yield* Effect.logError("Web research configuration invalid").pipe(
+        Effect.annotateLogs({
+          reason: error instanceof Error ? error.message : "unknown",
+        }),
+      );
+
+      throw error;
+    }
 
     return makeWebResearch({ client, config, cache: getSharedCache(config) });
   }),

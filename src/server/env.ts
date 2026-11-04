@@ -40,9 +40,27 @@ const envSchema = z.object({
   MODEL_MODEL_ID: z.string().optional(),
   MODEL_BASE_URL: z.string().optional(),
   MODEL_TIMEOUT_MS: z.coerce.number().int().optional(),
-  MODEL_CANDIDATE_LIMIT: z.coerce.number().int().max(100).optional(),
+  MODEL_CANDIDATE_LIMIT: z.coerce.number().int().optional(),
   MODEL_OUTPUT_LIMIT: z.coerce.number().int().optional(),
   MODEL_MAX_TOKENS: z.coerce.number().int().optional(),
+  // Agentic recommendation mode (workstream B, additive only). Explicit
+  // opt-in: only the literal "true" enables the tool-calling loop; unset
+  // or any other value keeps the existing single-shot rank() path
+  // byte-identical. All fields stay optional so startup never depends on
+  // agent configuration and existing ServerEnv literals keep compiling;
+  // the server-only resolvers (protocol resolveAgentBounds,
+  // agentConfigFromMuse) apply documented fallbacks when unset and throw
+  // naming field + reason on explicitly set invalid values — never silently
+  // clamped or replaced. z.coerce.number().int() rejects trailing junk
+  // ("20000oops" fails); positivity is enforced at the use site.
+  RECOMMEND_AGENT_ENABLED: z.string().optional(),
+  RECOMMEND_AGENT_MAX_ROUNDS: z.coerce.number().int().optional(),
+  RECOMMEND_AGENT_MAX_TOOL_CALLS: z.coerce.number().int().optional(),
+  RECOMMEND_AGENT_DETAILS_PER_CALL: z.coerce.number().int().optional(),
+  RECOMMEND_AGENT_CANDIDATE_POOL_CAP: z.coerce.number().int().optional(),
+  RECOMMEND_AGENT_FINAL_LIMIT: z.coerce.number().int().optional(),
+  MODEL_AGENT_TIMEOUT_MS: z.coerce.number().int().optional(),
+  RECOMMEND_AGENT_DEADLINE_MS: z.coerce.number().int().optional(),
   // Scanner configuration is validated lazily when enabled; unrelated reads
   // never depend on Muse or private image storage configuration.
   MENU_SCANNER_ENABLED: z.string().optional(),
@@ -130,54 +148,37 @@ export const DEFAULT_MODEL_TIMEOUT_MS = 15000;
 
 /**
  * Default ceiling on a single ranking call's tokens (reasoning + output).
- * The reasoning model burns ~1k tokens ranking 3 dishes; uncapped, a
- * 30-candidate prompt routinely blows the 15s budget (timeout) or
- * truncates the strict JSON (invalid output). The candidate trim below is
- * the primary guard; this cap bounds cost per call.
+ * The reasoning model burns ~1k tokens ranking a few dishes; the candidate
+ * trim below is the primary guard and this default bounds cost per call.
+ * The operator owns this value: any positive safe integer is accepted
+ * exactly as configured and only the provider's own limit can reject it
+ * (surfaced accurately, never silently reduced).
  */
 export const DEFAULT_MODEL_MAX_TOKENS = 4000;
 
 /**
- * Bounded per-call token ceiling: 1000 floor keeps reasoning models usable,
- * 16000 ceiling keeps a single call from eating the request budget. Ranks
- * only (reasoning + the short id list), never the candidate catalog itself.
+ * Operator-owned positive integers flow through exactly as configured;
+ * the default applies only when the variable is unset. An explicitly set
+ * value that is not a positive safe integer is an operator error and fails
+ * loudly with field + reason at the use site — never silently clamped or
+ * replaced. There is intentionally no upper bound here: provider-side
+ * limits are the provider's responsibility and surface as provider
+ * failures, never as silent configuration rewrites.
  */
-const clampMaxTokens = (value: number | undefined): number => {
-  if (value === undefined || Number.isNaN(value)) {
-    return DEFAULT_MODEL_MAX_TOKENS;
+const parseOperatorPositiveInt = (
+  value: number | undefined,
+  field: string,
+  fallback: number,
+): number => {
+  if (value === undefined) {
+    return fallback;
   }
 
-  return Math.min(Math.max(Math.floor(value), 1000), 16000);
-};
-
-const clampCandidateLimit = (value: number | undefined): number => {
-  if (value === undefined || Number.isNaN(value)) {
-    return 60;
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${field} must be a positive safe integer or unset (unset uses ${fallback}).`);
   }
 
-  return Math.min(Math.max(Math.floor(value), 1), 100);
-};
-
-const clampOutputLimit = (value: number | undefined): number => {
-  if (value === undefined || Number.isNaN(value)) {
-    return 10;
-  }
-
-  return Math.min(Math.max(Math.floor(value), 1), 10);
-};
-
-/**
- * Bounded provider timeout: 1s floor avoids instant-abort loops, 60s
- * ceiling avoids hung recommendation requests holding the 30s server-fn
- * budget hostage. Out-of-range values clamp instead of failing startup
- * (offline shape validation only; the provider is never contacted here).
- */
-const clampTimeoutMs = (value: number | undefined): number => {
-  if (value === undefined || Number.isNaN(value)) {
-    return DEFAULT_MODEL_TIMEOUT_MS;
-  }
-
-  return Math.min(Math.max(Math.floor(value), 1000), 60000);
+  return value;
 };
 
 const isHttpsUrl = (value: string): boolean => {
@@ -197,8 +198,13 @@ const isHttpsUrl = (value: string): boolean => {
 };
 
 export const resolveRankingConfig = (env: ServerEnv): RankingConfig => {
-  const candidateLimit = clampCandidateLimit(env.MODEL_CANDIDATE_LIMIT);
-  const outputLimit = clampOutputLimit(env.MODEL_OUTPUT_LIMIT);
+  const candidateLimit = parseOperatorPositiveInt(
+    env.MODEL_CANDIDATE_LIMIT,
+    "MODEL_CANDIDATE_LIMIT",
+    60,
+  );
+
+  const outputLimit = parseOperatorPositiveInt(env.MODEL_OUTPUT_LIMIT, "MODEL_OUTPUT_LIMIT", 10);
 
   if (env.RECOMMENDATION_PROVIDER !== "muse") {
     return RankingConfig.Deterministic({ candidateLimit, outputLimit });
@@ -228,9 +234,17 @@ export const resolveRankingConfig = (env: ServerEnv): RankingConfig => {
     apiKey,
     modelId,
     baseUrl,
-    timeoutMs: clampTimeoutMs(env.MODEL_TIMEOUT_MS),
+    timeoutMs: parseOperatorPositiveInt(
+      env.MODEL_TIMEOUT_MS,
+      "MODEL_TIMEOUT_MS",
+      DEFAULT_MODEL_TIMEOUT_MS,
+    ),
     candidateLimit,
     outputLimit,
-    maxTokens: clampMaxTokens(env.MODEL_MAX_TOKENS),
+    maxTokens: parseOperatorPositiveInt(
+      env.MODEL_MAX_TOKENS,
+      "MODEL_MAX_TOKENS",
+      DEFAULT_MODEL_MAX_TOKENS,
+    ),
   });
 };
