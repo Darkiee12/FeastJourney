@@ -76,7 +76,21 @@ export interface ProgressEvent {
   readonly terminal: boolean;
 }
 
-/** Agentic run bounds. Every value is required from the environment (no defaults). */
+/** Agentic run bounds. Every value is operator-owned env config.
+ * Unset uses the documented fallback at the server-only use site;
+ * an explicitly set invalid value fails loudly naming field + reason;
+ * an explicitly set valid value flows through exactly as configured.
+ * There are intentionally no upper bounds and no silent clamps. */
+export interface AgentBounds {
+  readonly maxRounds: number;
+  readonly maxToolCalls: number;
+  readonly detailsPerCall: number;
+  readonly candidatePoolCap: number;
+  readonly finalLimit: number;
+  readonly providerTimeoutMs: number;
+  readonly orchestrationDeadlineMs: number;
+}
+
 import { z } from "zod";
 
 type EnvBag = {
@@ -86,10 +100,9 @@ type EnvBag = {
 const PositiveIntFromEnv = (varName: string) =>
   z
     .string()
-    .min(1, `${varName} must not be empty.`)
+    .regex(/^[1-9]\d*$/, `${varName} must be a positive integer.`)
     .transform((raw) => Number(raw))
-    .pipe(z.number())
-    .refine((n) => Number.isSafeInteger(n) && n > 0, {
+    .refine((n) => Number.isSafeInteger(n), {
       message: `${varName} must be a positive integer.`,
     });
 
@@ -105,20 +118,54 @@ const parsePositiveInt = (varName: string, env: EnvBag): number => {
   return result.data;
 };
 
-export const resolveAgentBounds = (env: EnvBag = process.env) =>
-  ({
-    maxRounds: parsePositiveInt("RECOMMEND_AGENT_MAX_ROUNDS", env),
-    maxToolCalls: parsePositiveInt("RECOMMEND_AGENT_MAX_TOOL_CALLS", env),
-    detailsPerCall: parsePositiveInt("RECOMMEND_AGENT_DETAILS_PER_CALL", env),
-    candidatePoolCap: parsePositiveInt("RECOMMEND_AGENT_CANDIDATE_POOL_CAP", env),
-    finalLimit: parsePositiveInt("RECOMMEND_AGENT_FINAL_LIMIT", env),
-    providerTimeoutMs: parsePositiveInt("MODEL_AGENT_TIMEOUT_MS", env),
-    orchestrationDeadlineMs: parsePositiveInt("RECOMMEND_AGENT_DEADLINE_MS", env),
-  }) as const;
+/**
+ * Pure server-only resolver: takes an explicit env bag (callers pass
+ * `process.env`), never reads ambient state itself, never runs at import
+ * time. Browser code must only ever use `import type` from this module.
+ */
+export const resolveAgentBounds = (env: EnvBag): AgentBounds => ({
+  maxRounds: parsePositiveInt("RECOMMEND_AGENT_MAX_ROUNDS", env),
+  maxToolCalls: parsePositiveInt("RECOMMEND_AGENT_MAX_TOOL_CALLS", env),
+  detailsPerCall: parsePositiveInt("RECOMMEND_AGENT_DETAILS_PER_CALL", env),
+  candidatePoolCap: parsePositiveInt("RECOMMEND_AGENT_CANDIDATE_POOL_CAP", env),
+  finalLimit: parsePositiveInt("RECOMMEND_AGENT_FINAL_LIMIT", env),
+  providerTimeoutMs: parsePositiveInt("MODEL_AGENT_TIMEOUT_MS", env),
+  orchestrationDeadlineMs: parsePositiveInt("RECOMMEND_AGENT_DEADLINE_MS", env),
+});
 
-export const AGENT_BOUNDS = resolveAgentBounds();
-
-export type AgentBounds = typeof AGENT_BOUNDS;
+/**
+ * Lazily-resolved contract values for in-flight server-only consumers.
+ * Property getters defer parsing to first access (server-only use sites),
+ * so importing this module — including browser `import type` usage —
+ * never parses and never throws. Each access re-reads `process.env`,
+ * preserving the operator-owns-config principle with no cached snapshot.
+ *
+ * New server-only code should prefer `resolveAgentBounds(process.env)`;
+ * this object stays so existing contract shapes keep compiling.
+ */
+export const AGENT_BOUNDS: AgentBounds = {
+  get maxRounds(): number {
+    return parsePositiveInt("RECOMMEND_AGENT_MAX_ROUNDS", process.env);
+  },
+  get maxToolCalls(): number {
+    return parsePositiveInt("RECOMMEND_AGENT_MAX_TOOL_CALLS", process.env);
+  },
+  get detailsPerCall(): number {
+    return parsePositiveInt("RECOMMEND_AGENT_DETAILS_PER_CALL", process.env);
+  },
+  get candidatePoolCap(): number {
+    return parsePositiveInt("RECOMMEND_AGENT_CANDIDATE_POOL_CAP", process.env);
+  },
+  get finalLimit(): number {
+    return parsePositiveInt("RECOMMEND_AGENT_FINAL_LIMIT", process.env);
+  },
+  get providerTimeoutMs(): number {
+    return parsePositiveInt("MODEL_AGENT_TIMEOUT_MS", process.env);
+  },
+  get orchestrationDeadlineMs(): number {
+    return parsePositiveInt("RECOMMEND_AGENT_DEADLINE_MS", process.env);
+  },
+};
 
 /** Env flag gating agentic mode. Off (or unset) keeps the existing single-shot path byte-identical. */
 export const RECOMMEND_AGENT_FLAG = "RECOMMEND_AGENT_ENABLED";

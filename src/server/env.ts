@@ -46,8 +46,19 @@ const envSchema = z.object({
   // Agentic recommendation mode (workstream B, additive only). Explicit
   // opt-in: only the literal "true" enables the tool-calling loop; unset
   // or any other value keeps the existing single-shot rank() path
-  // byte-identical. Timeout knobs fall back to AGENT_BOUNDS defaults.
+  // byte-identical. All fields stay optional so startup never depends on
+  // agent configuration and existing ServerEnv literals keep compiling;
+  // the server-only resolvers (protocol resolveAgentBounds,
+  // agentConfigFromMuse) apply documented fallbacks when unset and throw
+  // naming field + reason on explicitly set invalid values — never silently
+  // clamped or replaced. z.coerce.number().int() rejects trailing junk
+  // ("20000oops" fails); positivity is enforced at the use site.
   RECOMMEND_AGENT_ENABLED: z.string().optional(),
+  RECOMMEND_AGENT_MAX_ROUNDS: z.coerce.number().int().optional(),
+  RECOMMEND_AGENT_MAX_TOOL_CALLS: z.coerce.number().int().optional(),
+  RECOMMEND_AGENT_DETAILS_PER_CALL: z.coerce.number().int().optional(),
+  RECOMMEND_AGENT_CANDIDATE_POOL_CAP: z.coerce.number().int().optional(),
+  RECOMMEND_AGENT_FINAL_LIMIT: z.coerce.number().int().optional(),
   MODEL_AGENT_TIMEOUT_MS: z.coerce.number().int().optional(),
   RECOMMEND_AGENT_DEADLINE_MS: z.coerce.number().int().optional(),
   // Scanner configuration is validated lazily when enabled; unrelated reads
