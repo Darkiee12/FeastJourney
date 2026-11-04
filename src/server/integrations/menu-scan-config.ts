@@ -2,6 +2,17 @@ import { z } from "zod";
 
 import { DEFAULT_MODEL_BASE_URL, serverEnv, type ServerEnv } from "@/server/env";
 
+/**
+ * Menu-scanner operator configuration. Every numeric knob is
+ * operator-owned: a valid explicitly configured value flows through exactly
+ * as set and defaults apply only when the variable is unset. There is
+ * intentionally no upper bound on any knob — provider-side limits are the
+ * provider's responsibility and surface as provider failures, never as
+ * silent configuration rewrites. Lower bounds are intrinsic validity only:
+ * timeouts/byte counts/counts must be positive (a zero/negative budget can
+ * never succeed) and retries must be nonnegative. Invalid explicit values
+ * fail loudly naming field + reason, without exposing values.
+ */
 const scannerConfigSchema = z.strictObject({
   apiKey: z.string().trim().min(1),
   // Operator-chosen model id (plain string, never validated against a
@@ -20,12 +31,12 @@ const scannerConfigSchema = z.strictObject({
       url.hash === ""
     );
   }),
-  timeoutMs: z.coerce.number().int().min(1000).max(90000),
-  retries: z.coerce.number().int().min(0).max(1),
-  maxResponseBytes: z.coerce.number().int().min(1024).max(2097152),
-  maxImages: z.coerce.number().int().min(1).max(6),
-  maxImageBytes: z.coerce.number().int().min(1024).max(8388608),
-  maxCompletionTokens: z.coerce.number().int().min(1024).max(24000),
+  timeoutMs: z.coerce.number().int().min(1),
+  retries: z.coerce.number().int().min(0),
+  maxResponseBytes: z.coerce.number().int().min(1),
+  maxImages: z.coerce.number().int().min(1),
+  maxImageBytes: z.coerce.number().int().min(1),
+  maxCompletionTokens: z.coerce.number().int().min(1),
 });
 
 export type MenuScanConfig = z.infer<typeof scannerConfigSchema>;
@@ -50,7 +61,13 @@ export function resolveMenuScanConfig(env: ServerEnv): MenuScanConfig | null {
     maxCompletionTokens: env.MENU_SCAN_MAX_COMPLETION_TOKENS ?? "12000",
   });
 
-  if (!parsed.success) throw new Error("Menu scanner configuration is invalid.");
+  if (!parsed.success) {
+    const fields = parsed.error.issues.map((issue) => issue.path.join(".")).join(", ");
+
+    throw new Error(
+      `Menu scanner configuration is invalid${fields.length > 0 ? ` (${fields})` : ""}: check the named MENU_SCAN_* variable.`,
+    );
+  }
 
   return parsed.data;
 }

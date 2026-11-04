@@ -52,7 +52,7 @@ const captureCopy = (locale: string): CaptureCopy => {
       gallery: "Chọn từ thư viện",
       addPages: "Thêm trang",
       language: "Dịch sang",
-      limits: "JPEG, PNG hoặc WebP — tối đa 6 trang, mỗi ảnh 8 MiB, tổng 24 MiB.",
+      limits: "JPEG, PNG hoặc WebP — số trang và dung lượng theo giới hạn máy chủ.",
       empty: "Thêm ít nhất một ảnh thực đơn rõ nét để bắt đầu.",
       submit: "Đọc thực đơn với Muse ✨",
     };
@@ -62,7 +62,7 @@ const captureCopy = (locale: string): CaptureCopy => {
     gallery: "Choose from gallery",
     addPages: "Add pages",
     language: "Translate into",
-    limits: "JPEG, PNG or WebP — up to 6 pages, 8 MiB each, 24 MiB total.",
+    limits: "JPEG, PNG or WebP — page, size and total limits are enforced by the server.",
     empty: "Add at least one clear menu photo to begin.",
     submit: "Read menu with Muse ✨",
   };

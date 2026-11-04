@@ -149,8 +149,8 @@ const hintFor = (kind: ScanErrorKind, locale: string): string | null => {
     ),
     Match.when("bad-image", () =>
       vi
-        ? "Ảnh không dùng được. Chụp lại rõ hơn: JPEG, PNG hoặc WebP, mỗi ảnh tối đa 8 MiB."
-        : "That photo cannot be used. Retake it clearly: JPEG, PNG or WebP, up to 8 MiB each.",
+        ? "Ảnh không dùng được. Chụp lại rõ hơn: JPEG, PNG hoặc WebP, trong giới hạn dung lượng cho phép."
+        : "That photo cannot be used. Retake it clearly: JPEG, PNG or WebP within the allowed size.",
     ),
     Match.when("expired", () =>
       vi

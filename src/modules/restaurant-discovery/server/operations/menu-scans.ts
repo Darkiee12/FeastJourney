@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { Data, Effect, Exit, Option } from "effect";
+import { Data, Duration, Effect, Exit, Option } from "effect";
 import { type z } from "zod";
 
 import { CatalogService, PlaceRepository } from "@/modules/food-discovery/server/index";
@@ -49,9 +49,10 @@ import { menuScanConfig } from "@/server/integrations/menu-scan-config";
 import {
   ExtractionUnavailable,
   InvalidModelOutput,
+  MENU_SCAN_COMBINED_IMAGE_BYTES,
   MenuExtractor,
 } from "@/server/integrations/muse-menu";
-import { PrivateMenuStorage, validateMenuImage } from "@/server/integrations/private-menu-storage";
+import { MAX_IMAGE_BYTES, PrivateMenuStorage, validateMenuImage } from "@/server/integrations/private-menu-storage";
 
 /** Constructed only by the verified session/capability transport boundary. */
 export interface ScanPrincipal {
@@ -66,6 +67,52 @@ export class ScanConflict extends Data.TaggedError("ScanConflict")<{ readonly re
 export class ScanInputError extends Data.TaggedError("ScanInputError")<{
   readonly reason: string;
 }> {}
+
+/**
+ * Resolve the operator's menu-scanner configuration with logging.
+ * Disabled resolves to null (callers fail closed with "disabled"); an
+ * invalid explicit configuration logs field + reason server-side (never
+ * values) and fails as a provider outage at the transport boundary.
+ */
+export const resolveScannerOrFail = Effect.fn("menu.scannerConfig")(function* () {
+  try {
+    return menuScanConfig();
+  } catch (error) {
+    yield* Effect.logError("Menu scanner configuration invalid").pipe(
+      Effect.annotateLogs({
+        reason: error instanceof Error ? error.message : "unknown",
+      }),
+    );
+
+    return yield* new ExtractionUnavailable({
+      reason: "Menu analysis is unavailable. Please retry later.",
+      retryable: false,
+      category: "unavailable",
+    });
+  }
+});
+
+/**
+ * Upload caps for attachMenuPhoto. Derived from the operator's MENU_SCAN_*
+ * configuration when the scanner resolves; historical defaults otherwise.
+ */
+export const resolveUploadCaps = (): {
+  readonly maxImages: number;
+  readonly maxImageBytes: number;
+} => {
+  try {
+    const scanner = menuScanConfig();
+
+    if (scanner !== null) {
+      return { maxImages: scanner.maxImages, maxImageBytes: scanner.maxImageBytes };
+    }
+  } catch {
+    // Misconfigured scanner: fall back to defaults for uploads; extraction
+    // itself fails loudly at its own boundary with field + reason.
+  }
+
+  return { maxImages: 6, maxImageBytes: MAX_IMAGE_BYTES };
+};
 
 export const requireOwnedMenuScan = Effect.fn("menu.requireOwned")(function* (
   principal: ScanPrincipal,
@@ -193,13 +240,24 @@ export const attachMenuPhoto = Effect.fn("menu.attachPhoto")(function* (
 ) {
   yield* withTransaction("menu/authorize-upload", requireOwnedMenuScan(principal, scanId));
 
-  if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > 6) {
+  // Upload caps derive from the operator's MENU_SCAN_* configuration so an
+  // explicit value is honored end to end. When the scanner is disabled or
+  // misconfigured, uploads keep the historical defaults; extraction itself
+  // still fails loudly at its own boundary. The 24 MiB combined bound stays
+  // fixed: it is the provider's inline-payload transport limit, not an
+  // operator ceiling (see MENU_SCAN_COMBINED_IMAGE_BYTES).
+  const uploadCaps = resolveUploadCaps();
+
+  if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > uploadCaps.maxImages) {
     return yield* new ScanInputError({
-      reason: "Menu pages must be numbered between one and six.",
+      reason:
+        uploadCaps.maxImages === 1
+          ? "Menu pages must be numbered one."
+          : `Menu pages must be numbered between one and ${uploadCaps.maxImages}.`,
     });
   }
 
-  const image = yield* validateMenuImage(bytes, mediaType);
+  const image = yield* validateMenuImage(bytes, mediaType, uploadCaps.maxImageBytes);
   const key = `menu/${scanId}/${randomUUID()}`;
 
   const asset = yield* withTransaction(
@@ -216,9 +274,12 @@ export const attachMenuPhoto = Effect.fn("menu.attachPhoto")(function* (
         assetTotals.run(sql, { session_id: scanId }),
       );
 
-      if (totals.count >= 6 || (totals.bytes ?? 0) + image.byteLength > 25165824)
+      if (
+        totals.count >= uploadCaps.maxImages ||
+        (totals.bytes ?? 0) + image.byteLength > MENU_SCAN_COMBINED_IMAGE_BYTES
+      )
         return yield* new ScanInputError({
-          reason: "Use at most six photographs and 24 MiB in total.",
+          reason: `Use at most ${uploadCaps.maxImages} photographs and 24 MiB in total.`,
         });
 
       const existing = yield* runQuery("menu/upload-pages", (sql) =>
@@ -246,7 +307,7 @@ export const attachMenuPhoto = Effect.fn("menu.attachPhoto")(function* (
     (reserved) =>
       Effect.gen(function* () {
         yield* storage.put(key, image.bytes);
-        const stored = yield* storage.read(key);
+        const stored = yield* storage.read(key, uploadCaps.maxImageBytes);
 
         if (
           stored.byteLength !== image.byteLength ||
@@ -327,7 +388,7 @@ export const readMenuPhoto = Effect.fn("menu.readPhoto")(function* (
 
   const storage = yield* PrivateMenuStorage;
 
-  return yield* storage.read(asset.object_key);
+  return yield* storage.read(asset.object_key, resolveUploadCaps().maxImageBytes);
 });
 
 interface PlaceMenuEvidence {
@@ -402,6 +463,26 @@ const resolvePlaceMenuEvidence = Effect.fn("menu.resolvePlaceEvidence")(function
   return evidence;
 });
 
+/**
+ * Orchestration margin (seconds) added to the operator's MENU_SCAN_TIMEOUT_MS
+ * when sizing the extraction lease. Covers asset reads, document assembly
+ * and revision writes around the provider call, plus clock slack. A fixed
+ * technical margin, documented here — not an operator ceiling and not a
+ * bound on the provider budget itself.
+ */
+const MENU_EXTRACTION_LEASE_MARGIN_S = 120;
+
+/**
+ * Accept-wait (ms) after claiming the lease: fast extractions complete
+ * inside the same request (existing callers observe the document
+ * immediately), while slow ones return the processing view and the caller
+ * polls. This bounds one HTTP round-trip only — never the provider call,
+ * which continues detached under MENU_SCAN_TIMEOUT_MS. Stays comfortably
+ * under the scan HTTP transport budget.
+ */
+const SCAN_ACCEPT_WAIT_MS = 45000;
+const SCAN_ACCEPT_POLL_MS = 1000;
+
 export const extractMenu = Effect.fn("menu.extractScan")(function* (
   principal: ScanPrincipal,
   scanId: string,
@@ -411,15 +492,7 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
   // Revision provenance records the actual configured model, so resolve it
   // before any lease or inference. A disabled or misconfigured scanner fails
   // here; the live extractor enforces the same boundary before any provider call.
-  const scanner = yield* Effect.try({
-    try: menuScanConfig,
-    catch: () =>
-      new ExtractionUnavailable({
-        reason: "Menu analysis is unavailable. Please retry later.",
-        retryable: false,
-        category: "unavailable",
-      }),
-  });
+  const scanner = yield* resolveScannerOrFail();
 
   if (scanner === null)
     return yield* new ExtractionUnavailable({
@@ -447,8 +520,15 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
       yield* runQuery("menu/extraction-guard", (sql) => extractionGuard.run(sql));
       const lease = randomUUID();
 
+      // Lease lifetime derives from the operator's provider budget plus a
+      // documented orchestration margin (asset reads, revision writes,
+      // clock slack) — never a fixed 90 seconds. attempts/concurrency caps
+      // stay in SQL: they are abuse/resource protections for this
+      // guest-accessible endpoint, not operator ceilings.
+      const leaseSeconds = Math.ceil(scanner.timeoutMs / 1000) + MENU_EXTRACTION_LEASE_MARGIN_S;
+
       const claimed = yield* runQuery("menu/claim-extraction", (sql) =>
-        claimExtraction.run(sql, { id: scanId, token: lease }),
+        claimExtraction.run(sql, { id: scanId, token: lease, lease_seconds: leaseSeconds }),
       );
 
       if (claimed === null)
@@ -463,7 +543,14 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
 
   if (token === null) return yield* getMenuScan(principal, scanId);
 
-  return yield* Effect.acquireUseRelease(
+  // Async extraction: the lease claim above is the only request-bound work.
+  // The provider call runs detached so no HTTP/server-function/proxy budget
+  // bounds it — only MENU_SCAN_TIMEOUT_MS does, whatever the operator sets.
+  // The client polls getMenuScan until the document lands or the scan fails;
+  // a retry while processing hits the idempotent guard above (ScanConflict
+  // or the stored revision). Lease expiry plus the attempt/concurrency caps
+  // in scan-claim.sql recover crashed or abandoned runs for retry.
+  const runExtraction = Effect.acquireUseRelease(
     Effect.succeed(token),
     (lease) =>
       Effect.gen(function* () {
@@ -479,7 +566,7 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
           assets,
           (asset) =>
             Effect.gen(function* () {
-              const bytes = yield* storage.read(asset.object_key);
+              const bytes = yield* storage.read(asset.object_key, scanner.maxImageBytes);
 
               if (
                 asset.media_type === null ||
@@ -587,17 +674,57 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
 
         return yield* getMenuScan(principal, scanId);
       }),
-    (lease, exit) => {
+    (held, exit) => {
       // Success already completed the session; only a failed or interrupted
       // extraction releases the lease for expiry or retry. Matches
-      // attachMenuPhoto, which also skips cleanup on success.
+      // attachMenuPhoto, which also skips cleanup on success. requestId is
+      // in scope: an interruption here (client disconnect, shutdown) is
+      // observable as this log line, distinct from a provider timeout
+      // failure logged by the extractor itself.
       if (Exit.isSuccess(exit)) return Effect.void;
 
+      yield* Effect.logWarning("Menu extraction lease released after failure").pipe(
+        Effect.annotateLogs({ requestId, scanId }),
+      );
+
       return runQuery("menu/release-extraction", (sql) =>
-        failExtraction.run(sql, { id: scanId, token: lease }),
+        failExtraction.run(sql, { id: scanId, token: held }),
       ).pipe(Effect.catch(() => Effect.logWarning("Menu analysis lease release requires expiry")));
     },
   );
+
+  yield* Effect.forkDetach(
+    Effect.gen(function* () {
+      const outcome = yield* Effect.exit(runExtraction);
+
+      if (Exit.isFailure(outcome)) {
+        yield* Effect.logError("Menu extraction background run failed").pipe(
+          Effect.annotateLogs({ requestId, scanId }),
+        );
+      }
+    }),
+  );
+
+  // Accept-wait: fast paths (tests with instant providers, quick scans)
+  // return the finished view in the same request; slow extractions return
+  // the processing view and the caller polls getMenuScan. Either way the
+  // provider call continues detached under MENU_SCAN_TIMEOUT_MS.
+  let waitedMs = 0;
+
+  for (;;) {
+    const view = yield* getMenuScan(principal, scanId);
+
+    if (
+      view.document !== null ||
+      view.scan.status !== "processing" ||
+      waitedMs >= SCAN_ACCEPT_WAIT_MS
+    ) {
+      return view;
+    }
+
+    yield* Effect.sleep(Duration.millis(SCAN_ACCEPT_POLL_MS));
+    waitedMs += SCAN_ACCEPT_POLL_MS;
+  }
 });
 
 /**

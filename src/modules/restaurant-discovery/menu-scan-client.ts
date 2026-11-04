@@ -156,6 +156,40 @@ const transportError = (failure: ScanTransportFailure): MenuScanClientError =>
     failure._tag,
   );
 
+/** Transport round-trip budget (ms) for one scan-service request. */
+const SCAN_REQUEST_TIMEOUT_MS = 30000;
+
+/**
+ * Status-polling parameters for extraction. Extraction runs detached
+ * server-side under the operator's MENU_SCAN_TIMEOUT_MS (uncapped), so the
+ * browser never holds one request open for it. These bounds are a client UX
+ * safeguard only: when rounds run out the work continues server-side and a
+ * retry resumes polling idempotently from the current view — never lost,
+ * never duplicated.
+ */
+const SCAN_POLL_INTERVAL_MS = 2500;
+const SCAN_POLL_MAX_ROUNDS = 120;
+
+const sleepAbortable = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(signal.reason);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+
 /** Upper bound before parsing; bodies are never logged. */
 const SCAN_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -477,6 +511,10 @@ async function requestScan<A>(
 ): Promise<A> {
   const body = actionsSchema.parse(input);
 
+  // Transport round-trip budget for quick local work (reads, writes,
+  // extraction accept). Extraction itself runs detached server-side under
+  // the operator's MENU_SCAN_TIMEOUT_MS and is tracked by polling the scan
+  // view — so this bound can never defeat a configured provider budget.
   const response = await fetchScan(
     "/api/menu-scans",
     {
@@ -485,7 +523,7 @@ async function requestScan<A>(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     },
-    body.action === "extract" ? 95000 : 30000,
+    SCAN_REQUEST_TIMEOUT_MS,
     signal,
   );
 
@@ -545,6 +583,51 @@ export const menuScanClient = {
    */
   extract: (scanId: string, signal?: AbortSignal, menuCityId?: string) =>
     dedupedExtract(scanId, signal, menuCityId),
+  /**
+   * Accept extraction then poll the scan view until the document lands.
+   * Terminal states: document present (done — returned), scan status other
+   * than "processing" with no document (failed/expired — retryable error so
+   * the UI offers retry), or the poll-round safeguard (retryable error; a
+   * retry resumes polling idempotently because extraction continues
+   * server-side under the operator's timeout).
+   */
+  extractAndWait: async (
+    scanId: string,
+    signal?: AbortSignal,
+    menuCityId?: string,
+  ): Promise<ScanView> => {
+    const accepted = await dedupedExtract(scanId, signal, menuCityId);
+
+    if (accepted.document !== null || accepted.scan.status !== "processing") {
+      return accepted;
+    }
+
+    for (let round = 0; round < SCAN_POLL_MAX_ROUNDS; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- Status polling is sequential by design.
+      await sleepAbortable(SCAN_POLL_INTERVAL_MS, signal);
+
+      // oxlint-disable-next-line no-await-in-loop -- Status polling is sequential by design.
+      const current = await menuScanClient.get(accepted.scan.id, signal);
+
+      if (current.document !== null) {
+        return current;
+      }
+
+      if (current.scan.status !== "processing") {
+        throw new MenuScanClientError(
+          "Menu analysis did not finish. Please try again.",
+          true,
+          null,
+        );
+      }
+    }
+
+    throw new MenuScanClientError(
+      "Menu analysis is still running. Retry to resume watching it.",
+      true,
+      null,
+    );
+  },
   revise: (input: z.infer<typeof reviseScanSchema>, signal?: AbortSignal) =>
     requestScan({ action: "revise", ...input }, scanViewSchema, signal),
   contribute: (input: z.infer<typeof contributeScanSchema>, signal?: AbortSignal) =>
@@ -577,7 +660,7 @@ export const menuScanClient = {
     const response = await fetchScan(
       "/api/menu-scans",
       { method: "POST", credentials: "same-origin", body },
-      30000,
+      SCAN_REQUEST_TIMEOUT_MS,
       signal,
     );
 
@@ -588,22 +671,19 @@ export const menuScanClient = {
   },
 };
 
-/** Client limits provide immediate feedback; the server verifies actual image bytes independently. */
+/**
+ * Client pre-flight: immediate feedback only. The server verifies actual
+ * image counts and bytes against the operator's MENU_SCAN_* configuration,
+ * so this never caps counts or sizes — only hopeless files are rejected
+ * here (wrong type, empty). Server messages stay authoritative.
+ */
 export function validateMenuFiles(files: ReadonlyArray<File>): string | null {
-  if (files.length > 6) return "Choose at most six menu photographs.";
-  let totalBytes = 0;
-
   for (const file of files) {
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
       return "Choose JPEG, PNG or WebP photographs.";
 
-    if (file.size === 0 || file.size > 8 * 1024 * 1024)
-      return "Each photograph must be between 1 byte and 8 MiB.";
-    totalBytes += file.size;
+    if (file.size === 0) return "One photograph is empty. Choose another image.";
   }
-
-  if (totalBytes > 24 * 1024 * 1024)
-    return "The photographs together must be no larger than 24 MiB.";
 
   return null;
 }

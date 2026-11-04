@@ -1482,7 +1482,22 @@ export const RecommendationServiceLive = Layer.effect(
           }
         }
 
-        const ranking = resolveRankingConfig(serverEnv());
+        // resolveRankingConfig throws on an explicitly set invalid numeric
+        // value (field + reason, never values); map it onto the same loud
+        // misconfigured path as a missing key or bad model shape.
+        let ranking: RankingConfig;
+
+        try {
+          ranking = resolveRankingConfig(serverEnv());
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : "MODEL_* configuration is invalid";
+
+          yield* Effect.logError("Recommendation ranking misconfigured").pipe(
+            Effect.annotateLogs({ backend: "muse", reason }),
+          );
+
+          return yield* new RecommendationMisconfigured({ reason });
+        }
 
         // Member-only Muse: guests always take the deterministic path even
         // when a provider is configured, so unauthenticated traffic can never

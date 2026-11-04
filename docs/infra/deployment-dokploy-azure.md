@@ -152,23 +152,37 @@ Operator checklist per variable group:
   Cloudflare untouched — document which header your chain actually sets.
 - `CORS_ORIGINS` — stays empty (same-origin app). Add exact https origins
   only for proven cross-origin callers.
-- Rate limits / `REQUEST_TIMEOUT_MS` / `DATABASE_POOL_MAX` — ship defaults;
-  tune on p95 evidence, not speculation (small VM: pool 10 is the ceiling
-  starting point).
+- Rate limits / `REQUEST_TIMEOUT_MS` / `RECOMMEND_TIMEOUT_MS` /
+  `RESTAURANT_REVIEW_DAYS` / `DATABASE_POOL_MAX` — ship defaults; tune on
+  p95 evidence, not speculation (small VM: pool 10 is the starting point,
+  not a ceiling). Every value flows through exactly as configured with no
+  upper bounds; an explicitly set invalid value fails loudly. Swarm forwards
+  all of them (including `*_WINDOW_S` mates, `RECOMMEND_TIMEOUT_MS`, and
+  `RESTAURANT_REVIEW_DAYS`) with code-matching defaults.
 - `MODEL_*` / `RECOMMENDATION_PROVIDER` — default is deterministic and
   startup never needs them. Enabling Muse ranking requires all of
   `provider=muse` + server-side key + supported `muse-spark-*` /
   `muse-wonder-*` id + https base; misconfiguration fails loudly (HTTP
   500). Server-side key only — browser keys forbidden; no Contributor-tier
-  key for staging experiments.
+  key for staging experiments. Timeout/token/candidate/output knobs are
+  operator-owned with no upper bounds: `MODEL_TIMEOUT_MS`,
+  `MODEL_MAX_TOKENS`, `MODEL_CANDIDATE_LIMIT`, `MODEL_OUTPUT_LIMIT` are
+  honored exactly as set, and `RECOMMEND_TIMEOUT_MS` must stay above
+  `MODEL_TIMEOUT_MS` or the provider call can never complete.
 - `COPILOT_VISION_*` / `WEB_RESEARCH_*` / `MENU_SCANNER_*` / `MENU_SCAN_*`
   / `REVIEW_INTELLIGENCE_*` — each feature stays disabled unless its
   `*_ENABLED` flag is exactly `true`; all reuse the `MODEL_*` transport.
   Swarm forwards them under `services.app.environment` with code-matching
   defaults, so an unset Dokploy variable means "disabled", never a
-  half-configured provider call. Copilot chat synthesis additionally requires
-  a signed-in member and first-party facts; guests keep deterministic catalog
-  answers.
+  half-configured provider call. Timeout/source/result knobs are likewise
+  uncapped operator values; derived budgets stay intentional (chat backstop
+  from synthesis + tool budgets, photo deadline from vision budget,
+  research tool backstop from the research budget). Menu extraction runs
+  detached server-side under `MENU_SCAN_TIMEOUT_MS` while the browser
+  polls — multi-minute extractions need no proxy-defying long request;
+  note the proxy's own idle timeouts as an external restriction anyway.
+  Copilot chat synthesis additionally requires a signed-in member and
+  first-party facts; guests keep deterministic catalog answers.
 - `FX_ENDPOINT` / `FX_REFRESH_HOURS` / `FX_MAX_AGE_HOURS` — reference FX
   for local-currency display (Frankfurter v2, display only, never a
   conversion feature flag). Forwarded with the Effect-Config defaults

@@ -823,7 +823,15 @@ export function MenuScanPage({
 
           setReading(true);
           setStatus(copy.analyzing);
-          const next = await menuScanClient.extract(created.id, signal, menuLocation?.cityId);
+          // Async extraction: the server accepts immediately and runs the
+          // provider call detached under MENU_SCAN_TIMEOUT_MS; this polls the
+          // scan view until the document lands. A retry resumes polling
+          // idempotently — server work is never lost or duplicated.
+          const next = await menuScanClient.extractAndWait(
+            created.id,
+            signal,
+            menuLocation?.cityId,
+          );
 
           if (!signal.aborted) adoptView(next);
         } finally {

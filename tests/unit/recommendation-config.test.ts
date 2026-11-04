@@ -38,22 +38,6 @@ const baseEnv: ServerEnv = {
 
 const withOverrides = (overrides: Partial<ServerEnv>): ServerEnv => ({ ...baseEnv, ...overrides });
 
-const resolveMuse = (value: number | undefined): RankingConfig =>
-  resolveRankingConfig(
-    withOverrides({
-      RECOMMENDATION_PROVIDER: "muse",
-      MODEL_API_KEY: "key",
-      MODEL_MAX_TOKENS: value,
-    }),
-  );
-
-const maxOfMuse = (config: RankingConfig): number =>
-  RankingConfig.$match(config, {
-    Deterministic: (): number => expect.unreachable("expected Muse"),
-    Muse: ({ maxTokens }): number => maxTokens,
-    Misconfigured: (): number => expect.unreachable("expected Muse"),
-  });
-
 describe("resolveRankingConfig", () => {
   test("deterministic is the default with documented limits", () => {
     const config = resolveRankingConfig(withOverrides({}));
@@ -108,13 +92,6 @@ describe("resolveRankingConfig", () => {
       },
       Misconfigured: () => expect.unreachable("expected Muse"),
     });
-  });
-
-  test("max tokens clamps to the documented band", () => {
-    expect(maxOfMuse(resolveMuse(undefined))).toBe(4000);
-    expect(maxOfMuse(resolveMuse(200))).toBe(1000);
-    expect(maxOfMuse(resolveMuse(20000))).toBe(16000);
-    expect(maxOfMuse(resolveMuse(8000))).toBe(8000);
   });
 
   test("muse without a key is misconfigured, never silent", () => {
@@ -222,26 +199,6 @@ describe("resolveRankingConfig", () => {
     RankingConfig.$match(https, {
       Deterministic: () => expect.unreachable("expected Muse"),
       Muse: () => undefined,
-      Misconfigured: () => expect.unreachable("expected Muse"),
-    });
-  });
-
-  test("limits clamp to their documented ranges", () => {
-    const config = resolveRankingConfig(
-      withOverrides({
-        RECOMMENDATION_PROVIDER: "muse",
-        MODEL_API_KEY: "key",
-        MODEL_CANDIDATE_LIMIT: 500,
-        MODEL_OUTPUT_LIMIT: 0,
-      }),
-    );
-
-    RankingConfig.$match(config, {
-      Deterministic: () => expect.unreachable("expected Muse"),
-      Muse: ({ candidateLimit, outputLimit }) => {
-        expect(candidateLimit).toBe(100);
-        expect(outputLimit).toBe(1);
-      },
       Misconfigured: () => expect.unreachable("expected Muse"),
     });
   });

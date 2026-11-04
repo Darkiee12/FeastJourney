@@ -55,6 +55,25 @@ fast when a required value is missing; see `.env.example` for the full list):
 - `S3_ENDPOINT_PUBLIC`: browser-valid presigned hostname, deliberately unset until an approved loopback mapping or reverse proxy exists. Do not sign browser URLs for `garage:3900` or rewrite signed hostnames afterward.
 - `AI_PROVIDER`, `AI_API_KEY`, `PLACES_API_KEY`, `APP_BASE_URL` and optional `LOG_LEVEL` are **not** application variables: no code reads them. The implemented equivalents are `RECOMMENDATION_PROVIDER`, `MODEL_*`, and `BETTER_AUTH_URL`. Do not reintroduce the old names.
 
+## Operator configuration principle
+
+The deployment operator owns environment configuration. Every operator-set
+value in `MODEL_*`, `MENU_SCAN_*`, `COPILOT_VISION_*`, `WEB_RESEARCH_*`,
+`REVIEW_INTELLIGENCE_*`, `REQUEST_TIMEOUT_MS`, `RECOMMEND_TIMEOUT_MS`, and
+rate-limit/storage knobs flows through exactly as configured: defaults apply
+only when a variable is unset, and there are intentionally no upper bounds.
+Explicitly set invalid values (non-positive timeouts, negative retries,
+unusable URLs, wrong model shapes) fail loudly with field + reason in server
+logs — never silently clamped or replaced, and never with credentials.
+Derived budgets stay intentional and documented: the chat backstop derives
+from the synthesis budget plus tool budgets, the photo deadline from the
+vision budget, the extraction lease from the scan budget, and the browser
+polls the scan view instead of holding one long request. Provider-side limits
+remain the provider's responsibility and surface as provider failures.
+Genuine technical limits (provider inline-payload size, decode-bomb guards,
+guest-endpoint attempt/concurrency caps, proxy timeouts) are documented at
+their use sites, not silently applied to operator values.
+
 **Important:** local Compose intentionally publishes no database port, so a host `DATABASE_URL=postgres://localhost:5432/...` is **not** reachable without a separate, explicitly approved dev access arrangement. Never solve this by exposing 0.0.0.0:5432.
 
 ## Map frontend configuration
