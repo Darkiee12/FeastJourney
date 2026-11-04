@@ -26,7 +26,9 @@ import {
   ScanProcessing,
   type ScanPhase,
 } from "@/modules/restaurant-discovery/components/scan-processing";
+import { ScanResearchLocation } from "@/modules/restaurant-discovery/components/scan-research-location";
 import { ScanResults } from "@/modules/restaurant-discovery/components/scan-results";
+import { SearchableCurrencyPicker } from "@/modules/restaurant-discovery/components/searchable-currency-picker";
 import { CITY_PRESETS } from "@/modules/restaurant-discovery/map-bounds";
 import { menuBcp47TagFor } from "@/modules/restaurant-discovery/menu-presentation";
 import {
@@ -39,6 +41,7 @@ import { menuLanguageSchema } from "@/modules/restaurant-discovery/menu-scan.sch
 import type { MenuScanDocument } from "@/modules/restaurant-discovery/menu-scan.schema";
 import { getRestaurantFn } from "@/modules/restaurant-discovery/restaurant.functions";
 import { researchPricesFn } from "@/server/web-research/research-functions";
+import { currencyMinorUnits } from "@/shared/currencies";
 import { localeSearchSchema, type Locale } from "@/shared/i18n";
 import { isCurrency } from "@/shared/money";
 
@@ -198,7 +201,15 @@ const cityIdSchema = z
     return placeLocationPattern.test(cityId);
   });
 
-const storedLocationSchema = z.object({ cityId: cityIdSchema, label: z.string().min(1).max(200) });
+const storedLocationSchema = z.object({
+  cityId: cityIdSchema,
+  label: z.string().min(1).max(200),
+  country: z
+    .string()
+    .regex(/^[A-Z]{2}$/)
+    .nullable()
+    .optional(),
+});
 
 const readStoredMenuLocation = (): ScanMenuLocation | null => {
   try {
@@ -222,7 +233,11 @@ const rememberMenuLocation = (location: ScanMenuLocation | null): void => {
     else
       sessionStorage.setItem(
         storageMenuLocation,
-        JSON.stringify({ cityId: location.cityId, label: location.label }),
+        JSON.stringify({
+          cityId: location.cityId,
+          label: location.label,
+          country: location.country,
+        }),
       );
   } catch {
     return;
@@ -259,10 +274,12 @@ function ScanPriceResearch({
   locale,
   items,
   menuLocation,
+  onMenuLocation,
 }: {
   readonly locale: string;
   readonly items: MenuScanDocument["items"];
   readonly menuLocation?: ScanMenuLocation | null | undefined;
+  readonly onMenuLocation: (location: ScanMenuLocation | null) => void;
 }) {
   const language = locale === "vi" ? "vi" : "en";
   const strings = researchCopyFor(language);
@@ -285,7 +302,7 @@ function ScanPriceResearch({
   // so the country field stays empty rather than inventing one.
   // Currency still defaults from the dish.
   const [city, setCity] = useState(menuLocation?.label ?? "");
-  const [country, setCountry] = useState("");
+  const [country, setCountry] = useState(menuLocation?.country ?? "");
   const [state, setState] = useState<ResearchStatusState>("idle");
   const [contextLine, setContextLine] = useState("");
   const [findings, setFindings] = useState<ReadonlyArray<ResearchFinding>>([]);
@@ -426,48 +443,27 @@ function ScanPriceResearch({
         }))}
         size="regular"
       />
-      {/* Single column: the research group lives in the narrow results
-          aside on desktop, where the stylesheet's three-column place grid
-          would crush the inputs. Inline style wins over that unlayered
-          rule; stacked inputs stay readable at every width. */}
-      <div className="scan-research-place" style={{ gridTemplateColumns: "1fr" }}>
-        <div>
-          <label htmlFor="scan-research-city">{copy.researchCity}</label>
-          <input
-            id="scan-research-city"
-            type="text"
-            autoComplete="address-level2"
-            maxLength={100}
-            placeholder={copy.researchCityPlaceholder}
-            value={city}
-            onChange={(event) => setCity(event.target.value)}
-          />
-        </div>
-        <div>
-          <label htmlFor="scan-research-country">{copy.researchCountry}</label>
-          <input
-            id="scan-research-country"
-            type="text"
-            autoComplete="country-name"
-            maxLength={100}
-            placeholder={copy.researchCountryPlaceholder}
-            value={country}
-            onChange={(event) => setCountry(event.target.value)}
-          />
-        </div>
-        <div>
-          <label htmlFor="scan-research-currency">{copy.researchCurrency}</label>
-          <input
-            id="scan-research-currency"
-            type="text"
-            autoComplete="off"
-            maxLength={3}
-            placeholder="VND"
-            value={currency}
-            onChange={(event) => setCurrency(event.target.value.trim().toUpperCase())}
-          />
-        </div>
-      </div>
+      <ScanResearchLocation
+        locale={language}
+        city={city}
+        country={country}
+        onChange={(nextCity, nextCountry, cityId) => {
+          setCity(nextCity);
+          setCountry(nextCountry);
+
+          if (cityId !== undefined)
+            onMenuLocation({ cityId, label: nextCity, country: nextCountry });
+          else onMenuLocation(null);
+        }}
+      />
+      <SearchableCurrencyPicker
+        value={currency}
+        codes={[...currencyMinorUnits.keys()]}
+        locale={locale}
+        label={copy.researchCurrency}
+        placeholder={copy.researchCurrency}
+        onChange={setCurrency}
+      />
       <button
         type="button"
         className="menu-order-primary scan-research-trigger"
@@ -1215,21 +1211,26 @@ export function MenuScanPage({
               the order bar inside S2 is already sticky and the site
               header must keep working. min-w-0 on both columns prevents
               grid blowout at 320px. */}
-          <div className="scan-results-layout lg:grid lg:grid-cols-3 lg:items-start lg:gap-6">
-            <div className="min-w-0 lg:col-span-2">
+          <div className="scan-results-layout">
+            <div className="min-w-0">
               <ScanResults
                 scanId={view.scan.id}
                 menuLocation={menuLocation}
                 onScanAnother={scanAnother}
+                onRevisionSaved={adoptView}
                 onDeleteScan={() => deleteScan(view.scan.id)}
               />
             </div>
-            <aside className="scan-results-side min-w-0" aria-label={copy.resultsTitle}>
+            <details className="scan-results-side min-w-0">
+              <summary>
+                {locale === "vi" ? "Nghiên cứu giá và đóng góp" : "Price research and contribution"}
+              </summary>
               {document.items.length > 0 && (
                 <ScanPriceResearch
                   locale={locale}
                   items={document.items}
                   menuLocation={menuLocation}
+                  onMenuLocation={changeMenuLocation}
                 />
               )}
               <section className="scan-contribution">
@@ -1268,7 +1269,7 @@ export function MenuScanPage({
                   </>
                 )}
               </section>
-            </aside>
+            </details>
           </div>
         </section>
       )}

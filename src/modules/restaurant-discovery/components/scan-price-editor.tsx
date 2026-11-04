@@ -1,14 +1,13 @@
+import type { z } from "zod";
+
 import { menuCopy } from "@/modules/restaurant-discovery/components/menu-copy";
+import { SearchableCurrencyPicker } from "@/modules/restaurant-discovery/components/searchable-currency-picker";
 import type { MenuDraftVariantPrice } from "@/modules/restaurant-discovery/menu-presentation";
 import { scanPriceSchema } from "@/modules/restaurant-discovery/menu-scan.schema";
+import { currencyMinorUnits } from "@/shared/currencies";
 import { isAmount, isCurrency } from "@/shared/money";
 
-type ScanPrice = {
-  readonly rawText: string;
-  readonly amount: string | null;
-  readonly currency: string | null;
-  readonly taxTreatment: "included" | "excluded" | "unknown";
-};
+type ScanPrice = z.infer<typeof scanPriceSchema>;
 
 /** Price sub-form for an extracted scan variant. Markup mirrors ScanEditor exactly. */
 export function ScanPriceFields({
@@ -49,33 +48,38 @@ export function ScanPriceFields({
           })
         }
       />
-      <label htmlFor={`edit-currency-${variantId}`}>{copy.currency}</label>
-      <input
-        id={`edit-currency-${variantId}`}
-        maxLength={3}
-        autoCapitalize="characters"
-        aria-invalid={!priceValid}
+      <SearchableCurrencyPicker
         value={price.currency ?? ""}
-        onChange={(event) =>
-          onChange({
-            ...price,
-            currency: event.target.value === "" ? null : event.target.value.toUpperCase(),
-          })
+        codes={[...currencyMinorUnits.keys()]}
+        locale={locale}
+        label={copy.currency}
+        placeholder={copy.currency}
+        onChange={(currency) =>
+          onChange({ ...price, currency, currencyProvenance: "user-confirmed" })
         }
       />
-      <label htmlFor={`edit-tax-${variantId}`}>{copy.taxes}</label>
-      <select
-        id={`edit-tax-${variantId}`}
-        value={price.taxTreatment}
-        onChange={(event) => {
-          const treatment = scanPriceSchema.shape.taxTreatment.parse(event.target.value);
-          onChange({ ...price, taxTreatment: treatment });
-        }}
+      <button
+        type="button"
+        onClick={() => onChange({ ...price, currency: null, currencyProvenance: "unknown" })}
       >
-        <option value="unknown">{copy.unknown}</option>
-        <option value="included">{copy.included}</option>
-        <option value="excluded">{copy.excluded}</option>
-      </select>
+        {locale === "vi" ? "Chưa xác nhận tiền tệ" : "Currency not confirmed"}
+      </button>
+      <details>
+        <summary>{copy.taxes}</summary>
+        <label htmlFor={`edit-tax-${variantId}`}>{copy.taxes}</label>
+        <select
+          id={`edit-tax-${variantId}`}
+          value={price.taxTreatment}
+          onChange={(event) => {
+            const treatment = scanPriceSchema.shape.taxTreatment.parse(event.target.value);
+            onChange({ ...price, taxTreatment: treatment });
+          }}
+        >
+          <option value="unknown">{copy.unknown}</option>
+          <option value="included">{copy.included}</option>
+          <option value="excluded">{copy.excluded}</option>
+        </select>
+      </details>
     </>
   );
 }

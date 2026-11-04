@@ -12,7 +12,9 @@ import {
   useScanCurrency,
 } from "@/modules/restaurant-discovery/components/scan-currency-control";
 import { ScanEditor } from "@/modules/restaurant-discovery/components/scan-editor";
+import { SearchableCurrencyPicker } from "@/modules/restaurant-discovery/components/searchable-currency-picker";
 import { menuBcp47TagFor, presentScan } from "@/modules/restaurant-discovery/menu-presentation";
+import { interpretPrintedPrice } from "@/modules/restaurant-discovery/menu-price-interpretation";
 import {
   MenuScanClientError,
   menuScanClient,
@@ -23,7 +25,7 @@ import {
   scanIdSchema,
 } from "@/modules/restaurant-discovery/menu-scan.schema";
 import type { MenuScanDocument } from "@/modules/restaurant-discovery/menu-scan.schema";
-import { isAmount, isCurrency } from "@/shared/money";
+import { currencyMinorUnits } from "@/shared/currencies";
 
 type ResultsCopy = ReturnType<typeof menuScanResultsCopy>;
 
@@ -47,20 +49,20 @@ const expiryText = (expiresAt: string, locale: string, copy: ResultsCopy): strin
   return `${copy.expiresLabel}: ${expiry.toLocaleString(locale)}`;
 };
 
-const priceUnclear = (document: MenuScanDocument): boolean =>
-  document.items.some((item) =>
-    item.variants.some(
-      (variant) =>
-        variant.price === null ||
-        variant.price.amount === null ||
-        variant.price.currency === null ||
-        !isAmount(variant.price.amount) ||
-        !isCurrency(variant.price.currency),
-    ),
-  );
-
 const sourceCurrenciesOf = (document: MenuScanDocument): ReadonlyArray<string | null> =>
-  document.items.flatMap((item) => item.variants.map((variant) => variant.price?.currency ?? null));
+  document.items.flatMap((item) =>
+    item.variants.flatMap((variant) => {
+      if (variant.price === null) return [];
+      const price = interpretPrintedPrice(variant.price);
+
+      return price.amount !== null &&
+        price.currency !== null &&
+        price.association !== "ambiguous" &&
+        price.association !== "unavailable"
+        ? [price.currency]
+        : [];
+    }),
+  );
 
 /** Two-step delete confirmation inside the overflow disclosure. */
 function ScanDeleteAction({
@@ -100,37 +102,21 @@ function ScanDeleteAction({
   );
 }
 
-/**
- * Post-analysis results shell. Visible success heading ("Your menu is ready"
- * + "Choose what you'd like to order"), then one compact context summary
- * (venue / menu location / source → target language / dish count / currency
- * status) with a quiet expiry line, the single compact menu-wide currency
- * control, and one concise scan-wide notice (allergy/dietary always, price
- * clarity only when unclear). Dishes are the dominant element: the shared
- * InteractiveMenuView/MenuItemRow board renders immediately after the
- * notice, with MenuItemDetail on demand. Supporting groups follow —
- * Menu tools (photo thumbnails via MenuPhotoViewer, corrections), then
- * More (overflow: scan another / reload / delete with confirmation;
- * collapsed scan details). IDs, model, revision, provenance, and expiry
- * detail stay collapsed; the visible UI keeps only concise lines.
- *
- * Price research is intentionally NOT rendered here: the single research
- * trigger per screen stays with S1's ScanPriceResearch, mounted as a sibling
- * directly below this component with the same locale + items (see mount
- * note in the coordinator report). Printed prices are never replaced.
- */
+/** Private menu browsing with separate correction and currency-confirmation dialogs. */
 export function ScanResults({
   scanId,
   menuLocation,
   onEditDish,
   onScanAnother,
   onDeleteScan,
+  onRevisionSaved,
 }: {
   readonly scanId: string;
   readonly menuLocation?: ScanMenuLocation | null | undefined;
   readonly onEditDish?: ((itemKey: string) => void) | undefined;
   readonly onScanAnother?: (() => void) | undefined;
   readonly onDeleteScan?: (() => void) | undefined;
+  readonly onRevisionSaved?: ((view: ScanView) => void) | undefined;
 }) {
   const [view, setView] = useState<ScanView | null>(null);
   const [document, setDocument] = useState<MenuScanDocument | null>(null);
@@ -140,9 +126,11 @@ export function ScanResults({
   const [failure, setFailure] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
-  const [correctionsOpen, setCorrectionsOpen] = useState(false);
   const [loadedId, setLoadedId] = useState<string | null>(null);
-  const correctionsRef = useRef<HTMLDetailsElement | null>(null);
+  const correctionsRef = useRef<HTMLDialogElement | null>(null);
+  const currencyDialog = useRef<HTMLDialogElement | null>(null);
+  const [editItemId, setEditItemId] = useState<string | null>(null);
+  const [confirmedCurrency, setConfirmedCurrency] = useState("");
 
   const idValid = scanIdSchema.safeParse({ scanId }).success;
 
@@ -158,7 +146,6 @@ export function ScanResults({
     setSaveNotice(null);
     setFailure(null);
     setLoading(true);
-    setCorrectionsOpen(false);
   }
 
   useEffect(() => {
@@ -212,14 +199,14 @@ export function ScanResults({
       return;
     }
 
-    setCorrectionsOpen(true);
-    correctionsRef.current?.scrollIntoView();
+    setEditItemId(itemKey);
+    correctionsRef.current?.showModal();
   };
 
-  const saveRevision = (): void => {
+  const saveRevision = (nextDocument: MenuScanDocument | null = document): void => {
     if (document === null || view === null || view.scan.current_revision === null) return;
 
-    const parsed = menuScanDocumentSchema.safeParse(document);
+    const parsed = menuScanDocumentSchema.safeParse(nextDocument);
 
     if (!parsed.success) {
       setSaveNotice(null);
@@ -240,7 +227,10 @@ export function ScanResults({
           setView(next);
           setDocument(next.document);
           setDirty(false);
+          onRevisionSaved?.(next);
           setSaveNotice(copy.saved);
+          correctionsRef.current?.close();
+          currencyDialog.current?.close();
         },
         (error) => {
           setSaveError(error instanceof Error ? error.message : copy.failed);
@@ -294,20 +284,74 @@ export function ScanResults({
     sourceName === null
       ? null
       : copy.contextLanguages.replace("{source}", sourceName).replace("{target}", targetName),
-    document.items.length.toLocaleString(locale),
-    currency.enabled && currency.target !== ""
-      ? copy.currencyConverted.replace("{target}", currency.target)
-      : copy.currencyOriginalOnly,
+    `${document.items.length.toLocaleString(locale)} ${locale === "vi" ? "món" : "dishes"}`,
+    [...new Set(sourceCurrenciesOf(document))].join(" / "),
   ]
     .flatMap((part) => (part === null ? [] : [part]))
     .join(" · ");
 
-  // One concise scan-wide notice: allergy/dietary wording is always
-  // visible but quiet; the unclear-price sentence joins it only when at
-  // least one variant lacks a usable price.
-  const noticeText = priceUnclear(document)
-    ? `${copy.dietNote} ${copy.priceUnclear}`
-    : copy.dietNote;
+  const noticeText = copy.dietNote;
+
+  const unresolved = document.items
+    .flatMap((item) => item.variants)
+    .filter((variant) => {
+      const price = variant.price === null ? null : interpretPrintedPrice(variant.price);
+
+      return (
+        price !== null &&
+        price.rawText.trim() !== "" &&
+        ((price.currency === null &&
+          /^[\d.,\s]+[kK]?(?:\s*\/[^/]+)?$/.test(price.rawText.trim())) ||
+          price.currencyProvenance === "inferred") &&
+        price.association !== "ambiguous" &&
+        price.association !== "unavailable"
+      );
+    });
+
+  const observedCurrencies = [
+    ...new Set(
+      unresolved.flatMap((variant) => (variant.price?.currency ? [variant.price.currency] : [])),
+    ),
+  ];
+
+  let suggestedCurrency = "";
+
+  if (observedCurrencies.length === 1) suggestedCurrency = observedCurrencies[0] ?? "";
+  else if (menuLocation?.country === "VN") suggestedCurrency = "VND";
+  const menuCurrency = confirmedCurrency || suggestedCurrency;
+
+  const confirmCurrency = (): void => {
+    if (menuCurrency === "") return;
+
+    const eligible = new Set(
+      unresolved
+        .filter(
+          (variant) => variant.price?.currency === null || variant.price?.currency === menuCurrency,
+        )
+        .map((variant) => variant.id),
+    );
+
+    const next = {
+      ...document,
+      items: document.items.map((item) => ({
+        ...item,
+        variants: item.variants.map((variant) => {
+          if (!eligible.has(variant.id) || variant.price === null) return variant;
+
+          return {
+            ...variant,
+            price: {
+              ...interpretPrintedPrice(variant.price),
+              currency: menuCurrency,
+              currencyProvenance: "user-confirmed" as const,
+            },
+          };
+        }),
+      })),
+    };
+
+    saveRevision(next);
+  };
 
   return (
     <article className="scan-results" lang={menuBcp47TagFor(locale)}>
@@ -317,46 +361,136 @@ export function ScanResults({
         </h1>
         <p>{copy.subtitle}</p>
         <p className="scan-results-context">{contextLine}</p>
-        <ScanCurrencyControl
-          sources={sourceCurrenciesOf(document)}
-          locale={locale}
-          state={currency}
-        />
+        <div className="scan-results-actions">
+          <button
+            type="button"
+            className="menu-order-back"
+            onClick={() => handleEditDish(document.items[0]?.id ?? "")}
+          >
+            {copy.corrections}
+          </button>
+          {onScanAnother && (
+            <button type="button" className="menu-order-back" onClick={onScanAnother}>
+              {copy.scanAnother}
+            </button>
+          )}
+        </div>
+        {assets.length > 0 && (
+          <section className="scan-results-photos" aria-label={copy.photosTitle}>
+            <h2>{copy.photosTitle}</h2>
+            <p>{copy.photosHelp}</p>
+            <MenuPhotoViewer
+              photos={assets.map((asset) => ({ assetId: asset.id, page: asset.page_number }))}
+              photoUrl={(assetId) => `/api/menu-scans?scanId=${view.scan.id}&assetId=${assetId}`}
+              locale={locale}
+            />
+          </section>
+        )}
+        {sourceCurrenciesOf(document).length > 0 && (
+          <ScanCurrencyControl
+            sources={sourceCurrenciesOf(document)}
+            locale={locale}
+            state={currency}
+          />
+        )}
         {expiry !== null && <p className="scan-results-expiry">{expiry}</p>}
       </header>
       <p className="scan-results-diet">{noticeText}</p>
+      {unresolved.length > 0 && (
+        <>
+          <button
+            type="button"
+            className="menu-results-edit"
+            onClick={() => currencyDialog.current?.showModal()}
+          >
+            {locale === "vi" ? "Xác nhận tiền tệ thực đơn" : "Confirm menu currency"}
+          </button>
+          <dialog
+            ref={currencyDialog}
+            className="menu-waiter-dialog"
+            aria-label={locale === "vi" ? "Xác nhận tiền tệ" : "Confirm menu currency"}
+          >
+            <form method="dialog">
+              <button className="menu-order-back">{locale === "vi" ? "Đóng" : "Close"}</button>
+            </form>
+            <section
+              className="scan-confirm-currency"
+              aria-label={locale === "vi" ? "Xác nhận tiền tệ" : "Confirm menu currency"}
+            >
+              <p>
+                {locale === "vi"
+                  ? "Xác nhận tiền tệ cho các giá rõ ràng. Giá mơ hồ được giữ nguyên."
+                  : "Confirm menu currency for readable prices. Ambiguous and printed currency observations stay unchanged."}
+              </p>
+              {suggestedCurrency !== "" && (
+                <p>
+                  {locale === "vi" ? "Gợi ý từ ngữ cảnh thực đơn" : "Suggestion from menu context"}:{" "}
+                  {suggestedCurrency}.{" "}
+                  {locale === "vi"
+                    ? "Vui lòng xác nhận hoặc chọn tiền tệ khác."
+                    : "Please confirm or choose another currency."}
+                </p>
+              )}
+              <SearchableCurrencyPicker
+                value={menuCurrency}
+                codes={[...currencyMinorUnits.keys()]}
+                locale={locale}
+                label={locale === "vi" ? "Tiền tệ thực đơn" : "Menu currency"}
+                placeholder={locale === "vi" ? "Chọn tiền tệ" : "Choose currency"}
+                onChange={setConfirmedCurrency}
+              />
+              <button
+                type="button"
+                className="menu-order-back"
+                disabled={saving || menuCurrency === ""}
+                onClick={confirmCurrency}
+              >
+                {locale === "vi" ? "Xác nhận" : "Confirm menu currency"}
+              </button>
+            </section>
+          </dialog>
+        </>
+      )}
+      {saveNotice !== null && <output aria-live="polite">{saveNotice}</output>}
+      {saveError !== null && <p role="alert">{saveError}</p>}
       <InteractiveMenuView
-        key={`${view.scan.id}:${view.scan.current_revision ?? "draft"}`}
+        key={view.scan.id}
         menu={presentScan(document, venueName)}
         locale={locale}
         photoUrl={(assetId) => `/api/menu-scans?scanId=${view.scan.id}&assetId=${assetId}`}
         rates={currency.rates}
         onEditDish={handleEditDish}
       />
-      {/* Price-research mount point (S1): render ScanPriceResearch as a
-          page-level sibling of ScanResults (aside column of the results
-          grid) with locale + items. ScanResults renders no research
-          trigger so the screen keeps exactly one (single-trigger rule). */}
-      {assets.length > 0 && (
-        <section className="scan-results-photos" aria-label={copy.photosTitle}>
-          <h2>{copy.photosTitle}</h2>
-          <p>{copy.photosHelp}</p>
-          <MenuPhotoViewer
-            photos={assets.map((asset) => ({ assetId: asset.id, page: asset.page_number }))}
-            photoUrl={(assetId) => `/api/menu-scans?scanId=${view.scan.id}&assetId=${assetId}`}
-            locale={locale}
-          />
-        </section>
-      )}
-      <details
+      <dialog
         ref={correctionsRef}
-        className="scan-results-corrections"
-        open={correctionsOpen}
-        onToggle={(event) => setCorrectionsOpen(event.currentTarget.open)}
+        className="menu-waiter-dialog"
+        aria-label={copy.corrections}
+        onCancel={(event) => {
+          if (saving) {
+            event.preventDefault();
+
+            return;
+          }
+
+          setDocument(view.document);
+          setDirty(false);
+        }}
       >
-        <summary>{copy.corrections}</summary>
-        <p>{copy.correctionsHelp}</p>
+        <button
+          type="button"
+          className="menu-order-back"
+          disabled={saving}
+          onClick={() => {
+            setDocument(view.document);
+            setDirty(false);
+            correctionsRef.current?.close();
+          }}
+        >
+          {locale === "vi" ? "Hủy" : "Cancel"}
+        </button>
         <ScanEditor
+          key={editItemId}
+          initialItemId={editItemId}
           document={document}
           onChange={(next) => {
             setDocument(next);
@@ -365,17 +499,16 @@ export function ScanResults({
           }}
         />
         {dirty && <output>{copy.unsavedChanges}</output>}
-        {saveNotice !== null && <output aria-live="polite">{saveNotice}</output>}
         {saveError !== null && <p role="alert">{saveError}</p>}
         <button
           type="button"
           className="menu-order-primary"
           disabled={saving || !dirty}
-          onClick={saveRevision}
+          onClick={() => saveRevision()}
         >
           {copy.saveFixes}
         </button>
-      </details>
+      </dialog>
       <details className="scan-results-overflow">
         <summary>{copy.overflowLabel}</summary>
         <div className="scan-results-overflow-actions">

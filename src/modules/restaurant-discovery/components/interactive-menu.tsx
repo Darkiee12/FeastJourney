@@ -9,14 +9,12 @@ import { MenuItemDetail } from "@/modules/restaurant-discovery/components/menu-i
 import {
   defaultVariantIdFor,
   MenuItemRow,
-  rowDisplayNameFor,
 } from "@/modules/restaurant-discovery/components/menu-item-row";
 import { WaiterOrderCard } from "@/modules/restaurant-discovery/components/waiter-order-card";
 import {
   menuBcp47TagFor,
   MenuSubtotal,
   menuSubtotal,
-  orderLines,
 } from "@/modules/restaurant-discovery/menu-presentation";
 import type {
   InteractiveMenu,
@@ -100,7 +98,9 @@ export function InteractiveMenuView({
   const [selections, setSelections] = useState<ReadonlyArray<MenuSelection>>([]);
   const [reviewed, setReviewed] = useState<ReadonlySet<string>>(() => new Set());
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [section, setSection] = useState<string | null>(null);
+  const detailDialog = useRef<HTMLDialogElement>(null);
+  const reviewDialog = useRef<HTMLDialogElement>(null);
 
   const availableIds = new Set(
     menu.items.flatMap((item) => item.variants.map((variant) => variant.id)),
@@ -143,9 +143,13 @@ export function InteractiveMenuView({
     return defaultVariantIdFor(item);
   };
 
-  const openItem = (itemId: string): void => setExpandedId(itemId);
+  const openItem = (itemId: string): void => {
+    setExpandedId(itemId);
+    detailDialog.current?.showModal();
+  };
 
   const closeDetail = (itemId: string): void => {
+    detailDialog.current?.close();
     setExpandedId(null);
     document.getElementById(`menu-row-open-${itemId}`)?.focus();
   };
@@ -156,21 +160,17 @@ export function InteractiveMenuView({
 
   if (menu.provenance === "draft") notice = copy.draftNotice;
 
-  const sourceLanguage = menu.sourceLanguage ?? "und";
-
   const expandedItem =
     expandedId === null ? undefined : menu.items.find((item) => item.id === expandedId);
 
   const expandedSelectionId =
     expandedItem === undefined ? null : selectedVariantIdFor(expandedItem);
 
-  const lines = orderLines(menu, currentSelections);
-
   const subtotal = menuSubtotal(menu, currentSelections);
 
   const subtotalText = MenuSubtotal.$match(subtotal, {
     Empty: () => copy.empty,
-    Unavailable: () => copy.priceCheck,
+    Unavailable: () => (locale === "vi" ? "Cần xác nhận tổng" : "Total to confirm"),
     Calculable: ({ amount, currency }) =>
       `${copy.subtotal}: ${formatMoney(amount, currency, locale)} ${currency}`,
   });
@@ -182,80 +182,114 @@ export function InteractiveMenuView({
       </h2>
       <p className="menu-order-notice">{notice}</p>
       {menu.items.length === 0 && <output>{copy.empty}</output>}
-      {expandedItem !== undefined && expandedSelectionId !== null ? (
-        <>
-          <MenuItemDetail
-            item={expandedItem}
-            locale={locale}
-            labels={{
-              back: copy.back,
-              variant: copy.variant,
-              asListed: copy.asListed,
-              quantity: copy.quantity,
-              add: copy.add,
-              remove: copy.remove,
-              addToOrder: copy.addToOrder,
-              unknownPrice: copy.unknownPrice,
-              unknownCurrency: copy.unknownCurrency,
-              priceSource: copy.priceSource,
-              exploreDish: copy.exploreDish,
-              photo: copy.photo,
-              ingredients: copy.ingredients,
-              ingredientNotice: copy.ingredientNotice,
-              printedIngredients: copy.printedIngredients,
-              inferredIngredients: copy.inferredIngredients,
-              explanation: copy.explanation,
-              originalDescription: copy.originalDescription,
-              uncertainty: copy.uncertainty,
-              instructions: copy.instructions,
-              enteredInstruction: copy.enteredInstruction,
-              waiterInstruction: copy.waiterInstruction,
-              instructionHelp: copy.instructionHelp,
-              reviewedInstructions: copy.reviewedInstructions,
-              inferredNote: resultsCopy.priceInferredNote,
-              possibleNote: resultsCopy.pricePossibleNote,
-            }}
-            rates={rates}
-            activeVariantId={expandedSelectionId}
-            selection={currentSelections.find((entry) => entry.variantId === expandedSelectionId)}
-            reviewed={reviewed.has(expandedSelectionId)}
-            sourceLanguage={menuBcp47TagFor(menu.sourceLanguage)}
-            targetLanguage={menuBcp47TagFor(menu.targetLanguage)}
-            notice={notice}
-            photoUrl={photoUrl}
-            onBack={() => closeDetail(expandedItem.id)}
-            onVariant={(id) =>
-              setActiveVariants((previous) => new Map([...previous, [expandedItem.id, id]]))
-            }
-            onSelection={changeSelection}
-            onReview={(accepted) =>
-              setReviewed((previous) => {
-                const next = new Set(previous);
+      <dialog
+        ref={detailDialog}
+        className="menu-waiter-dialog"
+        aria-label={copy.openDetails}
+        onClose={() => setExpandedId(null)}
+      >
+        {expandedItem !== undefined && expandedSelectionId !== null && (
+          <>
+            <MenuItemDetail
+              item={expandedItem}
+              locale={locale}
+              labels={{
+                back: copy.back,
+                variant: copy.variant,
+                asListed: copy.asListed,
+                quantity: copy.quantity,
+                add: copy.add,
+                remove: copy.remove,
+                addToOrder: copy.addToOrder,
+                unknownPrice: copy.unknownPrice,
+                unknownCurrency: copy.unknownCurrency,
+                priceSource: copy.priceSource,
+                exploreDish: copy.exploreDish,
+                photo: copy.photo,
+                ingredients: copy.ingredients,
+                ingredientNotice: copy.ingredientNotice,
+                printedIngredients: copy.printedIngredients,
+                inferredIngredients: copy.inferredIngredients,
+                explanation: copy.explanation,
+                originalDescription: copy.originalDescription,
+                uncertainty: copy.uncertainty,
+                instructions: copy.instructions,
+                enteredInstruction: copy.enteredInstruction,
+                waiterInstruction: copy.waiterInstruction,
+                instructionHelp: copy.instructionHelp,
+                reviewedInstructions: copy.reviewedInstructions,
+                inferredNote: resultsCopy.priceInferredNote,
+                possibleNote: resultsCopy.pricePossibleNote,
+              }}
+              rates={rates}
+              activeVariantId={expandedSelectionId}
+              selection={currentSelections.find((entry) => entry.variantId === expandedSelectionId)}
+              reviewed={reviewed.has(expandedSelectionId)}
+              sourceLanguage={menuBcp47TagFor(menu.sourceLanguage)}
+              targetLanguage={menuBcp47TagFor(menu.targetLanguage)}
+              notice={notice}
+              photoUrl={photoUrl}
+              onBack={() => closeDetail(expandedItem.id)}
+              onVariant={(id) =>
+                setActiveVariants((previous) => new Map([...previous, [expandedItem.id, id]]))
+              }
+              onSelection={changeSelection}
+              onReview={(accepted) =>
+                setReviewed((previous) => {
+                  const next = new Set(previous);
 
-                if (accepted) next.add(expandedSelectionId);
-                else next.delete(expandedSelectionId);
+                  if (accepted) next.add(expandedSelectionId);
+                  else next.delete(expandedSelectionId);
 
-                return next;
-              })
-            }
-          />
-          {onEditDish !== undefined && (
+                  return next;
+                })
+              }
+            />
+            {onEditDish !== undefined && (
+              <button
+                type="button"
+                className="menu-results-edit"
+                onClick={() => {
+                  detailDialog.current?.close();
+                  onEditDish(expandedItem.id);
+                }}
+              >
+                {resultsCopy.correctDetails}
+              </button>
+            )}
+          </>
+        )}
+      </dialog>
+      {menu.items.some((item) => item.section !== null) && (
+        <nav
+          className="menu-category-nav"
+          aria-label={locale === "vi" ? "Nhóm món" : "Menu categories"}
+        >
+          <button type="button" aria-pressed={section === null} onClick={() => setSection(null)}>
+            {locale === "vi" ? "Tất cả" : "All dishes"}
+          </button>
+          {[
+            ...new Set(menu.items.flatMap((item) => (item.section === null ? [] : [item.section]))),
+          ].map((label) => (
             <button
               type="button"
-              className="menu-results-edit"
-              onClick={() => onEditDish(expandedItem.id)}
+              key={label}
+              aria-pressed={section === label}
+              onClick={() => setSection(label)}
             >
-              {resultsCopy.correctDetails}
+              {humanizeSection(label)}
             </button>
-          )}
-        </>
-      ) : (
-        <div className="menu-board">
-          {menu.items.map((item, index) => {
+          ))}
+        </nav>
+      )}
+      <div className="menu-board">
+        {menu.items
+          .filter((item) => section === null || item.section === section)
+          .map((item, index, visible) => {
             const selectedId = selectedVariantIdFor(item);
 
             if (selectedId === null) return null;
-            const previousSection = menu.items[index - 1]?.section;
+            const previousSection = visible[index - 1]?.section;
 
             const sectionLabel =
               item.section === null || item.section === previousSection
@@ -283,103 +317,79 @@ export function InteractiveMenuView({
                     selection={currentSelections.find((entry) => entry.variantId === selectedId)}
                     sourceLanguage={menuBcp47TagFor(menu.sourceLanguage)}
                     targetLanguage={menuBcp47TagFor(menu.targetLanguage)}
-                    thumbnail={
-                      photoUrl === undefined
-                        ? undefined
-                        : item.assetIds.slice(0, 1).map((assetId) => (
-                            <img
-                              key={assetId}
-                              src={photoUrl(assetId)}
-                              alt=""
-                              loading="lazy"
-                              onError={(event) => {
-                                event.currentTarget.style.display = "none";
-                              }}
-                            />
-                          ))
-                    }
                     onOpen={() => openItem(item.id)}
+                    onEdit={onEditDish === undefined ? undefined : () => onEditDish(item.id)}
                     onSelection={changeSelection}
                   />
                 </ul>
               </Fragment>
             );
           })}
-        </div>
-      )}
+      </div>
       {quantity > 0 && (
-        <div className="menu-order-bar menu-order-bar-compact">
+        <div className="menu-order-bar">
           <output aria-live="polite">
-            {copy.selected}: {quantity} · {subtotalText}
+            {quantity} {locale === "vi" ? "món" : "items"} · {subtotalText}
           </output>
-          <ConvertedSubtotal
-            menu={menu}
-            selections={currentSelections}
-            locale={locale}
-            rates={rates}
-          />
-          <div className="menu-order-bar-actions">
-            <button
-              type="button"
-              aria-expanded={summaryOpen}
-              onClick={() => setSummaryOpen((open) => !open)}
-            >
-              {summaryOpen ? copy.collapseLines : copy.expandLines}
-            </button>
-            <button
-              type="button"
-              className="menu-order-primary"
-              disabled={needsReview}
-              aria-describedby={needsReview ? `${titleId}-review` : undefined}
-              onClick={() => dialog.current?.showModal()}
-            >
-              {copy.show}
-            </button>
-          </div>
-          {needsReview && <output id={`${titleId}-review`}>{copy.reviewRequired}</output>}
-          {summaryOpen && (
-            <ul className="menu-order-lines">
-              {lines.map((line) => (
-                <li key={line.variant.id}>
-                  <span lang={sourceLanguage}>
-                    {line.quantity}× {line.item.originalName} — {line.variant.originalLabel}
-                  </span>
-                  <span className="menu-order-lines-qty">
-                    <button
-                      type="button"
-                      aria-label={`${copy.remove}: ${rowDisplayNameFor(line.item)}`}
-                      disabled={line.quantity <= 1}
-                      onClick={() =>
-                        changeSelection({ ...line, quantity: Math.max(1, line.quantity - 1) })
-                      }
-                    >
-                      −
-                    </button>
-                    <output aria-label={copy.quantity}>{line.quantity}</output>
-                    <button
-                      type="button"
-                      aria-label={`${copy.add}: ${rowDisplayNameFor(line.item)}`}
-                      disabled={line.quantity >= 99}
-                      onClick={() =>
-                        changeSelection({ ...line, quantity: Math.min(99, line.quantity + 1) })
-                      }
-                    >
-                      +
-                    </button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <button
+            type="button"
+            className="menu-order-primary"
+            onClick={() => reviewDialog.current?.showModal()}
+          >
+            {locale === "vi" ? "Xem đơn" : "View order"}
+          </button>
         </div>
       )}
+      <dialog
+        ref={reviewDialog}
+        className="menu-waiter-dialog menu-review-dialog"
+        aria-label={copy.orderTitle}
+      >
+        <form method="dialog">
+          <button className="menu-order-back">{locale === "vi" ? "Đóng" : "Close"}</button>
+        </form>
+        <WaiterOrderCard
+          menu={menu}
+          selections={currentSelections}
+          locale={locale}
+          reviewedVariantIds={reviewed}
+          initialShowTranslations
+          onEditLine={(itemId) => {
+            reviewDialog.current?.close();
+            openItem(itemId);
+          }}
+          onQuantity={(variantId, nextQuantity) => {
+            const selection = currentSelections.find((entry) => entry.variantId === variantId);
+
+            if (selection !== undefined) changeSelection({ ...selection, quantity: nextQuantity });
+          }}
+        />
+        <p className="menu-order-notice">{copy.ingredientNotice}</p>
+        {needsReview && <output>{copy.reviewRequired}</output>}
+        <button
+          type="button"
+          className="menu-order-primary"
+          disabled={needsReview || quantity === 0}
+          onClick={() => {
+            reviewDialog.current?.close();
+            dialog.current?.showModal();
+          }}
+        >
+          {copy.show}
+        </button>
+      </dialog>
       <dialog ref={dialog} className="menu-waiter-dialog" aria-label={copy.orderTitle}>
         <form method="dialog">
           <button type="submit" className="menu-order-back">
             {copy.back}
           </button>
         </form>
-        <WaiterOrderCard menu={menu} selections={currentSelections} locale={locale} />
+        <WaiterOrderCard
+          menu={menu}
+          selections={currentSelections}
+          locale={locale}
+          reviewedVariantIds={reviewed}
+        />
         <ConvertedSubtotal
           menu={menu}
           selections={currentSelections}

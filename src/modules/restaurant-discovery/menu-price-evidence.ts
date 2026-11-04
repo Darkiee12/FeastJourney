@@ -283,7 +283,7 @@ export const formatCurrencyContextEvidence = (context: CurrencyContext): string 
 
   if (context.menuCity !== null || context.menuCountry !== null)
     parts.push(
-      `visitor-indicated menu location ${[context.menuCity, context.menuCountry].filter((part) => part !== null).join(", ")}`,
+      `menu location ${[context.menuCity, context.menuCountry].filter((part) => part !== null).join(", ")}`,
     );
 
   if (context.trustedCountry !== null)
@@ -295,12 +295,12 @@ export const formatCurrencyContextEvidence = (context: CurrencyContext): string 
     context.menuCountry !== context.trustedCountry
   )
     parts.push(
-      `conflicting signals: menu location names ${context.menuCountry} but visitor country is ${context.trustedCountry}; stay uncertain, do not resolve the conflict`,
+      `different visitor location: menu country is ${context.menuCountry}, visitor country is ${context.trustedCountry}; menu location takes precedence, visitor location does not establish menu currency`,
     );
 
   if (parts.length === 0) return null;
 
-  return `Coarse location evidence (weak; printed currency always wins): ${parts.join("; ")}. Menu language is not location evidence.`;
+  return `Menu-location evidence (printed currency always wins; visitor country is suggestion only): ${parts.join("; ")}. Menu language is not location evidence.`;
 };
 
 /**
@@ -314,8 +314,6 @@ export const formatCurrencyContextEvidence = (context: CurrencyContext): string 
  */
 export const resolveMenuCountry = (context: CurrencyContext): string | null => {
   if (context.menuCountry !== null) return context.menuCountry;
-
-  if (context.trustedCountry !== null) return context.trustedCountry;
 
   return null;
 };

@@ -264,6 +264,7 @@ export function ScanLocationPicker({
                           onClick={() =>
                             onSelect({
                               cityId: `place:${entry.id}`,
+                              country: entry.country,
                               label: entry.context ?? entry.name ?? entry.id,
                             })
                           }

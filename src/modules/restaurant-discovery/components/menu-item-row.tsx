@@ -38,7 +38,7 @@ export function PriceConfidenceNote({
   readonly possibleNote: string | undefined;
   readonly associationNote?: string | null | undefined;
 }): ReactNode {
-  if (price === null || price.amount === null || price.currency === null) return null;
+  if (price === null) return null;
 
   if (priceAssociationOf(price) === "ambiguous" && possibleNote !== undefined)
     return (
@@ -120,6 +120,7 @@ export function MenuItemRow({
   targetLanguage,
   thumbnail,
   onOpen,
+  onEdit,
   onSelection,
 }: {
   readonly item: MenuRowItem;
@@ -132,6 +133,7 @@ export function MenuItemRow({
   readonly targetLanguage: string;
   readonly thumbnail?: ReactNode | undefined;
   readonly onOpen: () => void;
+  readonly onEdit?: (() => void) | undefined;
   readonly onSelection: (selection: MenuSelection) => void;
 }): ReactNode {
   const variant: MenuRowVariant | undefined = item.variants.find(
@@ -144,7 +146,6 @@ export function MenuItemRow({
   const name = rowDisplayNameFor(item);
   const showOriginal = rowShowsOriginalNameFor(item);
   const snippet = rowSnippetFor(item);
-  const priced = priceAvailability(variant.price?.amount ?? null, variant.price?.currency ?? null);
   const price = variant.price;
 
   const addOne = (): void => {
@@ -160,17 +161,9 @@ export function MenuItemRow({
 
   return (
     <li className="menu-row">
-      <span className="menu-row-thumb" aria-hidden={thumbnail === undefined}>
-        {thumbnail ?? <span className="menu-row-thumb-empty" aria-hidden="true" />}
-      </span>
-      <span className="menu-row-main">
-        <button
-          type="button"
-          id={`menu-row-open-${item.id}`}
-          className="menu-row-text"
-          onClick={onOpen}
-          aria-label={`${labels.openDetails}: ${name}`}
-        >
+      {thumbnail !== undefined && <span className="menu-row-thumb">{thumbnail}</span>}
+      <div className="menu-row-main">
+        <span className="menu-row-text">
           <span className="menu-row-name" lang={showOriginal ? targetLanguage : sourceLanguage}>
             {item.uncertainties.length > 0 && labels.uncertaintyMarker !== undefined ? (
               <span
@@ -193,29 +186,42 @@ export function MenuItemRow({
               {snippet}
             </span>
           ) : null}
-        </button>
-        {priced === "priced" &&
-        price !== null &&
-        price.amount !== null &&
-        price.currency !== null ? (
-          <span className="menu-row-price">
-            <ObservedPrice
-              amount={price.amount}
-              currency={price.currency}
-              locale={locale}
-              rate={conversionRateFor(price, rates)}
-            />
-            <PriceConfidenceNote
-              price={price}
-              inferredNote={labels.inferredNote}
-              possibleNote={labels.possibleNote}
-              associationNote={price.associationNote}
-            />
-          </span>
-        ) : (
-          <span className="menu-row-price-na">{labels.priceUnknown}</span>
+        </span>
+        {item.variants.length > 1 && (
+          <small lang={targetLanguage}>{variant.translatedLabel ?? variant.originalLabel}</small>
         )}
-      </span>
+        <MenuPrice price={price} locale={locale} rates={rates} />
+        <PriceConfidenceNote
+          price={price}
+          inferredNote={labels.inferredNote}
+          possibleNote={labels.possibleNote}
+          associationNote={price?.associationNote}
+        />
+        {(item.variants.length > 1 ||
+          (item.ingredients?.length ?? 0) > 0 ||
+          item.explanatorySummary !== null ||
+          item.uncertainties.length > 0) && (
+          <button
+            type="button"
+            id={`menu-row-open-${item.id}`}
+            className="menu-results-edit"
+            onClick={onOpen}
+            aria-label={`${labels.openDetails}: ${name}`}
+          >
+            {locale === "vi" ? "Chi tiết" : "Details"}
+          </button>
+        )}
+        {onEdit !== undefined && (
+          <button
+            type="button"
+            className="menu-results-edit"
+            onClick={onEdit}
+            aria-label={`${locale === "vi" ? "Sửa" : "Edit"}: ${name}`}
+          >
+            {locale === "vi" ? "Sửa" : "Edit"}
+          </button>
+        )}
+      </div>
       <span className="menu-row-action">
         {quantity > 0 ? (
           <output className="menu-row-count" aria-label={`${labels.quantity}: ${quantity}`}>
@@ -233,5 +239,52 @@ export function MenuItemRow({
         </button>
       </span>
     </li>
+  );
+}
+
+/** Raw observations remain useful even when monetary normalization is incomplete. */
+export function MenuPrice({
+  price,
+  locale,
+  rates,
+}: {
+  readonly price: MenuRowVariant["price"];
+  readonly locale: string;
+  readonly rates?: ReadonlyMap<string, ExchangeRate> | undefined;
+}) {
+  if (price === null || (price.rawText.trim() === "" && price.amount === null))
+    return (
+      <p className="menu-row-price-na">
+        {locale === "vi" ? "Không đọc được giá" : "Price not readable"}
+      </p>
+    );
+
+  if (
+    priceAvailability(price.amount, price.currency) === "priced" &&
+    price.amount !== null &&
+    price.currency !== null
+  )
+    return (
+      <div className="menu-row-price">
+        <ObservedPrice
+          amount={price.amount}
+          currency={price.currency}
+          locale={locale}
+          rate={conversionRateFor(price, rates)}
+        />
+        {price.unit && <small> / {price.unit}</small>}
+      </div>
+    );
+
+  let unconfirmed = locale === "vi" ? "Cần xác nhận số tiền" : "Amount not confirmed";
+
+  if (price.currency === null)
+    unconfirmed = locale === "vi" ? "Chưa xác nhận tiền tệ" : "Currency not confirmed";
+
+  return (
+    <div className="menu-row-price">
+      <strong>{price.rawText}</strong>
+      <p className="menu-row-note">{unconfirmed}</p>
+    </div>
   );
 }

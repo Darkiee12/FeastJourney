@@ -11,15 +11,14 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { SharedSelect } from "@/components/ui/select";
-import { ObservedPrice } from "@/modules/restaurant-discovery/components/currency-tools";
 import { menuScanResultsCopy } from "@/modules/restaurant-discovery/components/menu-copy";
 import {
   canonicalDishHrefFor,
+  MenuPrice,
   PriceConfidenceNote,
   type MenuRowItem,
 } from "@/modules/restaurant-discovery/components/menu-item-row";
 import type { MenuSelection } from "@/modules/restaurant-discovery/menu-presentation";
-import { conversionRateFor } from "@/modules/restaurant-discovery/menu-presentation";
 import { isAmount, isCurrency, type ExchangeRate } from "@/shared/money";
 
 /**
@@ -128,13 +127,7 @@ export function MenuPhotoViewer({
             loading="lazy"
             width={72}
             height={72}
-            style={{
-              width: "4.5rem",
-              height: "4.5rem",
-              flex: "none",
-              objectFit: "cover",
-              borderRadius: "0.375rem",
-            }}
+            className="menu-photo-thumb"
           />
           {copy.photoOpen.replace("{n}", String(photo.page))}
         </button>
@@ -318,24 +311,13 @@ export function MenuItemDetail({
           />
         </span>
       ) : null}
-      {price !== null && price.amount !== null && price.currency !== null && knownPrice ? (
-        <>
-          <ObservedPrice
-            amount={price.amount}
-            currency={price.currency}
-            locale={locale}
-            rate={conversionRateFor(price, rates)}
-          />
-          <PriceConfidenceNote
-            price={price}
-            inferredNote={labels.inferredNote}
-            possibleNote={labels.possibleNote}
-            associationNote={price.associationNote}
-          />
-        </>
-      ) : (
-        <p className="menu-order-price">{labels.unknownPrice}</p>
-      )}
+      <MenuPrice price={price} locale={locale} rates={rates} />
+      <PriceConfidenceNote
+        price={price}
+        inferredNote={labels.inferredNote}
+        possibleNote={labels.possibleNote}
+        associationNote={price?.associationNote}
+      />
       {!knownPrice && price !== null && price.rawText !== "" ? (
         <p>
           {price.rawText} · {labels.unknownCurrency}

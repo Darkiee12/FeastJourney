@@ -10,6 +10,7 @@ import {
   resolveMenuCityId,
   type CurrencyContext,
 } from "@/modules/restaurant-discovery/menu-price-evidence";
+import { interpretPrintedPrice } from "@/modules/restaurant-discovery/menu-price-interpretation";
 import {
   menuDocumentFitsStorage,
   validateMenuRevision,
@@ -43,6 +44,7 @@ import retainScan from "@/modules/restaurant-discovery/server/repository/sql/sca
 import reviseScan from "@/modules/restaurant-discovery/server/repository/sql/scan-revise.sql";
 import insertRevision from "@/modules/restaurant-discovery/server/repository/sql/scan-revision-insert.sql";
 import revisionQuery from "@/modules/restaurant-discovery/server/repository/sql/scan-revision.sql";
+import venueDetail from "@/modules/restaurant-discovery/server/repository/sql/venue-detail.sql";
 import { withTransaction } from "@/server/database/client";
 import { runQuery } from "@/server/database/query";
 import { menuScanConfig } from "@/server/integrations/menu-scan-config";
@@ -667,10 +669,19 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
               targetLanguage,
             );
 
+            const venueId = state.scan.venue_id;
+
+            const venue =
+              venueId === null
+                ? null
+                : yield* runQuery("menu/venue-location", (sql) =>
+                    venueDetail.run(sql, { id: venueId }),
+                  );
+
             const currencyContext: CurrencyContext = normalizeCurrencyContext({
               venueName: state.scan.venue_name,
               menuCity: placeEvidence.menuCity,
-              menuCountry: placeEvidence.menuCountry,
+              menuCountry: venue?.country_code ?? placeEvidence.menuCountry,
               trustedCountry: location?.trustedCountry ?? null,
             });
 
@@ -692,7 +703,13 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
                 Object.assign({}, item, {
                   id: randomUUID(),
                   variants: item.variants.map((variant) =>
-                    Object.assign({}, variant, { id: randomUUID() }),
+                    Object.assign({}, variant, {
+                      id: randomUUID(),
+                      price:
+                        variant.price === null
+                          ? null
+                          : interpretPrintedPrice(variant.price, currencyContext.menuCountry),
+                    }),
                   ),
                 }),
               ),

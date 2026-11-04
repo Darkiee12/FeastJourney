@@ -31,6 +31,7 @@ import { menuLanguages } from "@/modules/restaurant-discovery/menu-scan.schema";
  * Only cityId + label persist (feastjourney:menu-location:v1).
  */
 export interface ScanMenuLocation {
+  readonly country?: string | null | undefined;
   readonly cityId: string;
   readonly label: string;
 }

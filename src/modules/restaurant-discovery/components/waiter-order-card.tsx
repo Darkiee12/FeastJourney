@@ -2,6 +2,10 @@ import { useId, useState } from "react";
 
 import { menuCopy, orderIntroductions } from "@/modules/restaurant-discovery/components/menu-copy";
 import {
+  MenuPrice,
+  PriceConfidenceNote,
+} from "@/modules/restaurant-discovery/components/menu-item-row";
+import {
   menuBcp47TagFor,
   MenuSubtotal,
   menuSubtotal,
@@ -48,6 +52,7 @@ function WaiterOrderLine({
   instructionReviewed,
   onQuantity,
   onVariant,
+  onEditLine,
 }: {
   readonly line: OrderLine;
   readonly copy: MenuOrderCopy;
@@ -58,6 +63,7 @@ function WaiterOrderLine({
   readonly instructionReviewed: boolean;
   readonly onQuantity?: ((variantId: string, quantity: number) => void) | undefined;
   readonly onVariant?: ((previousVariantId: string, nextVariantId: string) => void) | undefined;
+  readonly onEditLine?: ((itemId: string) => void) | undefined;
 }) {
   const price = line.variant.price;
 
@@ -112,8 +118,15 @@ function WaiterOrderLine({
           {formatMoney(line.lineAmount, price.currency, locale)} <span>{price.currency}</span>
         </p>
       ) : (
-        <p className="mt-1 text-sm font-semibold">⚠ {copy.unknownPrice}</p>
+        <MenuPrice price={price} locale={locale} />
       )}
+      <PriceConfidenceNote
+        price={price}
+        inferredNote={locale === "vi" ? "Tiền tệ suy luận" : "Currency inferred"}
+        possibleNote={
+          locale === "vi" ? "Cần xác nhận món ứng với giá" : "Price association uncertain"
+        }
+      />
       {onVariant !== undefined && line.item.variants.length > 1 && (
         <div className="mt-2">
           <label
@@ -139,6 +152,15 @@ function WaiterOrderLine({
             ))}
           </select>
         </div>
+      )}
+      {onEditLine !== undefined && (
+        <button
+          type="button"
+          className="menu-results-edit"
+          onClick={() => onEditLine(line.item.id)}
+        >
+          {locale === "vi" ? "Yêu cầu riêng" : "Special requests"}
+        </button>
       )}
       {onQuantity !== undefined && (
         <fieldset
@@ -197,6 +219,8 @@ export function WaiterOrderCard({
   onClose,
   onQuantity,
   onVariant,
+  onEditLine,
+  initialShowTranslations = false,
 }: {
   readonly menu: InteractiveMenu;
   readonly selections: ReadonlyArray<MenuSelection>;
@@ -206,11 +230,13 @@ export function WaiterOrderCard({
   readonly onClose?: (() => void) | undefined;
   readonly onQuantity?: ((variantId: string, quantity: number) => void) | undefined;
   readonly onVariant?: ((previousVariantId: string, nextVariantId: string) => void) | undefined;
+  readonly onEditLine?: ((itemId: string) => void) | undefined;
+  readonly initialShowTranslations?: boolean | undefined;
 }) {
   const titleId = useId();
   // Waiter-facing mode hides translations by default: staff match the
   // printed originals. The toggle stays one tap away for the traveler.
-  const [showTranslations, setShowTranslations] = useState(false);
+  const [showTranslations, setShowTranslations] = useState(initialShowTranslations);
   const copy = menuCopy(locale);
   const toggleLabels = translationToggleLabels ?? translationToggleFallback(copy);
   const sourceLanguage = menu.sourceLanguage ?? "und";
@@ -238,7 +264,13 @@ export function WaiterOrderCard({
   const uncertainties = [...new Set(lines.flatMap((line) => line.item.uncertainties))];
 
   const subtotalText = MenuSubtotal.$match(subtotal, {
-    Empty: () => copy.empty,
+    Empty: () => {
+      if (menu.items.length === 0) return copy.empty;
+
+      return locale === "vi"
+        ? "Chưa chọn món. Thêm món từ thực đơn."
+        : "No dishes selected. Add dishes from the menu.";
+    },
     Unavailable: () => copy.priceCheck,
     Calculable: ({ amount, currency }) =>
       `${copy.subtotal}: ${formatMoney(amount, currency, locale)} ${currency}`,
@@ -299,6 +331,7 @@ export function WaiterOrderCard({
             instructionReviewed={reviewedVariantIds?.has(line.variant.id) ?? false}
             onQuantity={onQuantity}
             onVariant={onVariant}
+            onEditLine={onEditLine}
           />
         ))}
       </ol>

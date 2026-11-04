@@ -1,3 +1,6 @@
+import { useState } from "react";
+
+import { SharedSelectField } from "@/components/ui/select";
 import { InteractiveMenuView } from "@/modules/restaurant-discovery/components/interactive-menu";
 import { menuCopy, menuLanguageNames } from "@/modules/restaurant-discovery/components/menu-copy";
 import {
@@ -20,10 +23,13 @@ export type { DishCandidate };
 export function ScanEditor({
   document,
   onChange,
+  initialItemId,
 }: {
+  readonly initialItemId?: string | null | undefined;
   readonly document: MenuScanDocument;
   readonly onChange: (document: MenuScanDocument) => void;
 }) {
+  const [selectedId, setSelectedId] = useState(initialItemId ?? document.items[0]?.id ?? "");
   const copy = menuCopy(document.targetLanguage);
   const valid = menuScanDocumentSchema.safeParse(document).success;
 
@@ -42,21 +48,32 @@ export function ScanEditor({
       <h2 className="font-display text-3xl">{copy.edit}</h2>
       <p>{copy.editHelp}</p>
       <output>{valid ? copy.valid : copy.invalid}</output>
-      {document.items.map((item) => (
-        <ScanItemEditor
-          key={item.id}
-          item={item}
-          locale={document.targetLanguage}
-          sourceLanguage={document.sourceLanguage ?? "und"}
-          onUpdate={updateItem}
-          onRemove={() =>
-            onChange({
-              ...document,
-              items: document.items.filter((entry) => entry.id !== item.id),
-            })
-          }
-        />
-      ))}
+      <SharedSelectField
+        label={copy.edit}
+        value={selectedId}
+        onValueChange={setSelectedId}
+        options={document.items.map((item) => ({
+          value: item.id,
+          label: item.translatedName ?? item.originalName,
+        }))}
+      />
+      {document.items
+        .filter((item) => item.id === selectedId)
+        .map((item) => (
+          <ScanItemEditor
+            key={item.id}
+            item={item}
+            locale={document.targetLanguage}
+            sourceLanguage={document.sourceLanguage ?? "und"}
+            onUpdate={updateItem}
+            onRemove={() =>
+              onChange({
+                ...document,
+                items: document.items.filter((entry) => entry.id !== item.id),
+              })
+            }
+          />
+        ))}
       <button
         type="button"
         onClick={() => {
@@ -64,12 +81,14 @@ export function ScanEditor({
 
           if (page === undefined) return;
 
+          const id = crypto.randomUUID();
+          setSelectedId(id);
           onChange({
             ...document,
             items: [
               ...document.items,
               {
-                id: crypto.randomUUID(),
+                id,
                 customerAdded: true,
                 originalName: "",
                 translatedName: null,
