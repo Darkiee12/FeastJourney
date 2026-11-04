@@ -213,6 +213,13 @@ services:
       FX_ENDPOINT: ${FX_ENDPOINT:-https://api.frankfurter.dev/v2/}
       FX_REFRESH_HOURS: ${FX_REFRESH_HOURS:-24}
       FX_MAX_AGE_HOURS: ${FX_MAX_AGE_HOURS:-72}
+      # Browser-visible MapLibre style URL (public, never a secret). This
+      # runtime value is informational only: Vite embeds VITE_MAP_STYLE_URL
+      # into the client bundle at build time, so changing it here does NOT
+      # change the served map — a new image build with the new build-time
+      # value (GitHub Actions variable VITE_MAP_STYLE_URL) is required.
+      # Kept here so operators can see which style a release was built with.
+      VITE_MAP_STYLE_URL: ${VITE_MAP_STYLE_URL:-https://basemaps.cartocdn.com/gl/positron-gl-style/style.json}
       # First-party object storage over the internal Swarm network. The app
       # never holds Garage admin/RPC credentials: S3_* below is the
       # least-privilege app key provisioned via garage-provision.sh and stored

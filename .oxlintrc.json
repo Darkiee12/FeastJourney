@@ -221,13 +221,18 @@
       }
     },
     // CI glue scripts ship as plain .mjs (runnable by stock node, no build
-    // step) and sit outside tsconfig, so the type engine resolves their
-    // node:fs imports as error/any and every call warns. They validate
+    // step) or as bun-run .ts (sharing the typed validator with tests) and
+    // sit outside tsconfig, so the type engine resolves their
+    // node:fs/process imports as error/any and every call warns. They validate
     // themselves at runtime with fail-closed argument and template checks;
     // keep the unsafe-* warns off here like the other engine-limitation
     // overrides above.
     {
-      "files": [".github/workflows/scripts/**/*.mjs", "infra/scripts/**/*.mjs"],
+      "files": [
+        ".github/workflows/scripts/**/*.mjs",
+        ".github/workflows/scripts/**/*.ts",
+        "infra/scripts/**/*.mjs"
+      ],
       "rules": {
         "typescript/no-unsafe-assignment": "off",
         "typescript/no-unsafe-member-access": "off",
