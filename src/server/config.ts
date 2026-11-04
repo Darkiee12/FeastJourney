@@ -21,6 +21,12 @@ export interface AppConfig {
   // Optional so existing AppConfig literals (incl. tests) keep compiling;
   // Config.withDefault below is the real source of this value.
   readonly recommendTimeoutMs?: number | undefined;
+  // Agentic recommendation mode (workstream B, additive only): flag plus
+  // per-call and orchestration budgets. Optional for the same reason;
+  // withDefault supplies the documented values at runtime.
+  readonly recommendAgentEnabled?: boolean | undefined;
+  readonly recommendAgentTimeoutMs?: number | undefined;
+  readonly recommendAgentDeadlineMs?: number | undefined;
 }
 
 const csv = (raw: string): ReadonlyArray<string> =>
@@ -51,4 +57,14 @@ export const appConfig: Config.Config<AppConfig> = Config.unwrap({
   // or the provider call can never complete. Default 120s per operator
   // choice; local dev only — tighten for production.
   recommendTimeoutMs: Config.Int("RECOMMEND_TIMEOUT_MS").pipe(Config.withDefault(120000)),
+  // Agentic loop budgets. Defaults mirror protocol AGENT_BOUNDS
+  // (20s per provider call, 90s total orchestration) so the agent can
+  // never outlive the 120s recommend operation budget above.
+  recommendAgentEnabled: Config.Boolean("RECOMMEND_AGENT_ENABLED").pipe(
+    Config.withDefault(false),
+  ),
+  recommendAgentTimeoutMs: Config.Int("MODEL_AGENT_TIMEOUT_MS").pipe(Config.withDefault(20000)),
+  recommendAgentDeadlineMs: Config.Int("RECOMMEND_AGENT_DEADLINE_MS").pipe(
+    Config.withDefault(90000),
+  ),
 });
