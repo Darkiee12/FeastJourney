@@ -1307,6 +1307,7 @@ export function RestaurantSearchPage() {
       <PanelToolbar
         view="menu"
         title={venueName}
+        sectionLabel={copy.panelMenuTitle}
         backText={venueName === "" ? copy.backToResults : venueName}
         backLabel={copy.menuBackToOverview}
         onBack={selected === null ? null : () => showOverviewPanel(selected)}
@@ -1476,7 +1477,7 @@ export function RestaurantSearchPage() {
       )}
       {!previewOpen && rows.length > 0 && (
         <>
-          <p aria-live="polite" className="mapapp-count">
+          <p aria-live="polite" className="mapapp-count" data-capped={rows.length === search.limit}>
             {countLabel}
             {rows.length === search.limit &&
               ` · ${copy.placesCapped.replace("{limit}", String(search.limit))}`}

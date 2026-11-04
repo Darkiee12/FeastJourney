@@ -78,6 +78,17 @@ export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
         </p>
 
         <div className="mx-auto flex w-full max-w-xs flex-col items-stretch gap-3 sm:max-w-none sm:flex-row sm:items-center sm:justify-center">
+          <Link
+            to="/"
+            search={{ lang }}
+            hash="discover"
+            resetScroll={false}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full border-2 border-mango bg-transparent px-6 text-base font-bold text-mango transition hover:bg-mango/10 [text-shadow:0_1px_2px_rgb(0_0_0/0.9),0_0_14px_rgb(0_0_0/0.65)] sm:min-h-13 sm:px-8 sm:text-lg"
+          >
+            <MapPinned aria-hidden="true" className="h-5 w-5 flex-none" />
+            {copy.ctaExplore}
+          </Link>
+
           {/* Desktop keeps the scroll-to-#recommend link; phones open the
               quiz drawer sliding over the globe instead of scrolling away. */}
           <Link
@@ -89,17 +100,6 @@ export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
           >
             <UtensilsIcon />
             {copy.ctaRecommend}
-          </Link>
-
-          <Link
-            to="/"
-            search={{ lang }}
-            hash="discover"
-            resetScroll={false}
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full border-2 border-mango bg-transparent px-6 text-base font-bold text-mango transition hover:bg-mango/10 [text-shadow:0_1px_2px_rgb(0_0_0/0.9),0_0_14px_rgb(0_0_0/0.65)] sm:min-h-13 sm:px-8 sm:text-lg"
-          >
-            <MapPinned aria-hidden="true" className="h-5 w-5 flex-none" />
-            {copy.ctaExplore}
           </Link>
 
           <Link

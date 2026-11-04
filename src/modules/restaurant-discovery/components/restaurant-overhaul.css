@@ -1,0 +1,753 @@
+/* Restaurants page overhaul (experimental) — "food passport".
+ *
+ * A traveller collects places to eat. Each venue gets one accent from the
+ * brand palette (orange, mango, blue, violet) that follows it from list
+ * card to map flag to overview: a rotated passport stamp carries its
+ * initial, a highlighter swipe marks its area, and its card throws a hard
+ * offset shadow in that colour. Ink outlines and offset shadows echo the
+ * comic Bangers display face; menu highlights read as price tags.
+ *
+ * Unlayered on purpose: imported after the layered component sheets and
+ * the unlayered menu-order sheet, so these rules win without specificity
+ * escalation. Remove the import in styles.css to roll back.
+ */
+
+/* ------------------------------------------------------------ tokens --- */
+
+.mapapp {
+  --fj-ink: var(--color-ink);
+  --fj-line: 2px solid var(--fj-ink);
+  --fj-hard: 3px 3px 0 var(--fj-ink);
+  --fj-highlight: color-mix(in srgb, var(--color-mango) 70%, transparent);
+}
+
+[data-tint="0"] {
+  --accent: var(--color-food-orange);
+  --accent-ink: var(--color-food-orange-strong);
+  --accent-soft: #ffedd5;
+}
+
+[data-tint="1"] {
+  --accent: var(--color-mango);
+  --accent-ink: #92400e;
+  --accent-soft: #fef3c7;
+}
+
+[data-tint="2"] {
+  --accent: var(--color-brand-blue);
+  --accent-ink: var(--color-brand-blue-hover);
+  --accent-soft: #dbeafe;
+}
+
+[data-tint="3"] {
+  --accent: var(--color-cosmic-violet);
+  --accent-ink: #6d28d9;
+  --accent-soft: #ede9fe;
+}
+
+/* ------------------------------------------------------------ drawer --- */
+
+/* Cream "notebook" ground with a faint dot grid so white cards lift off it. */
+.mapapp-drawer {
+  border: var(--fj-line);
+  border-radius: 1.25rem;
+  background:
+    radial-gradient(rgb(23 32 51 / 0.09) 1px, transparent 1.4px) 0 0 / 16px 16px,
+    var(--color-cream);
+  box-shadow: 0 24px 48px -16px rgb(3 10 30 / 0.45);
+}
+
+.mapapp-drawer-head {
+  border-bottom: 0;
+  padding: 1rem 1.25rem 0.25rem;
+}
+
+.mapapp-drawer-title {
+  padding: 0 0.15em;
+  font-size: 2rem;
+  color: var(--fj-ink);
+  background: linear-gradient(
+    transparent 52%,
+    var(--fj-highlight) 52%,
+    var(--fj-highlight) 90%,
+    transparent 90%
+  );
+}
+
+/* Programmatic focus targets only; a static heading never needs a ring. */
+.mapapp-drawer-title:focus,
+.mapapp-panel-toolbar h2:focus {
+  outline: none;
+}
+
+.mapapp-drawer-body {
+  gap: 0.75rem;
+  padding: 0.5rem 1.25rem 1.5rem;
+}
+
+.mapapp-drawer-head .mapapp-iconbtn,
+.mapapp-drawer-head button {
+  border: var(--fj-line);
+  background: white;
+}
+
+/* ----------------------------------------------------- search + tools --- */
+
+.mapapp-search-field input {
+  border: var(--fj-line);
+  border-radius: 0.9rem;
+  background: white;
+  box-shadow: var(--fj-hard);
+}
+
+.mapapp-search-field input:focus {
+  outline: none;
+  box-shadow: 3px 3px 0 var(--color-brand-blue);
+}
+
+.mapapp-search-actions {
+  gap: 0.5rem;
+}
+
+.mapapp-sb-icon[data-labelled="true"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.5rem;
+  padding: 0 0.9rem;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  background: white;
+  box-shadow: 2px 2px 0 var(--fj-ink);
+  font-size: 0.88rem;
+  font-weight: 700;
+  white-space: nowrap;
+  transition:
+    translate 100ms ease-out,
+    box-shadow 100ms ease-out;
+}
+
+.mapapp-sb-icon[data-labelled="true"]:hover:not(:disabled) {
+  background: white;
+  translate: -1px -1px;
+  box-shadow: var(--fj-hard);
+}
+
+.mapapp-sb-icon[data-labelled="true"]:active:not(:disabled) {
+  translate: 2px 2px;
+  box-shadow: none;
+}
+
+.mapapp-sb-icon[data-labelled="true"] svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--color-food-orange-strong);
+}
+
+.mapapp-sb-badge {
+  top: -0.4rem;
+  right: -0.4rem;
+  place-content: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  border: 2px solid white;
+  border-radius: 9999px;
+  background: var(--color-food-orange-strong);
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+/* Phone search pill: the desktop rule positions this icon absolutely over
+   the field, which made it sit on top of the placeholder here. */
+.mapapp-search-collapsed .mapapp-sb-icon-static {
+  position: static;
+  translate: none;
+}
+
+.mapapp-search-collapsed {
+  border: var(--fj-line);
+  box-shadow: var(--fj-hard);
+  padding-left: 1rem;
+}
+
+.mapapp-search-collapsed .mapapp-sb-icon {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--color-mango);
+}
+
+/* --------------------------------------------- region + result count --- */
+
+.mapapp-region {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-muted);
+}
+
+.mapapp-panel-toolbar[data-view="browse"] {
+  display: grid;
+  justify-items: start;
+  gap: 0.35rem;
+}
+
+/* The count as a navy pill: one glanceable number instead of a sentence. */
+.mapapp-toolbar-title[data-count-only="true"] {
+  padding: 0.2rem 0.7rem;
+  border-radius: 9999px;
+  background: var(--color-space-deep);
+  color: white;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.mapapp-toolbar-context {
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+
+/* The live count stays for screen readers; only the "first N shown" cap
+   note is worth repeating visually. */
+.mapapp-count[data-capped="false"],
+.mapapp-sheet .mapapp-toolbar-title[data-count-only="true"],
+.mapapp-panel-toolbar[data-view="overview"] .mapapp-toolbar-title,
+.mapapp-panel-toolbar[data-view="reviews"] .mapapp-toolbar-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.mapapp-count[data-capped="true"] {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--color-muted);
+}
+
+/* -------------------------------------------------- passport cards --- */
+
+.mapapp-list {
+  gap: 1rem;
+  padding: 0.25rem 0.35rem 0.5rem 0;
+}
+
+.mapapp-list li[data-selected="true"] .res-card {
+  outline: none;
+}
+
+/* In the list the accent lives only on the stamp; shadows and highlighter
+   are shared (ink + mango) so a long list reads as one calm column. The
+   selected card is the one place orange takes over. */
+.res-card {
+  display: grid;
+  gap: 0;
+  padding: 1rem 1rem 0.95rem 1.1rem;
+  border: var(--fj-line);
+  border-radius: 1.1rem;
+  background: white;
+  box-shadow: 4px 4px 0 var(--fj-ink);
+  overflow: visible;
+  transition:
+    translate 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+.res-card:hover {
+  translate: -2px -2px;
+  box-shadow: 6px 6px 0 var(--fj-ink);
+}
+
+.res-card[data-selected="true"] {
+  border: var(--fj-line);
+  background: #fff4e8;
+  box-shadow: 6px 6px 0 var(--color-food-orange);
+}
+
+.res-card-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.75rem;
+}
+
+.res-card-heading {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.res-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.6rem;
+}
+
+/* Mango highlighter swipe behind the area name, shared by every card. */
+.res-card-area {
+  padding: 0 0.25em;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fj-ink);
+  background: linear-gradient(
+    transparent 45%,
+    var(--fj-highlight) 45%,
+    var(--fj-highlight) 92%,
+    transparent 92%
+  );
+}
+
+.res-card-distance {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-muted);
+}
+
+.res-card-heading h3 {
+  margin: 0;
+}
+
+.res-name {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fj-ink);
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  line-height: 1.05;
+  letter-spacing: 0.02em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.res-name:hover {
+  color: var(--color-food-orange-strong);
+}
+
+.res-name:focus-visible {
+  outline: 2px solid var(--color-brand-blue);
+  outline-offset: 3px;
+  border-radius: 0.25rem;
+}
+
+/* Passport stamp: double inked ring, slightly rotated, initial inside. */
+.res-stamp {
+  display: grid;
+  place-content: center;
+  width: 4rem;
+  height: 4rem;
+  border: 2.5px solid var(--accent-ink);
+  border-radius: 9999px;
+  background: var(--accent-soft);
+  box-shadow:
+    inset 0 0 0 3px white,
+    inset 0 0 0 5px var(--accent-ink);
+  color: var(--accent-ink);
+  rotate: -12deg;
+  object-fit: cover;
+  overflow: hidden;
+  transition: rotate 160ms ease-out;
+}
+
+.res-card:hover .res-stamp {
+  rotate: -4deg;
+}
+
+.res-stamp-initial {
+  font-family: var(--font-display);
+  font-size: 2.1rem;
+  line-height: 1;
+  /* Bangers leans right; nudge the glyph back to optical centre. */
+  padding-right: 0.06em;
+}
+
+.res-stamp-photo {
+  box-shadow: none;
+  border-color: var(--fj-ink);
+}
+
+.res-match {
+  margin-top: 0.75rem;
+  padding-top: 0.6rem;
+  border-top: 2px dashed color-mix(in srgb, var(--fj-ink) 18%, transparent);
+}
+
+.res-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.res-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.5rem;
+  padding: 0.35rem 1.05rem;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  background: var(--color-food-orange-strong);
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 800;
+  box-shadow: 2px 2px 0 var(--fj-ink);
+  cursor: pointer;
+  transition:
+    translate 100ms ease-out,
+    box-shadow 100ms ease-out;
+}
+
+.res-view:hover {
+  background: var(--color-food-orange-strong);
+  translate: -1px -1px;
+  box-shadow: var(--fj-hard);
+}
+
+.res-view:active {
+  translate: 2px 2px;
+  box-shadow: none;
+}
+
+.res-view svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.res-mapbtn {
+  display: inline-grid;
+  place-content: center;
+  width: 2.5rem;
+  min-height: 2.5rem;
+  padding: 0;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  background: white;
+  color: var(--fj-ink);
+  cursor: pointer;
+}
+
+.res-mapbtn:hover {
+  background: #fef3c7;
+}
+
+.res-mapbtn svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.res-view:focus-visible,
+.res-mapbtn:focus-visible {
+  outline: 2px solid var(--color-brand-blue);
+  outline-offset: 3px;
+}
+
+/* Touch screens get the full 44px target back. */
+@media (pointer: coarse) {
+  .res-view {
+    min-height: 2.75rem;
+  }
+
+  .res-mapbtn {
+    width: 2.75rem;
+    min-height: 2.75rem;
+  }
+}
+
+/* --------------------------------------------------------- map pins --- */
+
+.maplibregl-marker:has(.restaurant-pin.is-selected) {
+  z-index: 2;
+}
+
+.maplibregl-marker:has(.restaurant-pin:hover),
+.maplibregl-marker:has(.restaurant-pin:focus-visible) {
+  z-index: 3;
+}
+
+.restaurant-pin {
+  position: relative;
+  overflow: visible;
+}
+
+/* Comic speech bubble above the pin: name on hover, mango when selected. */
+.restaurant-pin-flag {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.35rem);
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.3rem 0.7rem;
+  border: var(--fj-line);
+  border-radius: 0.65rem;
+  background: white;
+  color: var(--fj-ink);
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.2;
+  box-shadow: var(--fj-hard);
+  opacity: 0;
+  translate: -50% 0.35rem;
+  pointer-events: none;
+  transition:
+    opacity 140ms ease-out,
+    translate 140ms ease-out;
+}
+
+.restaurant-pin:hover .restaurant-pin-flag,
+.restaurant-pin:focus-visible .restaurant-pin-flag,
+.restaurant-pin.is-selected .restaurant-pin-flag {
+  opacity: 1;
+  translate: -50% 0;
+}
+
+.restaurant-pin.is-selected .restaurant-pin-flag {
+  background: var(--color-mango);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .res-card,
+  .res-stamp,
+  .res-view,
+  .mapapp-sb-icon,
+  .restaurant-pin-flag {
+    transition: none;
+  }
+}
+
+/* -------------------------------------------- panel toolbar spacing --- */
+
+.mapapp-panel-toolbar[data-view="overview"],
+.mapapp-panel-toolbar[data-view="menu"],
+.mapapp-panel-toolbar[data-view="reviews"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  /* Even rhythm: the drawer's 0.75rem gap plus this equals the space
+     between the tool chips and the back button above. */
+  margin-bottom: 0.5rem;
+}
+
+.mapapp-toolbar-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.5rem;
+  padding: 0.25rem 0.95rem 0.25rem 0.7rem;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  /* Soft mango fill sets "go back" apart from the white action chips. */
+  background: #fef3c7;
+  color: var(--fj-ink);
+  box-shadow: 2px 2px 0 var(--fj-ink);
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Menu panel heading: the page's name in the display face, same mango
+   highlighter as the drawer title. */
+.mapapp-panel-toolbar[data-view="menu"] {
+  display: grid;
+  justify-items: start;
+  gap: 1rem;
+}
+
+.mapapp-panel-toolbar[data-view="menu"] .mapapp-toolbar-title {
+  padding: 0 0.15em;
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--fj-ink);
+  background: linear-gradient(
+    transparent 52%,
+    var(--fj-highlight) 52%,
+    var(--fj-highlight) 90%,
+    transparent 90%
+  );
+}
+
+.mapapp-toolbar-back:hover {
+  translate: -1px -1px;
+  box-shadow: var(--fj-hard);
+}
+
+.mapapp-toolbar-back:focus-visible {
+  outline: 2px solid var(--color-brand-blue);
+  outline-offset: 3px;
+}
+
+.mapapp-toolbar-back svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* ---------------------------------------------- venue overview panel --- */
+
+.venue-overview {
+  gap: 1.25rem;
+}
+
+/* Passport page header: the venue's accent fills the panel, ink-outlined. */
+.venue-head {
+  position: relative;
+  gap: 0.35rem;
+  padding: 1.1rem 1.2rem 1.15rem;
+  border: var(--fj-line);
+  border-radius: 1.1rem;
+  background: var(--accent-soft);
+  box-shadow: 5px 5px 0 var(--accent);
+}
+
+.venue-eyebrow {
+  justify-self: start;
+  padding: 0 0.25em;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fj-ink);
+  background: linear-gradient(
+    transparent 45%,
+    color-mix(in srgb, var(--accent) 50%, transparent) 45%,
+    color-mix(in srgb, var(--accent) 50%, transparent) 92%,
+    transparent 92%
+  );
+}
+
+.venue-title {
+  font-size: clamp(2.1rem, 5vw, 2.6rem);
+  line-height: 1;
+  color: var(--fj-ink);
+}
+
+.venue-addr {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--fj-ink) 70%, transparent);
+}
+
+/* The business name repeats the venue (or says "sample data"); the
+   address and title carry identity on their own. */
+.venue-business {
+  display: none;
+}
+
+/* No verified photo: say nothing rather than reserve an empty frame. */
+.venue-overview > .venue-photo[role="presentation"] {
+  display: none;
+}
+
+.venue-actionbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.venue-action {
+  min-width: 0;
+  min-height: 2.75rem;
+  border: var(--fj-line);
+  background: white;
+  color: var(--fj-ink);
+  box-shadow: 2px 2px 0 var(--fj-ink);
+  font-size: 0.9rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.venue-action:hover {
+  background: white;
+  translate: -1px -1px;
+  box-shadow: var(--fj-hard);
+}
+
+.venue-actionbar > .venue-action:first-child {
+  background: var(--color-food-orange-strong);
+  color: white;
+}
+
+/* Menu highlights as price tags: accent tab on the tied end, two per row. */
+.venue-highlights > h2 {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+.venue-highlight-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.venue-highlight-card {
+  position: relative;
+  height: 100%;
+  align-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 0.8rem 0.75rem 1.2rem;
+  border: var(--fj-line);
+  border-left-width: 0.45rem;
+  border-left-color: var(--accent);
+  border-radius: 0.5rem 0.9rem 0.9rem 0.5rem;
+  background: white;
+  box-shadow: 3px 3px 0 var(--fj-ink);
+}
+
+.venue-highlight-card:hover {
+  background: var(--accent-soft);
+}
+
+.venue-highlight-name {
+  font-size: 0.95rem;
+  line-height: 1.25;
+}
+
+.venue-highlight-card :is(.observed-price, [class*="price"]) {
+  font-weight: 800;
+  color: var(--accent-ink);
+}
+
+/* ------------------------------------------------------- menu panel --- */
+
+.menu-row {
+  border: var(--fj-line);
+  border-radius: 0.9rem;
+  box-shadow: var(--fj-hard);
+}
+
+.menu-row-list {
+  gap: 1rem;
+  padding-right: 0.25rem;
+}
+
+.menu-row-add {
+  border: var(--fj-line);
+  background: var(--color-food-orange-strong);
+  box-shadow: 2px 2px 0 var(--fj-ink);
+}
+
+.menu-row-add:active {
+  translate: 2px 2px;
+  box-shadow: none;
+}
+
+/* Language picker sits on the same ink-outlined system as the chips. */
+.mapapp-drawer-body select {
+  border: var(--fj-line);
+  border-radius: 0.75rem;
+  background-color: white;
+}

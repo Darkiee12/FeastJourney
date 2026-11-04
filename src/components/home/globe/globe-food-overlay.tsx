@@ -111,7 +111,7 @@ export function GlobeFoodOverlay({
                 className={`pointer-events-auto flex cursor-pointer items-center gap-3 rounded-2xl border border-border-soft bg-white py-2 pr-4 pl-2 text-left text-ink shadow-[0_16px_40px_rgba(3,10,30,0.45)] transition-colors hover:border-food-orange ${
                   active.exiting
                     ? "motion-safe:animate-popup-exit"
-                    : "motion-safe:animate-popup-enter"
+                    : "motion-safe:animate-popup-swap-in"
                 }`}
               >
                 <span

@@ -96,14 +96,19 @@ const RANKING_STATUS_MARKERS = [
 export const isAiFallbackWarning = (warning: string): boolean =>
   RANKING_STATUS_MARKERS.some((marker) => warning.includes(marker));
 
+/** Server note for a Surprise pick: expected behaviour, nothing to warn about. */
+const SURPRISE_NOTE_MARKER = "Surprise variety applied";
+
 /**
- * Banner-visible warnings: everything except AI-availability fallbacks.
- * Dietary and unknown-dislike notes stay prominent in the banner; the
- * fallback renders once, discreetly, in the sidebar ranking card instead of
- * duplicating across both.
+ * Banner-visible warnings: everything except AI-availability fallbacks and
+ * the Surprise note. Dietary and unknown-dislike notes stay prominent in the
+ * banner; the fallback renders once, discreetly, in the sidebar ranking card
+ * instead of duplicating across both.
  */
 export const userWarningsFor = (warnings: ReadonlyArray<string>): Array<string> =>
-  warnings.filter((warning) => !isAiFallbackWarning(warning));
+  warnings.filter(
+    (warning) => !isAiFallbackWarning(warning) && !warning.includes(SURPRISE_NOTE_MARKER),
+  );
 
 /**
  * One coherent ranking status for both placements (inline note and sidebar
