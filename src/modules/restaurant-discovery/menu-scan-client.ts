@@ -598,8 +598,12 @@ export const menuScanClient = {
   ): Promise<ScanView> => {
     const accepted = await dedupedExtract(scanId, signal, menuCityId);
 
-    if (accepted.document !== null || accepted.scan.status !== "processing") {
+    if (accepted.document !== null) {
       return accepted;
+    }
+
+    if (accepted.scan.status !== "processing") {
+      throw new MenuScanClientError("Menu analysis did not finish. Please try again.", true, null);
     }
 
     for (let round = 0; round < SCAN_POLL_MAX_ROUNDS; round += 1) {

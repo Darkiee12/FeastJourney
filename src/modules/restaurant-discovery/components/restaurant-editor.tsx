@@ -1,7 +1,7 @@
 import * as maplibre from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from "react";
-import Map, { Marker, NavigationControl } from "react-map-gl/maplibre";
+import MapLibreMap, { Marker, NavigationControl } from "react-map-gl/maplibre";
 import type { MapRef } from "react-map-gl/maplibre";
 import { z } from "zod";
 
@@ -338,7 +338,7 @@ function CoordinatePicker({
             className="relative h-64 w-full overflow-hidden rounded-xl border border-border-soft"
             aria-label="Branch location picker"
           >
-            <Map
+            <MapLibreMap
               key={retryKey}
               ref={mapRef}
               mapLib={maplibre}
@@ -375,7 +375,7 @@ function CoordinatePicker({
                   onMapPick(event.lngLat.lng, event.lngLat.lat);
                 }}
               />
-            </Map>
+            </MapLibreMap>
             {!ready && (
               <p
                 role="status"
