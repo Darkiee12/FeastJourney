@@ -79,19 +79,19 @@ export interface ProgressEvent {
 /** Hard bounds for every agentic run. All configurable via env with these defaults. */
 export const AGENT_BOUNDS = {
   /** Maximum model rounds (initial + tool-follow-ups) per request. */
-  readonly maxRounds: 3,
+  maxRounds: 3,
   /** Maximum tool calls in total across all rounds. */
-  readonly maxToolCalls: 8,
+  maxToolCalls: 8,
   /** Maximum dish IDs per getDishDetails call. */
-  readonly detailsPerCall: 10,
+  detailsPerCall: 10,
   /** Maximum unique candidate IDs the agent may hold. */
-  readonly candidatePoolCap: 60,
+  candidatePoolCap: 60,
   /** Final selection cap (keeps the existing top-10 contract). */
-  readonly finalLimit: 10,
+  finalLimit: 10,
   /** Per-provider-call timeout in milliseconds. */
-  readonly providerTimeoutMs: 20000,
+  providerTimeoutMs: 20000,
   /** Total orchestration deadline in milliseconds. */
-  readonly orchestrationDeadlineMs: 90000,
+  orchestrationDeadlineMs: 90000,
 } as const;
 
 /** Env flag gating agentic mode. Off (or unset) keeps the existing single-shot path byte-identical. */
