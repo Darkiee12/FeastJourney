@@ -1,10 +1,19 @@
 import { clearInterval, setInterval } from "node:timers";
 
-import { Data, Effect, Exit, Fiber } from "effect";
+import { Data, Effect, Exit, Fiber, Option } from "effect";
 import type * as PersistenceRateLimiter from "effect/persistence/RateLimiter";
 
 import { recommendationQuerySchema } from "@/modules/food-discovery/food.schema";
-import type { ProgressStage } from "@/modules/food-discovery/server/agent/protocol";
+import type { ResolvedAgentBounds } from "@/modules/food-discovery/server/agent/bounds";
+import {
+  AgentRunOutcome,
+  runAgentLoop,
+  toDegradedCause,
+} from "@/modules/food-discovery/server/agent/orchestrator";
+import {
+  resolveAgentBounds,
+  type ProgressStage,
+} from "@/modules/food-discovery/server/agent/protocol";
 import {
   ProgressEmitter,
   streamResponseHeaders,
@@ -19,16 +28,23 @@ import {
   type RecommendationError,
   RecommendationService,
   RankingProvenance,
+  hydrateAgentFallback,
+  hydrateAgentSelected,
+  resolveAgentPool,
   toWireOutcome,
 } from "@/modules/food-discovery/server/operations/recommendation-service";
+import type { DishRelationsRepository } from "@/modules/food-discovery/server/repository/dish-relations-repository";
 import type { IngredientRepository } from "@/modules/food-discovery/server/repository/ingredient-repository";
 import { Actor } from "@/server/auth/actor";
-import { withActor } from "@/server/auth/current-actor";
+import { CurrentActor, withActor } from "@/server/auth/current-actor";
 import { resolveSession } from "@/server/auth/session";
 import { appConfig } from "@/server/config";
 import type { Database } from "@/server/database/client";
+import { describeCause } from "@/server/database/errors";
+import { RankingConfig, resolveRankingConfig, serverEnv } from "@/server/env";
 import { RateLimitPolicy } from "@/server/http/rate-limit";
 import { resolveIdentityFromHeaders, requestIdFromHeaders } from "@/server/http/request";
+import { agentConfigFromMuse, makeAgentModelClientLive } from "@/server/integrations/meta-agent";
 import type { MetaClient } from "@/server/integrations/meta-client";
 import { withRequestTimeout } from "@/server/runtime";
 
@@ -49,12 +65,18 @@ import { withRequestTimeout } from "@/server/runtime";
  * terminal `failed` progress event plus an `error` event, then close.
  *
  * Lane B plugs the real tool-using agent here via `StreamPipeline`: a
- * function receiving the validated input and a stage reporter. Until then
- * `deterministicPipeline` runs the existing RecommendationService so the
- * transport is end-to-end verifiable today.
+ * function receiving the validated input and a stage reporter. `agentPipeline`
+ * runs the bounded orchestrator loop (`runAgentLoop`) with a per-request
+ * AgentModelClient; `deterministicPipeline` runs the existing
+ * RecommendationService so the transport stays verifiable with the flag off.
  */
 
-export type PipelineDeps = Database | IngredientRepository | RecommendationService | MetaClient;
+export type PipelineDeps =
+  | Database
+  | IngredientRepository
+  | RecommendationService
+  | MetaClient
+  | DishRelationsRepository;
 
 export type RecommendationStreamDeps =
   | PipelineDeps
@@ -70,6 +92,7 @@ export type StageReporter = (
 export type StreamPipeline = (
   input: RecommendDishesInput,
   report: StageReporter,
+  requestId?: string,
 ) => Effect.Effect<RecommendationOutcome, RecommendationError, PipelineDeps>;
 
 class InvalidJsonBody extends Data.TaggedError("InvalidJsonBody") {}
@@ -126,8 +149,9 @@ export const mergeExcludedIngredients = (data: {
  * Default pipeline: the existing bounded RecommendationService with stage
  * reports around its real phases. Emits `searching-catalog` before SQL +
  * ranking and `finalizing` around hydration, so progress is honest about
- * what actually ran. Lane B replaces this with the tool-using agent without
- * touching the guard/stream machinery.
+ * what actually ran. It is also the fallback every agent precondition
+ * delegates to (flag off, guest, surprise slice, deterministic provider
+ * config, empty pool), so the flag-off path stays byte-identical.
  */
 export const deterministicPipeline: StreamPipeline = (input, report) =>
   Effect.gen(function* () {
@@ -137,6 +161,116 @@ export const deterministicPipeline: StreamPipeline = (input, report) =>
     report("finalizing", null);
 
     return outcome;
+  });
+
+/**
+ * Production agent pipeline: the tool-using loop behind the stream transport.
+ *
+ * Resolution order inside one Effect, so every synchronous throw maps to
+ * loud RecommendationMisconfigured instead of escaping as a defect: agent
+ * flag (off delegates to deterministicPipeline), protocol bounds from
+ * process.env, ranking config (must be the Muse variant — Deterministic
+ * delegates to deterministicPipeline, Misconfigured fails closed), then
+ * MetaAgentConfig via agentConfigFromMuse. Guests and surprise slices also
+ * delegate to deterministicPipeline: guests never spend model budget and
+ * surprise stays a deterministic pool slice by contract. An empty or
+ * malformed pool delegates too (honest Empty, no model spend).
+ *
+ * The AgentModelClient layer is built per request from the resolved Muse
+ * config and provided locally to runAgentLoop; ambient repositories come
+ * from the surrounding runtime, and per-request identity still travels via
+ * CurrentActor. The StageReporter forwards non-terminal orchestrator stages
+ * to the transport emitter; terminal events stay owned by the transport so
+ * the exactly-one-terminal invariant holds.
+ */
+export const agentPipeline: StreamPipeline = (input, report, requestId) =>
+  Effect.gen(function* () {
+    if (!isAgentStreamEnabled(process.env)) {
+      return yield* deterministicPipeline(input, report);
+    }
+
+    const current = yield* Effect.serviceOption(CurrentActor);
+
+    const isGuest =
+      Option.isNone(current) ||
+      Actor.$match(current.value, {
+        Guest: () => true,
+        Member: () => false,
+      });
+
+    if (isGuest || input.surpriseSeed > 0) {
+      return yield* deterministicPipeline(input, report);
+    }
+
+    const bounds = yield* Effect.try({
+      try: () => resolveAgentBounds(process.env),
+      catch: (cause) => new RecommendationMisconfigured({ reason: describeCause(cause) }),
+    });
+
+    // Mechanics derived exactly as resolveAgentBounds in bounds.ts; the
+    // single validated env parse above stays the only config source.
+    const resolvedBounds: ResolvedAgentBounds = {
+      ...bounds,
+      maxToolCallsPerRound: Math.ceil(bounds.maxToolCalls / bounds.maxRounds),
+      toolPageLimit: bounds.finalLimit,
+      initialOverviewLimit: bounds.finalLimit,
+    };
+
+    const ranking = yield* Effect.try({
+      try: () => resolveRankingConfig(serverEnv()),
+      catch: (cause) => new RecommendationMisconfigured({ reason: describeCause(cause) }),
+    });
+
+    return yield* RankingConfig.$match(ranking, {
+      Deterministic: () => deterministicPipeline(input, report),
+      Misconfigured: ({ reason }) =>
+        Effect.logError("Recommendation ranking misconfigured").pipe(
+          Effect.annotateLogs({ backend: "muse", reason }),
+          Effect.andThen(Effect.fail(new RecommendationMisconfigured({ reason }))),
+        ),
+      Muse: (muse) =>
+        Effect.gen(function* () {
+          const agentConfig = yield* Effect.try({
+            try: () => agentConfigFromMuse(muse, serverEnv()),
+            catch: (cause) => new RecommendationMisconfigured({ reason: describeCause(cause) }),
+          });
+
+          const snapshot = yield* resolveAgentPool(input, resolvedBounds.candidatePoolCap);
+
+          if (snapshot === null) {
+            return yield* deterministicPipeline(input, report);
+          }
+
+          const outcome = yield* runAgentLoop({
+            pool: snapshot.pool,
+            eligibility: snapshot.eligibility,
+            mood: input.mood,
+            occasion: input.meal,
+            requestId: requestId ?? crypto.randomUUID(),
+            outputLimit: muse.outputLimit,
+            bounds: resolvedBounds,
+            emitProgress: (event) => {
+              if (
+                event.stage === "completed" ||
+                event.stage === "degraded" ||
+                event.stage === "failed"
+              ) {
+                return Effect.void;
+              }
+
+              return Effect.sync(() => {
+                report(event.stage, event.detail);
+              });
+            },
+          }).pipe(Effect.provide(makeAgentModelClientLive(agentConfig)));
+
+          return yield* AgentRunOutcome.$match(outcome, {
+            Selected: ({ ids, reasons }) => hydrateAgentSelected(snapshot, ids, reasons),
+            DeterministicFallback: ({ ids, cause, warning }) =>
+              hydrateAgentFallback(snapshot, ids, toDegradedCause(cause), warning),
+          });
+        }),
+    });
   });
 
 const jsonError = (requestId: string, rejection: PreStreamRejection): Response => {
@@ -354,9 +488,13 @@ const streamOutcome = (
       Effect.gen(function* () {
         enqueue(emitter.stage("preparing", null));
 
-        return yield* pipeline(input, (stage, detail) => {
-          enqueue(emitter.stage(stage, detail));
-        });
+        return yield* pipeline(
+          input,
+          (stage, detail) => {
+            enqueue(emitter.stage(stage, detail));
+          },
+          requestId,
+        );
       }).pipe((effect) => withRequestTimeout(effect, "recommend/stream", timeoutMs)),
     );
 

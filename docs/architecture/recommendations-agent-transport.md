@@ -1,9 +1,9 @@
 # Recommendations agent transport (streaming progress)
 
-**Status: Partially implemented; not merge-ready.** The stream transport,
-client controller, and offline fixture eval exist. Production agent/provider
-wiring and quiz stream consumption remain incomplete. CI validation is pending;
-the fixture eval is not evidence of live agent recommendation quality.
+**Status: Wired; pending CI validation.** The stream transport, client
+controller, offline fixture eval, provider adapter, agent pool wiring, and
+per-request route selection exist. CI validation is pending; the fixture
+eval is not evidence of live agent recommendation quality.
 
 ## Decision
 
@@ -16,10 +16,17 @@ give the client a typed dispatch without custom framing; byte cost is
 equivalent).
 
 Server: `src/modules/food-discovery/server/agent/progress-transport.ts`
-(`handleRecommendStream`), route
+(`handleRecommendStream`, `agentPipeline`, `deterministicPipeline`), route
 `src/routes/api/v1/recommendations.stream.ts`, codec
 `src/modules/food-discovery/server/agent/stream-codec.ts` (isomorphic —
 no server runtime imports; domain imports are type-only).
+Provider seam: `src/server/integrations/meta-agent.ts`
+(`makeAgentModelClientLive` — single-turn `AgentModelClient` adapter over
+Chat Completions; the unused `MetaAgent.runLoop` stays for reference).
+Pool + hydration: `resolveAgentPool` / `hydrateAgentSelected` /
+`hydrateAgentFallback` in
+`src/modules/food-discovery/server/operations/recommendation-service.ts`
+(additive; the deterministic `recommend` flow is untouched).
 Client: `src/components/home/recommend/agent-progress-controller.ts`
 (framework-agnostic; lane C wires it into the quiz UI).
 
@@ -136,18 +143,56 @@ MODEL_MODEL_ID=muse-spark-1.3-contributor
 MODEL_BASE_URL=https://api.meta.ai/v1
 ```
 
-These are example operator choices, not built-in agent defaults. The transport
-currently recognizes `1`, `true`, and `yes`; the provider recognizes only `true`.
-Flag parsing must be unified before production wiring is considered complete.
+These are example operator choices, not built-in agent defaults. The stream
+path (guard, route, pipeline) consistently uses `isAgentStreamEnabled`
+(`1`, `true`, `yes`); the legacy `meta-agent.ts` `isAgentEnabled`
+(`"true"` only) is not consulted on this path.
 
-## Lane B handoff
+## Production pipeline (wired)
 
-Replace `deterministicPipeline` with the tool-using agent:
+The route selects the pipeline from `RECOMMEND_AGENT_ENABLED`
+(`isAgentStreamEnabled`: `1`/`true`/`yes`); the handler default stays
+`deterministicPipeline`. When the flag is on, `agentPipeline` runs the
+tool-using loop; every precondition failure delegates back to
+`deterministicPipeline` except hard misconfiguration, which fails closed:
+
+```
+flag off → deterministicPipeline (byte-identical to flag-off)
+guest actor or surpriseSeed > 0 → deterministicPipeline (guests never
+  spend model budget; surprise stays a deterministic pool slice)
+bounds / ranking / agent-config sync throw → RecommendationMisconfigured
+  (loud; never a defect)
+ranking Deterministic → deterministicPipeline
+ranking Misconfigured → RecommendationMisconfigured (loud, no fallback)
+pool empty or eligibility malformed → deterministicPipeline (honest Empty)
+Selected → hydrateAgentSelected (LiveMuse cards with ID-keyed reasons)
+DeterministicFallback → hydrateAgentFallback (DegradedMuse + warning)
+```
+
+Precondition resolution order: flag → bounds (`resolveAgentBounds`,
+protocol) → ranking config (`resolveRankingConfig`, must be the Muse
+variant) → agent config (`agentConfigFromMuse`) → pool
+(`resolveAgentPool`, candidate limit = `candidatePoolCap`) → `runAgentLoop`
+with a per-request `AgentModelClient` layer (`makeAgentModelClientLive`,
+provided locally) over ambient Database / IngredientRepository /
+DishRelationsRepository, forwarding non-terminal stages to the transport
+emitter. Terminal events stay owned by the transport. The transport passes
+its request id into the pipeline (`StreamPipeline` third parameter) so
+agent logs join the stream request; direct pipeline callers fall back to a
+fresh UUID. A-loop wins: the orchestrator owns bounds, transcript,
+execution, and validation; the adapter is single-turn only (no
+self-timeout — the orchestrator applies the per-turn timeout; interruption
+already propagates through the adapter's `tryPromise` signal).
+
+## Lane B handoff (done)
+
+Replaced `deterministicPipeline` with the tool-using agent:
 
 ```ts
 export type StreamPipeline = (
   input: RecommendDishesInput,
   report: StageReporter,
+  requestId?: string,
 ) => Effect.Effect<RecommendationOutcome, RecommendationError, PipelineDeps>;
 ```
 
@@ -157,11 +202,22 @@ reasoning, coordinates, or raw exclusions.
 
 ## Open risks
 
-- `protocol.ts` eagerly resolves agent bounds on a server value import,
-  including when agent mode is disabled. Separate pure protocol types from
-  enabled-only configuration before production wiring.
-- The default stream pipeline still invokes the legacy recommendation service;
-  the quiz still uses JSON RPC. Branch consolidation alone does not activate
-  tool-using recommendations or real quiz progress.
+- `AGENT_BOUNDS` still parses on first server-side access (lazy getters, no
+  import-time throw); `agentPipeline` additionally parses explicitly via
+  `resolveAgentBounds(process.env)` so a bad value fails closed as
+  `RecommendationMisconfigured`. Keep protocol types browser-import-safe
+  (`import type` only).
+- The quiz still uses JSON RPC. Branch consolidation alone does not activate
+  real quiz progress; the stream endpoint is live but the quiz does not
+  consume it yet.
 - No member-path stream test (needs a live session); covered by existing
   actor tests + the guest stream path.
+- Flag parsing is not yet unified: the stream path (guard, route, pipeline)
+  consistently uses `isAgentStreamEnabled` (`1`/`true`/`yes`), while
+  `meta-agent.ts` `isAgentEnabled` accepts only `"true"` and `bounds.ts`
+  `isAgentEnabled` accepts `"1"`/`"true"`. Unify before removing the
+  flag-off fallback.
+- Surprise slices and guest requests intentionally bypass the agent
+  (deterministic path); the agent pool mirror in `resolveAgentPool` must be
+  kept in sync with the deterministic scope dispatch until a shared
+  pool-fetch is extracted.

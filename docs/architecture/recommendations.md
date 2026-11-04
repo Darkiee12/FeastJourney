@@ -221,6 +221,26 @@ same post-exclusion pool; only the ordering step differs.
   env vars; without an explicit `muse` provider selection the pipeline
   runs deterministically with an explicit note (never mislabeled).
 
+## Agentic recommendations (stream transport, flag-gated)
+
+`POST /api/v1/recommendations/stream` (SSE) runs the tool-using agent loop
+when `RECOMMEND_AGENT_ENABLED` is on; the route selects `agentPipeline`,
+otherwise `deterministicPipeline` (the single-shot path above, byte-identical
+default). Full contract, guard order, lifecycle invariants, and limits live in
+[recommendations-agent-transport](recommendations-agent-transport.md):
+
+- Preconditions resolve inside one Effect: flag → protocol bounds → ranking
+  config (must be the Muse variant) → agent config → eligible pool
+  (`resolveAgentPool`: same scope dispatch, exclusion loop, and deterministic
+  ordering as the single-shot path, stopping at the pool instead of ranking).
+- Guests and surprise slices stay deterministic (no model spend); empty or
+  malformed pools stay deterministic (honest Empty); misconfiguration fails
+  closed (`RecommendationMisconfigured`).
+- The orchestrator (`runAgentLoop`) owns bounds, transcript, tool execution,
+  and final validation; the provider adapter (`makeAgentModelClientLive`)
+  is single-turn only. Selected outcomes hydrate to `ReadyMuse` (LiveMuse),
+  fallbacks to `ReadyDeterministic` (DegradedMuse + honest warning).
+
 ## Transport
 
 `recommendDishesFn` (POST, Zod-validated, public): `{mode, dishes,

@@ -1,6 +1,13 @@
-import { Context, Data, Duration, Effect, Layer, Match } from "effect";
+import { Context, Data, Duration, Effect, Layer, Match, Predicate } from "effect";
 import { z } from "zod";
 
+import {
+  AgentModelClient,
+  AgentTranscriptEntry,
+  AgentTurnOutput,
+  type AgentToolCall as ModelAgentToolCall,
+  type AgentTurnInput,
+} from "@/modules/food-discovery/server/agent/model-client";
 import {
   AGENT_BOUNDS,
   RECOMMEND_AGENT_FLAG,
@@ -9,7 +16,15 @@ import {
   type SearchDishesInput,
 } from "@/modules/food-discovery/server/agent/protocol";
 import type { ServerEnv } from "@/server/env";
-import { MAX_REASON_LENGTH } from "@/server/integrations/meta-client";
+import {
+  MAX_REASON_LENGTH,
+  MetaAuthError,
+  MetaInvalidOutput,
+  MetaPermanentError,
+  MetaRateLimited,
+  MetaRequestError,
+  type MetaError,
+} from "@/server/integrations/meta-client";
 
 /**
  * Agentic Muse provider transport (workstream B).
@@ -888,3 +903,132 @@ export class MetaAgent extends Context.Service<
 
 export const makeMetaAgentLive = (): Layer.Layer<MetaAgent> =>
   Layer.succeed(MetaAgent, { runLoop: (request) => runAgentLoop(request) });
+
+/**
+ * Single-turn AgentModelClient adapter over Chat Completions.
+ *
+ * A-loop wins: the orchestrator (`runAgentLoop` in
+ * `@/modules/food-discovery/server/agent/orchestrator.ts`) owns bounds,
+ * transcript assembly, tool execution, and final validation. This adapter
+ * performs exactly one provider turn per `runTurn` call: serialize the
+ * transcript to Chat Completions messages, POST with tool definitions, and
+ * decode the assistant turn. No orchestration timeout is applied here — the
+ * orchestrator wraps every turn in a per-turn `timeoutOrElse`, and fiber
+ * interruption reaches the in-flight fetch through the combined AbortSignal
+ * in `postToProvider` (matching `meta-client`).
+ */
+
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- boundary serializer: model-tool args are unknown by contract; strings replay verbatim, other JSON values re-encode.
+const serializeToolArgs = (args: ModelAgentToolCall["args"]): string =>
+  Predicate.isString(args) ? args : JSON.stringify(args);
+
+/**
+ * Model-supplied arguments arrive as a raw string. Keep the parsed JSON
+ * value when it parses so the orchestrator's tools execute structured args;
+ * otherwise keep the raw string so execution rejects it safely as a bounded
+ * tool-error result the model can self-correct from — never a fiber failure.
+ */
+const parseToolArgs = (argsRaw: string) => {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(argsRaw);
+  } catch {
+    return argsRaw;
+  }
+
+  return parsed;
+};
+
+const toMetaError = (error: MetaAgentError): MetaError =>
+  Match.value(error).pipe(
+    Match.tagsExhaustive({
+      MetaAgentAuthError: (failure) =>
+        new MetaAuthError({ reason: failure.reason, status: failure.status }),
+      MetaAgentPermanentError: (failure) =>
+        new MetaPermanentError({ reason: failure.reason, status: failure.status }),
+      MetaAgentRateLimited: (failure) =>
+        new MetaRateLimited({
+          reason: failure.reason,
+          retryAfterSeconds: failure.retryAfterSeconds,
+        }),
+      MetaAgentRequestError: (failure) =>
+        new MetaRequestError({ reason: failure.reason, status: failure.status }),
+      MetaAgentTimeoutError: (failure) => new MetaRequestError({ reason: failure.reason }),
+      MetaAgentInvalidOutput: (failure) => new MetaInvalidOutput({ reason: failure.reason }),
+      MetaAgentInvalidToolCall: (failure) => new MetaInvalidOutput({ reason: failure.reason }),
+    }),
+  );
+
+const runModelTurn = (
+  input: AgentTurnInput,
+  config: MetaAgentConfig,
+): Effect.Effect<AgentTurnOutput, MetaError> =>
+  Effect.gen(function* () {
+    const messages: Array<AgentMessage> = [{ role: "system", content: input.systemPrompt }];
+
+    for (const entry of input.transcript) {
+      const serialized = AgentTranscriptEntry.$match(entry, {
+        User: ({ text }): ReadonlyArray<AgentMessage> => [{ role: "user", content: text }],
+        AssistantTools: ({ calls }): ReadonlyArray<AgentMessage> => [
+          {
+            role: "assistant",
+            content: null,
+            tool_calls: calls.map((call) => ({
+              id: call.id,
+              type: "function" as const,
+              function: { name: call.name, arguments: serializeToolArgs(call.args) },
+            })),
+          },
+        ],
+        ToolResults: ({ results }): ReadonlyArray<AgentMessage> =>
+          results.map((result) => ({
+            role: "tool",
+            tool_call_id: result.toolCallId,
+            content: JSON.stringify({ ok: result.ok, payload: result.payload }),
+          })),
+      });
+
+      messages.push(...serialized);
+    }
+
+    const body = yield* postToProvider({
+      messages,
+      withTools: true,
+      withStructuredOutput: false,
+      config,
+    }).pipe(Effect.mapError(toMetaError));
+
+    const turn = yield* decodeAssistantTurn(body).pipe(Effect.mapError(toMetaError));
+
+    if (turn.toolCalls.length > 0) {
+      return AgentTurnOutput.ToolCalls({
+        calls: turn.toolCalls.map((call) => ({
+          id: call.id,
+          // SAFETY: unknown tool names are preserved verbatim so the orchestrator answers them with a bounded tool-error result; execution validates before running.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the provider may invent tool names; this boundary cast is a reprieve, not validation (the orchestrator safeParses before executing).
+          name: call.name as AgentToolName,
+          args: parseToolArgs(call.argsRaw),
+        })),
+      });
+    }
+
+    if (turn.content === null || turn.content.length === 0) {
+      return yield* new MetaInvalidOutput({
+        reason: "Muse agent returned no tool calls and no final answer",
+      });
+    }
+
+    return AgentTurnOutput.Final({ rawJson: turn.content });
+  });
+
+/**
+ * Per-request AgentModelClient layer from the already-resolved Muse config.
+ * Composed with `Effect.provide` at the transport edge for each agent run —
+ * never a singleton holding per-user state (the config is operator-owned;
+ * per-request identity still travels via `CurrentActor`).
+ */
+export const makeAgentModelClientLive = (config: MetaAgentConfig): Layer.Layer<AgentModelClient> =>
+  Layer.succeed(AgentModelClient, {
+    runTurn: (input) => runModelTurn(input, config),
+  });
