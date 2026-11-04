@@ -144,15 +144,26 @@ exactly as configured with no upper bounds — invalid explicit values fail
 loudly naming field + reason. The combined 24 MiB inline-payload bound is the
 provider's transport limit, not an operator ceiling. Extraction runs detached
 from the HTTP request under the operator's provider budget (async accept +
-status polling in the browser), so no 60s/95s fixed chain can defeat a
-configured value. Cancellation reaches provider and storage requests. The
+status polling in the browser). Acceptance returns the owned scan view after
+the lease/worker handoff, with no provider wait; even fast scans may initially
+return `processing`. Repeated acceptance of an active lease returns that view
+for polling without another worker. Failed views without a document surface as
+retryable client failures, including failures before the first poll. Browser
+cancellation stops watching, not the accepted extraction; worker interruption
+still reaches provider/storage requests and finalizes the lease. The worker
+inherits the resolved services, owns a fresh resource scope, and remains
+interruptible across the cancellation-masked lease handoff. No fixed HTTP
+chain defeats the configured provider budget. The
 extraction lease lifetime derives from the configured provider budget plus a
 documented orchestration margin; PostgreSQL still guards at most four active
 extractions and five attempts per scan (abuse/resource protections for this
 guest-accessible endpoint, not operator ceilings). Leases survive restarts;
 an expired lease can be retried explicitly (idempotent: a retry while work
 is running observes the current view instead of duplicating it); success
-reuses the stored revision.
+reuses the stored revision. Workers are in-process, not durable jobs: process
+loss requires an explicit retry after lease expiry, and deployment must keep
+the server process alive for accepted work. The browser's existing polling
+window can end before a long configured run; retry resumes watching it.
 
 [Meta's vision](https://dev.meta.ai/docs/image-understanding) and
 [structured-output](https://dev.meta.ai/docs/structured-output) guides document
