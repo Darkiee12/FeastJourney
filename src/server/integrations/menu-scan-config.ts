@@ -4,7 +4,11 @@ import { DEFAULT_MODEL_BASE_URL, serverEnv, type ServerEnv } from "@/server/env"
 
 const scannerConfigSchema = z.strictObject({
   apiKey: z.string().trim().min(1),
-  model: z.literal("muse-spark-1.3"),
+  // Operator-chosen model id (plain string, never validated against a
+  // hardcoded allowlist): the provider is the authority on which model
+  // ids exist. A wrong id fails loudly at the scanner boundary via the
+  // provider's 4xx, not silently at startup.
+  model: z.string().trim().min(1).max(120),
   endpoint: z.url().refine((value) => {
     const url = new URL(value);
 

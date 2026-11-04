@@ -1,99 +1,62 @@
+import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { z } from "zod";
 
 import {
-  BusyStage,
-  ConversationThread,
-  CopilotCards,
-  FlowAlert,
-  FlowShell,
-  FollowUpChips,
-  ResearchFallback,
-  type CopilotMessage,
-  type FlowProps,
-} from "@/modules/muse-copilot/flows/conversation";
-import { menuScanClient, validateMenuFiles } from "@/modules/restaurant-discovery/menu-scan-client";
-import type { CopilotCard } from "@/server/muse-copilot/copilot-schemas";
-import { copilotChatOutputSchema } from "@/server/muse-copilot/copilot-schemas";
-import { copilotChatFn } from "@/server/muse-copilot/copilot.functions";
-import { researchDishesFn } from "@/server/web-research/research-functions";
+  PhotoIdentifyResult,
+  classifyChatError,
+  identifyPhoto,
+} from "@/modules/muse-copilot/flows/conversation-model";
+import {
+  PlatePhotoIssue,
+  describePlateVerdict,
+  validatePlatePhoto,
+} from "@/modules/muse-copilot/flows/plate-vision-adapter";
+import { ExchangeOutcome, type WorkspacePanelApi } from "@/modules/muse-copilot/flows/task-panel";
+import { isMenuReadingLanguage } from "@/modules/restaurant-discovery/menu-language";
+import { menuScanClient } from "@/modules/restaurant-discovery/menu-scan-client";
 
 const uuidSchema = z.uuid();
 
-const copy = {
-  en: {
-    title: "Know your plate",
-    intro:
-      "Show Muse a plate and it will suggest what the dish might be. The photo uploads through the menu scanner so it stays yours to revisit; every suggestion is tentative — confirm with the venue before ordering.",
-    choosePhoto: "Choose a photo",
-    photoHint: "JPEG, PNG, or WebP, up to 8 MiB. The photo is sent for identification only.",
-    uploading: "Uploading photo…",
-    preparing: "Preparing suggestions…",
-    failed: "Photo identification did not finish. Try again when ready.",
-    retry: "Try again",
-    reset: "Use another photo",
-    you: "You",
-    muse: "Muse",
-    platePrompt: "What dish is in this photo?",
-    viewDish: "View dish",
-    viewVenue: "View place",
-    researchHint: "Still unsure? Web research can look beyond the catalog.",
-  },
-  vi: {
-    title: "Hiểu món ăn",
-    intro:
-      "Cho Muse xem ảnh món ăn, Muse sẽ gợi ý đó có thể là món gì. Ảnh tải lên qua trình quét thực đơn nên bạn xem lại lúc nào cũng được; mọi gợi ý đều chỉ là phỏng đoán — hãy xác nhận với quán trước khi gọi món.",
-    choosePhoto: "Chọn ảnh",
-    photoHint: "JPEG, PNG hoặc WebP, tối đa 8 MiB. Ảnh chỉ được gửi để nhận diện.",
-    uploading: "Đang tải ảnh lên…",
-    preparing: "Đang soạn gợi ý…",
-    failed: "Lần nhận diện chưa xong. Thử lại khi bạn sẵn sàng.",
-    retry: "Thử lại",
-    reset: "Dùng ảnh khác",
-    you: "Bạn",
-    muse: "Muse",
-    platePrompt: "Món trong ảnh này là món gì?",
-    viewDish: "Xem món",
-    viewVenue: "Xem quán",
-    researchHint: "Vẫn chưa chắc? Tìm trên web có thể vượt ngoài danh mục.",
-  },
-} as const;
-
-interface PlateAnswer {
-  readonly cards: ReadonlyArray<CopilotCard>;
-  readonly followUps: ReadonlyArray<string>;
-}
-
 /**
- * Plate flow. Photo handling reuses the menu scanner's client validation
- * (`validateMenuFiles`: JPEG/PNG/WebP, ≤8 MiB) and its upload pipeline
- * (`menuScanClient.create` + `attach`), so bytes are backend-processed and
- * the photo stays a real scan the traveler can revisit — nothing here
- * copies the scanner or mints storage keys. The created scan ID travels in
- * context to `copilotChatFn` (task `plate`), whose dish cards render with
- * canonical catalog links; a web-research fallback covers the no-match
- * case with provenance badges.
+ * Know Your Plate (plan §13, addendum §§3/7). The composer's gallery/camera
+ * buttons open the native picker directly through the hidden inputs below —
+ * no intermediate form. A picked photo shows a compact preview for
+ * confirmation BEFORE any upload; the upload then reuses the existing
+ * private menu-scan storage path and identification calls the real
+ * `copilotIdentifyPhotoFn`, never catalog text search. The exchange retry
+ * reuses the owned scan; a newly picked photo always mints a fresh scan so
+ * retries never duplicate private storage and failures keep the photo for
+ * retry without re-upload.
  *
- * Integration note: `copilotIdentifyPhotoFn` takes a server-minted
- * object-store `imageKey` the client cannot derive, so this flow uses the
- * chat path with the scan in context instead.
+ * Guests see the sign-in requirement before uploading: the vision operation
+ * only permits signed-in owners, so advertising identification to guests
+ * would lie. The verdict stays tentative — careful confidence, visual
+ * evidence, canonical dish link, Explain/Find-nearby/None-of-these — and
+ * never claims ingredients, allergens, or origin from an image.
  */
-export default function PlateFlow({ context, onUpdateContext }: FlowProps): ReactNode {
-  const strings = context.language === "vi" ? copy.vi : copy.en;
+export function PlatePanel(api: WorkspacePanelApi): ReactNode {
+  const {
+    busy,
+    consumePhotoRequest,
+    context,
+    copy,
+    onUpdateContext,
+    publishNote,
+    signedIn,
+    startExchange,
+  } = api;
+
+  const [picked, setPicked] = useState<File | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [stage, setStage] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [done, setDone] = useState(false);
-  const [messages, setMessages] = useState<ReadonlyArray<CopilotMessage>>([]);
-  const [answer, setAnswer] = useState<PlateAnswer | null>(null);
-  const runId = useRef(0);
   const photoUrlRef = useRef<string | null>(null);
+  /** Latest upload per photo: exchange retries reuse the owned scan. */
+  const lastUploadRef = useRef<{ readonly photo: File; readonly scanId: string } | null>(null);
+  const galleryRef = useRef<HTMLInputElement | null>(null);
+  const cameraRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(
     () => () => {
-      runId.current += 1;
-
       if (photoUrlRef.current !== null) {
         URL.revokeObjectURL(photoUrlRef.current);
         photoUrlRef.current = null;
@@ -101,6 +64,24 @@ export default function PlateFlow({ context, onUpdateContext }: FlowProps): Reac
     },
     [],
   );
+
+  // Composer capture buttons (gallery/camera) delegate here: consume a
+  // pending request and open the matching native picker. Runs every render
+  // so a mode switch triggered by the button is honored on mount. Skipped
+  // while an identification is in flight.
+  useEffect(() => {
+    if (busy) {
+      return;
+    }
+
+    const request = consumePhotoRequest();
+
+    if (request === "gallery") {
+      galleryRef.current?.click();
+    } else if (request === "camera") {
+      cameraRef.current?.click();
+    }
+  });
 
   const setPreview = (next: string | null): void => {
     if (photoUrlRef.current !== null) {
@@ -112,278 +93,186 @@ export default function PlateFlow({ context, onUpdateContext }: FlowProps): Reac
     setPhotoUrl(next);
   };
 
-  const reset = (): void => {
-    runId.current += 1;
-    setPreview(null);
-    setFile(null);
-    setStage(null);
-    setFailed(false);
-    setDone(false);
-    setMessages([]);
-    setAnswer(null);
+  const presentCandidates = (
+    output: Parameters<typeof describePlateVerdict>[0],
+  ): ExchangeOutcome => {
+    const verdict = describePlateVerdict(output, copy);
+
+    if (verdict.dishId !== undefined) {
+      onUpdateContext({ dishId: verdict.dishId });
+    }
+
+    return ExchangeOutcome.ExchangeOk({
+      text: verdict.text,
+      cards: verdict.cards,
+      followUps: verdict.followUps,
+      notice: verdict.notice,
+      // Client-composed from validated candidates: deterministic assembly.
+      synthesized: false,
+    });
   };
 
-  const identify = (photo: File): void => {
-    const id = runId.current + 1;
-    runId.current = id;
-
-    const alive = (): boolean => runId.current === id;
-    const violation = validateMenuFiles([photo]);
-
-    if (violation !== null) {
-      setFailed(true);
-      setDone(false);
-      setMessages([]);
-      setAnswer(null);
-
+  const identify = (): void => {
+    if (picked === null || busy) {
       return;
     }
 
-    setPreview(URL.createObjectURL(photo));
-    setFile(photo);
-    setFailed(false);
-    setDone(false);
-    setMessages([]);
-    setAnswer(null);
-    setStage(strings.uploading);
-
+    const photo = picked;
     const parsedVenue = uuidSchema.safeParse(context.venueId);
     const venueId = parsedVenue.success ? parsedVenue.data : null;
 
-    void menuScanClient
-      .create({ targetLanguage: context.language, venueId })
-      .then((created) => menuScanClient.attach(created.id, 1, photo).then(() => created.id))
-      .then((scanId) => {
-        if (!alive()) {
-          return null;
+    startExchange({
+      task: "plate",
+      userText: copy.photoShared,
+      stage: copy.thinkingPhoto,
+      work: async () => {
+        // Retry reuses the existing owned scan (addendum §3); only a newly
+        // picked photo uploads again.
+        const reuse = lastUploadRef.current;
+        let ownedScanId: string;
+
+        if (reuse !== null && reuse.photo === photo) {
+          ownedScanId = reuse.scanId;
+        } else {
+          try {
+            const created = await menuScanClient.create({
+              targetLanguage: isMenuReadingLanguage(context.language) ? context.language : "en",
+              venueId,
+            });
+
+            await menuScanClient.attach(created.id, 1, photo);
+            ownedScanId = created.id;
+            lastUploadRef.current = { photo, scanId: ownedScanId };
+          } catch (error) {
+            return ExchangeOutcome.ExchangeFailed({
+              failure: classifyChatError({
+                message: error instanceof Error ? error.message : "",
+              }),
+            });
+          }
+
+          onUpdateContext({ scanId: ownedScanId });
         }
 
-        onUpdateContext({ scanId });
-        setStage(strings.preparing);
+        const result = await identifyPhoto(ownedScanId, context.language);
 
-        return copilotChatFn({
-          data: {
-            message: strings.platePrompt,
-            task: "plate",
-            context: {
-              city: context.city,
-              country: context.country,
-              language: context.language,
-              dishId: context.dishId,
-              venueId: context.venueId,
-              scanId,
-            },
-          },
+        return PhotoIdentifyResult.$match(result, {
+          PhotoFailed: ({ failure }) => ExchangeOutcome.ExchangeFailed({ failure }),
+          PhotoReady: ({ output }) => presentCandidates(output),
         });
-      })
-      .then(
-        (raw) => {
-          if (!alive() || raw === null) {
-            return;
-          }
-
-          // AI-derived reply: validate against the peer contract before rendering.
-          const parsed = copilotChatOutputSchema.safeParse(raw);
-
-          if (!parsed.success) {
-            setStage(null);
-            setFailed(true);
-            setDone(false);
-
-            return;
-          }
-
-          const reply = parsed.data;
-
-          setMessages([{ id: "plate-1", role: "assistant", text: reply.reply }]);
-
-          const dishCard = reply.cards.find(
-            (card) => card.kind === "dish" && card.refId !== undefined,
-          );
-
-          const venueCard = reply.cards.find(
-            (card) => card.kind === "restaurant" && card.refId !== undefined,
-          );
-
-          if (dishCard?.refId !== undefined || venueCard?.refId !== undefined) {
-            onUpdateContext({ dishId: dishCard?.refId, venueId: venueCard?.refId });
-          }
-
-          setAnswer({ cards: reply.cards, followUps: reply.followUps });
-          setStage(null);
-          setFailed(false);
-          setDone(true);
-        },
-        () => {
-          if (alive()) {
-            setStage(null);
-            setFailed(true);
-            setDone(false);
-          }
-        },
-      );
+      },
+    });
   };
 
-  const ask = (text: string): void => {
-    if (stage !== null) {
+  const pickPhoto = (event: { readonly target: HTMLInputElement }): void => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (file === undefined) {
       return;
     }
 
-    const id = runId.current + 1;
-    runId.current = id;
+    const issue = validatePlatePhoto(file);
 
-    const alive = (): boolean => runId.current === id;
-
-    setMessages((previous) => [...previous, { id: `plate-q-${id}`, role: "user", text }]);
-    setStage(strings.preparing);
-
-    void copilotChatFn({
-      data: {
-        message: text,
-        task: "plate",
-        context: {
-          city: context.city,
-          country: context.country,
-          language: context.language,
-          dishId: context.dishId,
-          venueId: context.venueId,
-          scanId: context.scanId,
+    if (issue !== null) {
+      PlatePhotoIssue.$match(issue, {
+        PhotoUnsupportedType: () => {
+          publishNote(copy.errorPhotoType);
         },
-      },
-    }).then(
-      (raw) => {
-        if (!alive()) {
-          return;
-        }
+        PhotoTooLarge: () => {
+          publishNote(copy.errorPhotoLarge);
+        },
+      });
 
-        // AI-derived reply: validate against the peer contract before rendering.
-        const parsed = copilotChatOutputSchema.safeParse(raw);
+      return;
+    }
 
-        if (!parsed.success) {
-          setStage(null);
-          setFailed(true);
-
-          return;
-        }
-
-        const reply = parsed.data;
-
-        setMessages((previous) => [
-          ...previous,
-          { id: `plate-a-${id}`, role: "assistant", text: reply.reply },
-        ]);
-        setAnswer({ cards: reply.cards, followUps: reply.followUps });
-        setStage(null);
-      },
-      () => {
-        if (alive()) {
-          setStage(null);
-          setFailed(true);
-        }
-      },
-    );
+    // A newly picked photo invalidates the previous upload binding.
+    lastUploadRef.current = null;
+    setPicked(file);
+    setPreview(URL.createObjectURL(file));
   };
 
-  const canResearch = done && context.city !== undefined && context.country !== undefined;
+  if (!signedIn) {
+    return (
+      <div className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-white px-4 py-3">
+        <p className="text-sm leading-relaxed text-ink">{copy.errorAuth}</p>
+
+        <Link
+          to="/sign-in"
+          search={{ lang: context.language, returnTo: "/muse" }}
+          className="inline-flex min-h-11 items-center justify-center rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark"
+        >
+          {copy.signInAction}
+        </Link>
+      </div>
+    );
+  }
+
+  const pickerButton =
+    "inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-full border border-border-soft bg-white px-4 text-sm font-bold text-ink transition hover:border-food-orange-strong";
 
   return (
-    <FlowShell title={strings.title} intro={strings.intro}>
-      <label
-        htmlFor="copilot-plate-photo"
-        className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark"
-      >
-        {strings.choosePhoto}
-      </label>
-
+    <div className="flex flex-col gap-2">
       <input
-        id="copilot-plate-photo"
+        ref={galleryRef}
+        id="muse-plate-photo"
         type="file"
         accept="image/jpeg,image/png,image/webp"
         className="sr-only"
-        disabled={stage !== null}
+        disabled={busy}
         onChange={(event) => {
-          const picked = event.target.files?.[0];
-
-          if (picked !== undefined) {
-            identify(picked);
-          }
-
-          event.target.value = "";
+          pickPhoto(event);
         }}
       />
 
-      <p className="text-xs leading-relaxed text-muted">{strings.photoHint}</p>
+      <input
+        ref={cameraRef}
+        id="muse-plate-camera"
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="sr-only"
+        disabled={busy}
+        onChange={(event) => {
+          pickPhoto(event);
+        }}
+      />
 
-      {photoUrl === null ? null : (
-        <img
-          src={photoUrl}
-          alt=""
-          className="w-full rounded-2xl border border-border-soft object-cover"
-        />
-      )}
+      <p className="text-sm leading-relaxed text-ink">{copy.suggestPlate}</p>
 
-      <BusyStage stage={stage} />
+      <p className="text-xs leading-relaxed text-muted">{copy.plateConstraints}</p>
 
-      <ConversationThread messages={messages} museLabel={strings.muse} youLabel={strings.you} />
+      <div className="flex flex-wrap gap-2">
+        <label htmlFor="muse-plate-photo" className={pickerButton}>
+          {copy.photoGalleryLabel}
+        </label>
 
-      {answer === null ? null : (
-        <>
-          <CopilotCards
-            cards={answer.cards}
-            language={context.language}
-            onUpdateContext={onUpdateContext}
-            viewDishLabel={strings.viewDish}
-            viewVenueLabel={strings.viewVenue}
+        <label htmlFor="muse-plate-camera" className={pickerButton}>
+          {copy.photoCameraLabel}
+        </label>
+      </div>
+
+      {photoUrl === null || picked === null ? null : (
+        <figure className="flex flex-col gap-2">
+          <img
+            src={photoUrl}
+            alt={copy.photoShared}
+            className="max-h-56 w-full rounded-2xl border border-border-soft object-cover"
           />
 
-          <FollowUpChips busy={stage !== null} items={answer.followUps} onPick={ask} />
-        </>
-      )}
-
-      {failed ? (
-        <FlowAlert
-          message={strings.failed}
-          onRetry={() => {
-            if (file !== null) {
-              identify(file);
-            } else {
-              reset();
-            }
-          }}
-          retryLabel={strings.retry}
-        />
-      ) : null}
-
-      {done && !failed ? (
-        <div className="flex flex-col gap-2">
           <button
             type="button"
-            onClick={reset}
-            className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-white px-5 text-sm font-bold text-ink transition hover:bg-ink hover:text-white"
+            onClick={identify}
+            disabled={busy}
+            className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full bg-food-orange-strong px-5 text-sm font-bold text-white transition hover:bg-food-orange-dark disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {strings.reset}
+            {busy ? copy.thinkingPhoto : copy.plateIdentifyAction}
           </button>
-
-          {canResearch ? (
-            <>
-              <p className="text-xs leading-relaxed text-muted">{strings.researchHint}</p>
-
-              <ResearchFallback
-                language={context.language}
-                load={() =>
-                  researchDishesFn({
-                    data: {
-                      city: context.city ?? "",
-                      country: context.country ?? "",
-                      language: context.language,
-                    },
-                  })
-                }
-              />
-            </>
-          ) : null}
-        </div>
-      ) : null}
-    </FlowShell>
+        </figure>
+      )}
+    </div>
   );
 }
+
+export default PlatePanel;

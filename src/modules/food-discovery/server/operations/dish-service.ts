@@ -853,6 +853,7 @@ export const DishServiceLive = Layer.effect(
               name: pickDisplayName(labels.map(asLocalizedName), checkedLocale)?.name,
               association: entry.association,
               isDisputed: entry.is_disputed,
+              note: entry.note,
               kind: entry.kind,
               iso3166: entry.iso3166,
               displayLatitude: entry.display_latitude,

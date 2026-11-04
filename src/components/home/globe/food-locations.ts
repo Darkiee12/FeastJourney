@@ -43,6 +43,9 @@ export type LocalizedText = {
   hi: string;
   es: string;
   zh: string;
+  ja?: string | undefined;
+  de?: string | undefined;
+  nl?: string | undefined;
 };
 
 /** Build the locale map backing country, region, and description fields. */
@@ -53,6 +56,9 @@ export function textMap(text: LocalizedText): ReadonlyMap<Locale, string> {
     ["hi", text.hi],
     ["es", text.es],
     ["zh", text.zh],
+    ["ja", text.ja ?? text.en],
+    ["de", text.de ?? text.en],
+    ["nl", text.nl ?? text.en],
   ]);
 }
 

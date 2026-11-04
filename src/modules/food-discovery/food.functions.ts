@@ -474,6 +474,15 @@ export const recommendDishesFn = createServerFn({ method: "POST" })
       }
     }
 
+    // Operation budget covers SQL + a reasoning-model ranking call (which
+    // alone can take 15s+ on 15 candidates: ~87% reasoning tokens). Sourced
+    // from RECOMMEND_TIMEOUT_MS (default 120s), never a literal — and it
+    // must stay above MODEL_TIMEOUT_MS or the provider call can never
+    // complete.
+    const recommendTimeoutMs = await effects.Effect.runPromise(
+      appConfig.pipe(effects.Config.map((config) => config.recommendTimeoutMs ?? 120000)),
+    );
+
     const outcome = await runApp(
       withActor(
         actor,
@@ -491,7 +500,7 @@ export const recommendDishesFn = createServerFn({ method: "POST" })
         ),
       ),
       "fn/dishes/recommend",
-      30000,
+      recommendTimeoutMs,
       "server-fn",
     );
 

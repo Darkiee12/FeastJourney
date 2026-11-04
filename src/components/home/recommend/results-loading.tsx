@@ -103,7 +103,9 @@ function RailSkeletonCard({ visibility }: { readonly visibility: string }): Reac
  * - "More recommendations" heading (real text, stable across the swap)
  *   plus 3–5 rail thumbnail placeholders matching real card geometry;
  * - no mode/warning content: nothing renders an AI or deterministic label
- *   before the backend responds.
+ *   before the backend responds. No visible status line: the pulse
+ *   skeletons carry the pending state visually, so the generic
+ *   `recLoading` copy appears exactly once (sr-only).
  *
  * Accessibility: the composition adds no live region, status, alert, or
  * interactive element of its own. Everything decorative is `aria-hidden`;

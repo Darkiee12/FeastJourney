@@ -71,6 +71,7 @@ export interface DishPlace {
   readonly name: string | undefined;
   readonly association: string;
   readonly isDisputed: boolean;
+  readonly note: string | null;
   readonly kind: string;
   readonly iso3166: string | null;
   readonly displayLatitude: number | null;

@@ -1,8 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { Data, Effect, Exit } from "effect";
+import { Data, Effect, Exit, Option } from "effect";
 import { type z } from "zod";
 
+import { CatalogService, PlaceRepository } from "@/modules/food-discovery/server/index";
+import {
+  normalizeCurrencyContext,
+  parsePlaceMenuCityId,
+  resolveMenuCityId,
+  type CurrencyContext,
+} from "@/modules/restaurant-discovery/menu-price-evidence";
 import {
   menuDocumentFitsStorage,
   validateMenuRevision,
@@ -323,10 +330,83 @@ export const readMenuPhoto = Effect.fn("menu.readPhoto")(function* (
   return yield* storage.read(asset.object_key);
 });
 
+interface PlaceMenuEvidence {
+  readonly menuCity: string | null;
+  readonly menuCountry: string | null;
+}
+
+const noPlaceMenuEvidence: PlaceMenuEvidence = { menuCity: null, menuCountry: null };
+
+const COUNTRY_ISO = /^[A-Z]{2}$/;
+
+/**
+ * Resolve a `place:<decimalId>` menu city id to coarse currency evidence
+ * through the place catalog: the locale-picked display name becomes the
+ * visitor-indicated city and the nearest country-kind ancestor ISO becomes
+ * the visitor-indicated country. Only city-scale kinds (locality,
+ * subnational, province) yield a city; country records contribute their
+ * ISO only; regions and continents are dropped. Unknown or missing records
+ * degrade to null — never trusted as geography. Non-place ids return null
+ * so the caller falls back to the sync preset/`geo:` resolver. The catalog
+ * services are read optionally: runtimes without them (minimal test
+ * harnesses) degrade to null, while the production runtime always provides
+ * them. No raw GPS,
+ * street addresses, or coordinates leave this boundary; the locale only
+ * picks the display label language, never location.
+ */
+const resolvePlaceMenuEvidence = Effect.fn("menu.resolvePlaceEvidence")(function* (
+  menuCityId: string | null | undefined,
+  locale: string,
+) {
+  const placeId = parsePlaceMenuCityId(menuCityId);
+
+  if (placeId === null) return noPlaceMenuEvidence;
+
+  const catalogOption = yield* Effect.serviceOption(CatalogService);
+  const placesOption = yield* Effect.serviceOption(PlaceRepository);
+
+  if (Option.isNone(catalogOption) || Option.isNone(placesOption)) return noPlaceMenuEvidence;
+
+  const catalog = catalogOption.value;
+  const places = placesOption.value;
+
+  const detail = yield* catalog
+    .getPlace(placeId, locale)
+    .pipe(Effect.catchTag("PlaceNotFound", () => Effect.succeed(null)));
+
+  if (detail === null) return noPlaceMenuEvidence;
+
+  if (detail.kind !== "locality" && detail.kind !== "subnational" && detail.kind !== "province") {
+    if (detail.kind === "country" && detail.iso3166 !== null && COUNTRY_ISO.test(detail.iso3166)) {
+      const countryOnly: PlaceMenuEvidence = { menuCity: null, menuCountry: detail.iso3166 };
+
+      return countryOnly;
+    }
+
+    return noPlaceMenuEvidence;
+  }
+
+  const chain = yield* places.ancestors(BigInt(placeId));
+
+  let menuCountry: string | null = null;
+
+  for (const entry of chain) {
+    if (entry.kind === "country" && entry.iso3166 !== null && COUNTRY_ISO.test(entry.iso3166)) {
+      menuCountry = entry.iso3166;
+      break;
+    }
+  }
+
+  const evidence: PlaceMenuEvidence = { menuCity: detail.displayName ?? null, menuCountry };
+
+  return evidence;
+});
+
 export const extractMenu = Effect.fn("menu.extractScan")(function* (
   principal: ScanPrincipal,
   scanId: string,
   requestId: string,
+  location?: { readonly trustedCountry?: string | null; readonly menuCityId?: string | null },
 ) {
   // Revision provenance records the actual configured model, so resolve it
   // before any lease or inference. A disabled or misconfigured scanner fails
@@ -337,6 +417,7 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
       new ExtractionUnavailable({
         reason: "Menu analysis is unavailable. Please retry later.",
         retryable: false,
+        category: "unavailable",
       }),
   });
 
@@ -344,6 +425,7 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
     return yield* new ExtractionUnavailable({
       reason: "Menu analysis is unavailable. Please retry later.",
       retryable: false,
+      category: "unavailable",
     });
 
   const token = yield* withTransaction(
@@ -417,12 +499,37 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
 
         const extractor = yield* MenuExtractor;
 
+        // Currency context merges existing scan fields only: the linked
+        // venue (venue_id/venue_name already on the scan row) outranks the
+        // coarse visitor country. The visitor-selected menu city id resolves
+        // server-side: curated presets and `geo:` names via the sync map
+        // (unknown ids are dropped, never trusted as geography), while
+        // `place:` registry ids resolve through the place catalog to a
+        // coarse city display name plus country ISO (unknown/missing records
+        // degrade to null). Preset and `geo:` ids keep today's behavior with
+        // menuCountry unset on this path. No new persistence, no raw GPS or
+        // street addresses, and language is never treated as location.
+        const targetLanguage = menuScanDocumentSchema.shape.targetLanguage.parse(
+          state.scan.target_language,
+        );
+
+        const placeEvidence = yield* resolvePlaceMenuEvidence(
+          location?.menuCityId ?? null,
+          targetLanguage,
+        );
+
+        const currencyContext: CurrencyContext = normalizeCurrencyContext({
+          venueName: state.scan.venue_name,
+          menuCity: placeEvidence.menuCity ?? resolveMenuCityId(location?.menuCityId ?? null),
+          menuCountry: placeEvidence.menuCountry,
+          trustedCountry: location?.trustedCountry ?? null,
+        });
+
         const extraction = yield* extractor.extract({
           images,
-          targetLanguage: menuScanDocumentSchema.shape.targetLanguage.parse(
-            state.scan.target_language,
-          ),
+          targetLanguage,
           requestId,
+          currencyContext,
         });
 
         const document: MenuScanDocument = {
@@ -446,6 +553,7 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
           return yield* new InvalidModelOutput({
             reason: "The extracted menu is too large. Retry with fewer pages.",
             retryable: false,
+            category: "truncated",
           });
         }
 

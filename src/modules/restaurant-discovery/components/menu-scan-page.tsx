@@ -1,5 +1,4 @@
 import { Link } from "@tanstack/react-router";
-import { RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 
@@ -12,13 +11,19 @@ import { SharedSelectField } from "@/components/ui/select";
 import { menuCopy, menuScanPageCopy } from "@/modules/restaurant-discovery/components/menu-copy";
 import { parsePriceResearchOutcome } from "@/modules/restaurant-discovery/components/price-compare-panel";
 import { ScanCapture } from "@/modules/restaurant-discovery/components/scan-capture";
-import { classifyScanError, ScanError } from "@/modules/restaurant-discovery/components/scan-error";
+import type { ScanMenuLocation } from "@/modules/restaurant-discovery/components/scan-capture";
+import {
+  classifyScanError,
+  ScanError,
+  type ScanTransportKind,
+} from "@/modules/restaurant-discovery/components/scan-error";
 import type { ScanPreviewPhoto } from "@/modules/restaurant-discovery/components/scan-photo-preview";
 import {
   ScanProcessing,
   type ScanPhase,
 } from "@/modules/restaurant-discovery/components/scan-processing";
 import { ScanResults } from "@/modules/restaurant-discovery/components/scan-results";
+import { CITY_PRESETS } from "@/modules/restaurant-discovery/map-bounds";
 import { menuBcp47TagFor } from "@/modules/restaurant-discovery/menu-presentation";
 import {
   MenuScanClientError,
@@ -37,7 +42,6 @@ const english = {
   eyebrow: "Powered by Muse ✨",
   title: "Scan a menu",
   subtitle: "Photograph a menu and read it in your language.",
-  unknownRestaurant: "Unknown restaurant · adding it comes later.",
   analyzing: "Reading and translating your menu…",
   uploading: "Uploading menu photograph",
   restoring: "Checking your private scan…",
@@ -77,7 +81,6 @@ const vietnamese: typeof english = {
   eyebrow: "Powered by Muse ✨",
   title: "Quét thực đơn",
   subtitle: "Chụp thực đơn và đọc bằng ngôn ngữ của bạn.",
-  unknownRestaurant: "Chưa rõ nhà hàng · thêm sau.",
   analyzing: "Đang đọc và dịch thực đơn…",
   uploading: "Đang tải ảnh thực đơn",
   restoring: "Đang kiểm tra bản quét riêng tư…",
@@ -122,6 +125,8 @@ interface ScanFailure {
   readonly retryAfterSeconds: number | null;
   readonly action: RetryAction | null;
   readonly code: string | undefined;
+  /** Frozen Lane BT transport kind when the failure came from the decoder. */
+  readonly transportKind: ScanTransportKind | undefined;
 }
 
 export type ScanFailureKind = "validation" | "conflict" | "auth" | "expired";
@@ -165,6 +170,60 @@ const storageOwner = "feastjourney:menu-scan-owner:v1";
 const storageScan = "feastjourney:menu-scan:v1";
 
 const storageTargetLanguage = "feastjourney:menu-target-language:v1";
+
+const storageMenuLocation = "feastjourney:menu-location:v1";
+
+/**
+ * Stored cityId grammar: curated preset ids, legacy "geo:<name>" labels,
+ * and canonical catalog identities ("place:<decimalId>"). Anything else
+ * (stale experiments, free text) fails validation and the read drops it.
+ */
+const presetLocationIds: ReadonlySet<string> = new Set(CITY_PRESETS.map((city) => city.id));
+
+const placeLocationPattern = /^place:([1-9][0-9]{0,18})$/;
+
+const cityIdSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .refine((cityId) => {
+    if (presetLocationIds.has(cityId)) return true;
+
+    if (cityId.startsWith("geo:")) return cityId.length > "geo:".length;
+
+    return placeLocationPattern.test(cityId);
+  });
+
+const storedLocationSchema = z.object({ cityId: cityIdSchema, label: z.string().min(1).max(200) });
+
+const readStoredMenuLocation = (): ScanMenuLocation | null => {
+  try {
+    const raw = sessionStorage.getItem(storageMenuLocation);
+
+    if (raw === null) return null;
+
+    const parsed = storedLocationSchema.safeParse(JSON.parse(raw));
+
+    if (!parsed.success) return null;
+
+    return parsed.data;
+  } catch {
+    return null;
+  }
+};
+
+const rememberMenuLocation = (location: ScanMenuLocation | null): void => {
+  try {
+    if (location === null) sessionStorage.removeItem(storageMenuLocation);
+    else
+      sessionStorage.setItem(
+        storageMenuLocation,
+        JSON.stringify({ cityId: location.cityId, label: location.label }),
+      );
+  } catch {
+    return;
+  }
+};
 
 const readStoredTargetLanguage = (): string | null => {
   try {
@@ -500,10 +559,15 @@ export function MenuScanPage({
     rememberTargetLanguage(parsed.data);
   };
 
+  const changeMenuLocation = (location: ScanMenuLocation | null): void => {
+    setMenuLocation(location);
+    rememberMenuLocation(location);
+  };
+
   // Verified source identity for scans launched from a restaurant: the venue
   // name (never a raw UUID) with an explicit dissociation control. Direct
-  // entry stays unknown; adding a restaurant is deferred, so there is no
-  // manual UUID field on this page.
+  // entry carries no restaurant line; adding a restaurant is deferred, so
+  // there is no manual UUID field on this page.
   const [verifiedBranch, setVerifiedBranch] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
@@ -528,9 +592,15 @@ export function MenuScanPage({
       cancelled = true;
     };
   }, [venueId]);
+
   const [photos, setPhotos] = useState<ReadonlyArray<SelectedPhoto>>([]);
   const [view, setView] = useState<ScanView | null>(null);
   const [scanId, setScanId] = useState<string | null>(null);
+
+  const [menuLocation, setMenuLocation] = useState<ScanMenuLocation | null>(() =>
+    readStoredMenuLocation(),
+  );
+
   const [document, setDocument] = useState<MenuScanDocument | null>(null);
   const [consent, setConsent] = useState(false);
   const [claimCandidate, setClaimCandidate] = useState<string | null>(null);
@@ -543,7 +613,6 @@ export function MenuScanPage({
   const controller = useRef<AbortController | null>(null);
   const previewUrls = useRef(new Set<string>());
   const submitGuard = useRef(false);
-  const resultsHeading = useRef<HTMLHeadingElement | null>(null);
   const busy = status !== null;
   const uploading = uploadTotal > 0 && uploaded < uploadTotal;
 
@@ -567,7 +636,8 @@ export function MenuScanPage({
 
   // Results enter at the reading position: scroll the results heading into
   // view and move focus there once per scan. Same-scan updates keep the
-  // traveler's scroll position.
+  // traveler's scroll position. The heading lives inside ScanResults (the
+  // single results heading), so it is resolved by id, not by page ref.
   const lastScrolledScan = useRef<string | null>(null);
 
   useEffect(() => {
@@ -575,11 +645,14 @@ export function MenuScanPage({
 
     lastScrolledScan.current = scanId;
 
-    resultsHeading.current?.scrollIntoView({
+    const heading = globalThis.document.getElementById("scan-results-title");
+
+    heading?.scrollIntoView({
       behavior: prefersReducedMotion() ? "auto" : "smooth",
       block: "start",
     });
-    resultsHeading.current?.focus({ preventScroll: true });
+
+    if (heading instanceof HTMLElement) heading.focus({ preventScroll: true });
   }, [document, scanId]);
 
   useEffect(() => {
@@ -614,6 +687,7 @@ export function MenuScanPage({
               error instanceof MenuScanClientError ? error.retryAfterSeconds : null,
             action: null,
             code: error instanceof MenuScanClientError ? error.failure?.code : undefined,
+            transportKind: error instanceof MenuScanClientError ? error.transportKind : undefined,
           });
       } finally {
         if (!abort.signal.aborted) setStatus(null);
@@ -653,6 +727,7 @@ export function MenuScanPage({
         retryAfterSeconds: error instanceof MenuScanClientError ? error.retryAfterSeconds : null,
         action: retryable ? retryAction : null,
         code: error instanceof MenuScanClientError ? error.failure?.code : "invalid_request",
+        transportKind: error instanceof MenuScanClientError ? error.transportKind : undefined,
       });
     } finally {
       if (!abort.signal.aborted) {
@@ -674,6 +749,7 @@ export function MenuScanPage({
         retryAfterSeconds: null,
         action: null,
         code: "invalid_request",
+        transportKind: undefined,
       });
 
       return;
@@ -747,7 +823,7 @@ export function MenuScanPage({
 
           setReading(true);
           setStatus(copy.analyzing);
-          const next = await menuScanClient.extract(created.id, signal);
+          const next = await menuScanClient.extract(created.id, signal, menuLocation?.cityId);
 
           if (!signal.aborted) adoptView(next);
         } finally {
@@ -758,15 +834,6 @@ export function MenuScanPage({
     ).finally(() => {
       submitGuard.current = false;
     });
-  };
-
-  const reloadScan = (): void => {
-    if (scanId === null) return;
-    void runTask(
-      copy.loading,
-      async (signal) => adoptView(await menuScanClient.get(scanId, signal)),
-      "load",
-    );
   };
 
   const submitContribution = (): void => {
@@ -794,8 +861,6 @@ export function MenuScanPage({
 
   const retryFailure = (): void => {
     if (failure?.action === "analyze") analyze();
-
-    if (failure?.action === "load") reloadScan();
 
     if (failure?.action === "contribute") submitContribution();
 
@@ -830,8 +895,6 @@ export function MenuScanPage({
   const canRetry =
     failure !== null && !busy && (failure.retryable || classifyScanError(failure) === "expired");
 
-  const modelChip = scanModelChip(view === null ? view : view.revision);
-
   const capturePhase = capturePhaseFor(status !== null && document === null, uploading, reading);
 
   const previewPhotos: ReadonlyArray<ScanPreviewPhoto> = photos.map((photo) => ({
@@ -840,15 +903,50 @@ export function MenuScanPage({
     name: photo.file.name,
   }));
 
+  const scanAnother = (): void => {
+    setScanId(null);
+    setView(null);
+    setDocument(null);
+    setConsent(false);
+    setNotice(null);
+    setFailure(null);
+    setPhotos((previous) => {
+      for (const photo of previous) {
+        URL.revokeObjectURL(photo.previewUrl);
+        previewUrls.current.delete(photo.previewUrl);
+      }
+
+      return [];
+    });
+  };
+
+  const deleteScan = (id: string): void => {
+    void runTask(
+      copy.deleting,
+      async (signal) => {
+        await menuScanClient.remove(id, signal);
+        sessionStorage.removeItem(storageScan);
+        setScanId(null);
+        setView(null);
+        setDocument(null);
+        setConsent(false);
+        setNotice(copy.deleted);
+      },
+      null,
+    );
+  };
+
   const submitHint = photos.length > 0 && !busy && scanId !== null ? copy.uploadRetry : null;
 
   return (
     <article className="menu-scan-page" lang={menuBcp47TagFor(locale)}>
-      <header className="scan-hero">
-        <p className="scan-eyebrow">{copy.eyebrow}</p>
-        <h1 className="font-display">{copy.title}</h1>
-        <p className="scan-subtitle">{copy.subtitle}</p>
-      </header>
+      {document === null && (
+        <header className="scan-hero">
+          <p className="scan-eyebrow">{copy.eyebrow}</p>
+          <h1 className="font-display">{copy.title}</h1>
+          <p className="scan-subtitle">{copy.subtitle}</p>
+        </header>
+      )}
       {returnView === "copilot" && (
         <p className="scan-return">
           <Link
@@ -856,6 +954,7 @@ export function MenuScanPage({
             search={{
               lang: validatedLang,
               task: scanId !== null ? "order" : "scan",
+              scan: scanId ?? undefined,
             }}
           >
             ← {copy.returnToMuse}
@@ -876,7 +975,7 @@ export function MenuScanPage({
           </Link>
         </p>
       )}
-      {verifiedBranch !== null ? (
+      {verifiedBranch !== null && (
         <p className="scan-branch-chip" aria-live="polite">
           ✓ {copy.scanningFor.replace("{name}", verifiedBranch.name)}{" "}
           <button
@@ -889,8 +988,6 @@ export function MenuScanPage({
             {copy.removeBranch}
           </button>
         </p>
-      ) : (
-        <p className="scan-branch-unknown">{copy.unknownRestaurant}</p>
       )}
       {claimCandidate !== null && (
         <section className="scan-claim">
@@ -922,6 +1019,8 @@ export function MenuScanPage({
             locale={locale}
             targetLanguage={targetLanguage}
             onTargetLanguageChange={changeTargetLanguage}
+            menuLocation={menuLocation}
+            onLocationChange={changeMenuLocation}
             photos={previewPhotos}
             onAddFiles={addPhotos}
             onRemovePhoto={removePhoto}
@@ -945,6 +1044,7 @@ export function MenuScanPage({
               retryAfterText={retryAfterText}
               onRetry={canRetry ? retryFailure : undefined}
               locale={locale}
+              transportKind={failure.transportKind}
             />
           )}
           {status !== null && capturePhase === null && (
@@ -955,57 +1055,8 @@ export function MenuScanPage({
         </>
       )}
       {view?.scan.status === "processing" && <p>{copy.processing}</p>}
-      {scanId !== null && document !== null && (
-        <div className="scan-session-actions">
-          <button type="button" disabled={busy} onClick={reloadScan}>
-            <RefreshCw aria-hidden="true" /> {copy.refresh}
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              void runTask(
-                copy.deleting,
-                async (signal) => {
-                  await menuScanClient.remove(scanId, signal);
-                  sessionStorage.removeItem(storageScan);
-                  setScanId(null);
-                  setView(null);
-                  setDocument(null);
-                  setConsent(false);
-                  setNotice(copy.deleted);
-                },
-                null,
-              );
-            }}
-          >
-            <Trash2 aria-hidden="true" /> {copy.delete}
-          </button>
-          {returnVenue !== undefined && (
-            <Link
-              className="scan-return-link"
-              to="/restaurants"
-              search={{
-                lang: validatedLang,
-                venue: returnVenue,
-                view: returnView === "copilot" ? "menu" : returnView,
-              }}
-            >
-              ← {copy.returnToRestaurant}
-            </Link>
-          )}
-        </div>
-      )}
       {document !== null && view !== null && (
-        <section className="scan-results scan-enter" aria-labelledby="scan-results-title">
-          <h2
-            id="scan-results-title"
-            ref={resultsHeading}
-            tabIndex={-1}
-            className="scan-results-title"
-          >
-            {copy.resultsTitle}
-          </h2>
+        <section className="scan-results scan-enter">
           {status === null && notice !== null && (
             <output className="scan-status" aria-live="polite">
               {notice}
@@ -1017,20 +1068,15 @@ export function MenuScanPage({
               retryAfterText={retryAfterText}
               onRetry={canRetry ? retryFailure : undefined}
               locale={locale}
+              transportKind={failure.transportKind}
             />
           )}
-          <p className="scan-revision-line">
-            {copy.revision}: {view.scan.current_revision} · {copy.expired}:{" "}
-            <time dateTime={view.scan.expires_at}>
-              {new Date(view.scan.expires_at).toLocaleString(locale)}
-            </time>
-          </p>
-          {modelChip !== null && (
-            <p className="scan-model-chip">
-              {pageCopy.modelLabel}: {modelChip.model} · rev {modelChip.revision}
-            </p>
-          )}
-          <ScanResults scanId={view.scan.id} />
+          <ScanResults
+            scanId={view.scan.id}
+            menuLocation={menuLocation}
+            onScanAnother={scanAnother}
+            onDeleteScan={() => deleteScan(view.scan.id)}
+          />
           {document.items.length > 0 && (
             <ScanPriceResearch locale={locale} items={document.items} />
           )}

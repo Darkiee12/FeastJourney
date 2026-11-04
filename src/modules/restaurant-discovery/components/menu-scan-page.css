@@ -566,6 +566,105 @@
   min-height: 2.75rem;
 }
 
+/* Results context row + single menu-wide currency control. */
+.scan-results-context {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.scan-currency {
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 0.5rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  background: white;
+}
+
+.scan-currency-check {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 2.75rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.scan-currency-check input {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+  accent-color: var(--color-food-orange-dark);
+}
+
+.scan-currency-change {
+  justify-self: start;
+  min-height: 2.75rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.5rem;
+  background: white;
+  font-weight: 700;
+  padding: 0.5rem 0.875rem;
+  cursor: pointer;
+}
+
+.scan-currency-status {
+  margin-block: 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+/* Compact overflow actions: scan another / reload / delete. */
+.scan-results-overflow {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.5rem;
+  padding: 0.25rem 1rem 1rem;
+  background: white;
+}
+
+.scan-results-overflow > summary {
+  min-height: 2.75rem;
+  padding-block: 0.75rem;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.scan-results-overflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.scan-results-overflow-actions button {
+  min-height: 2.75rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.25rem;
+  background: white;
+  color: var(--color-ink);
+  font-weight: 650;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+.scan-delete {
+  border-color: var(--color-food-orange-strong);
+  color: var(--color-food-orange-strong);
+}
+
+.scan-delete-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
 /* Tentative dish→venue matches stay visibly uncertain. */
 .price-compare-tentative {
   font-weight: 650;
@@ -575,6 +674,13 @@
 @media (min-width: 28rem) {
   .scan-research-place {
     grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+/* Narrow phones: stack capture actions with the primary first. */
+@media (max-width: 22rem) {
+  .scan-capture-actions {
+    grid-template-columns: 1fr;
   }
 }
 

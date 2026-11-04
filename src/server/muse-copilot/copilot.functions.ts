@@ -1,5 +1,8 @@
+import type { Hash } from "node:crypto";
+
 import { createServerFn } from "@tanstack/react-start";
 
+import type { ScanPrincipal } from "@/modules/restaurant-discovery/server/operations/menu-scans";
 import {
   copilotChatInputSchema,
   copilotChatOutputSchema,
@@ -23,6 +26,8 @@ const loadChatServer = () =>
     import("@/server/config"),
     import("@/server/web-research/research-service"),
     import("@/server/integrations/meta-responses"),
+    import("@/server/env"),
+    import("node:crypto"),
   ]);
 
 const loadPhotoServer = () =>
@@ -36,6 +41,8 @@ const loadPhotoServer = () =>
     import("@tanstack/react-start/server"),
     import("@/server/http/request"),
     import("@/server/config"),
+    import("@/server/env"),
+    import("node:crypto"),
   ]);
 
 const loadDraftServer = () =>
@@ -49,6 +56,8 @@ const loadDraftServer = () =>
     import("@tanstack/react-start/server"),
     import("@/server/http/request"),
     import("@/server/config"),
+    import("@/server/env"),
+    import("node:crypto"),
   ]);
 
 interface InflightEntry {
@@ -68,11 +77,59 @@ const sweepChatInflight = (now: number): void => {
   }
 };
 
+/** Guest scan capability: same HttpOnly cookie + sha256 hash the scanner mints. */
+const GUEST_COOKIE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+/**
+ * Ownership principal for private scans. Members resolve from the verified
+ * session; guests resolve from the existing scanner guest cookie (no new
+ * mechanism). Null denies private access — callers fail closed.
+ */
+const resolveScanPrincipal = (
+  headers: Headers,
+  memberUserId: string | null,
+  betterAuthUrl: string,
+  createHash: (algorithm: string) => Hash,
+): ScanPrincipal | null => {
+  if (memberUserId !== null) {
+    return { userId: memberUserId, guestHash: "" };
+  }
+
+  let origin: string;
+
+  try {
+    origin = new URL(betterAuthUrl).origin;
+  } catch {
+    return null;
+  }
+
+  const cookieName = origin.startsWith("https:") ? "__Host-fj-menu-guest" : "fj-menu-guest";
+  const cookies = headers.get("cookie") ?? "";
+
+  const stored = cookies
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${cookieName}=`))
+    ?.slice(cookieName.length + 1);
+
+  if (stored === undefined || !GUEST_COOKIE_PATTERN.test(stored)) {
+    return null;
+  }
+
+  return { userId: null, guestHash: createHash("sha256").update(stored).digest("hex") };
+};
+
 /**
  * Muse copilot transport. Validation runs through Zod at this boundary;
  * server-only Effect modules load dynamically so browser bundles never
  * include database or provider code. Rate limiting runs before any identity
  * or database work; the actor always resolves from the verified session.
+ *
+ * Deadline coordination: chat runs under the service-owned overall budget
+ * (synthesis + research + tool rounds); photo derives from the vision
+ * budget plus scan-read overhead. Neither side is raised blindly.
+ * Business-call failures (timeout/defect) become safe Zod-shaped
+ * fallbacks; only thrown Responses (429/503) keep HTTP semantics.
  */
 export const copilotChatFn = createServerFn({ method: "POST" })
   .validator(copilotChatInputSchema)
@@ -89,6 +146,8 @@ export const copilotChatFn = createServerFn({ method: "POST" })
       { appConfig },
       { WebResearchLive },
       { MetaResponsesLive },
+      { serverEnv },
+      { createHash },
     ] = await loadChatServer();
 
     const headers = server.getRequestHeaders();
@@ -97,7 +156,7 @@ export const copilotChatFn = createServerFn({ method: "POST" })
     await runApp(
       effects.Effect.flatMap(RateLimitPolicy, (policy) =>
         effects.Effect.flatMap(appConfig, (config) =>
-          policy.check("search", resolveIdentityFromHeaders(headers, config)).pipe(
+          policy.check("copilot-chat", resolveIdentityFromHeaders(headers, config)).pipe(
             effects.Effect.catchTag("RateLimitExceeded", (failure) =>
               effects.Effect.die(
                 new Response(
@@ -141,8 +200,23 @@ export const copilotChatFn = createServerFn({ method: "POST" })
       requestId,
     );
 
+    const memberUserId = Actor.$match(actor, {
+      Guest: () => null,
+      Member: ({ userId }) => userId,
+    });
+
+    let betterAuthUrl = "";
+
+    try {
+      betterAuthUrl = serverEnv().BETTER_AUTH_URL;
+    } catch {
+      betterAuthUrl = "";
+    }
+
+    const scanPrincipal = resolveScanPrincipal(headers, memberUserId, betterAuthUrl, createHash);
+
     const actorKey = Actor.$match(actor, {
-      Guest: () => "guest",
+      Guest: () => `guest:${scanPrincipal?.guestHash.slice(0, 16) ?? "none"}`,
       Member: ({ userId }) => `member:${userId}`,
     });
 
@@ -150,6 +224,7 @@ export const copilotChatFn = createServerFn({ method: "POST" })
       message: data.message,
       task: data.task ?? "ask",
       context: data.context ?? {},
+      history: data.history ?? [],
       actor: actorKey,
     });
 
@@ -167,7 +242,9 @@ export const copilotChatFn = createServerFn({ method: "POST" })
           message: data.message,
           task: data.task ?? "ask",
           context: data.context ?? {},
+          history: data.history ?? [],
           actor,
+          scanPrincipal,
         }),
         effects.Layer.provide(WebResearchLive, MetaResponsesLive),
       ),
@@ -184,7 +261,10 @@ export const copilotChatFn = createServerFn({ method: "POST" })
       return {
         reply: "This answer could not be completed. Please try again.",
         cards: [],
-        followUps: ["Browse popular dishes"],
+        followUps: [],
+        actions: [{ kind: "browseDishes" as const, label: "Browse popular dishes" }],
+        synthesized: false,
+        evidenceTiers: [],
       };
     });
 
@@ -192,6 +272,19 @@ export const copilotChatFn = createServerFn({ method: "POST" })
 
     try {
       return await run;
+    } catch (error) {
+      if (error instanceof Response) {
+        throw error;
+      }
+
+      return {
+        reply: "This answer could not be completed. Please try again.",
+        cards: [],
+        followUps: [],
+        actions: [{ kind: "browseDishes" as const, label: "Browse popular dishes" }],
+        synthesized: false,
+        evidenceTiers: [],
+      };
     } finally {
       chatInflight.delete(coherenceKey);
     }
@@ -202,7 +295,7 @@ export const copilotIdentifyPhotoFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const [
       effects,
-      { identifyFoodPhoto },
+      { identifyFoodPhoto, resolveCopilotVisionConfig },
       { Actor },
       { resolveSession },
       { runApp },
@@ -210,6 +303,8 @@ export const copilotIdentifyPhotoFn = createServerFn({ method: "POST" })
       server,
       { resolveIdentityFromHeaders },
       { appConfig },
+      { serverEnv },
+      { createHash },
     ] = await loadPhotoServer();
 
     const headers = server.getRequestHeaders();
@@ -218,7 +313,7 @@ export const copilotIdentifyPhotoFn = createServerFn({ method: "POST" })
     await runApp(
       effects.Effect.flatMap(RateLimitPolicy, (policy) =>
         effects.Effect.flatMap(appConfig, (config) =>
-          policy.check("search", resolveIdentityFromHeaders(headers, config)).pipe(
+          policy.check("copilot-ai", resolveIdentityFromHeaders(headers, config)).pipe(
             effects.Effect.catchTag("RateLimitExceeded", (failure) =>
               effects.Effect.die(
                 new Response(
@@ -262,15 +357,54 @@ export const copilotIdentifyPhotoFn = createServerFn({ method: "POST" })
       requestId,
     );
 
-    const output = await runApp(
-      identifyFoodPhoto(
-        { scanId: data.scanId, assetId: data.assetId, language: data.language },
-        actor,
-      ),
-      "fn/copilot-photo/identify",
-      30000,
-      requestId,
-    );
+    const memberUserId = Actor.$match(actor, {
+      Guest: () => null,
+      Member: ({ userId }) => userId,
+    });
+
+    let betterAuthUrl = "";
+
+    try {
+      betterAuthUrl = serverEnv().BETTER_AUTH_URL;
+    } catch {
+      betterAuthUrl = "";
+    }
+
+    const scanPrincipal = resolveScanPrincipal(headers, memberUserId, betterAuthUrl, createHash);
+
+    // Coordinated deadline: the shared vision budget (fetch, bounded body,
+    // backoff, at most one retry) plus scan-read/validation overhead. The
+    // runApp race interrupts the vision fiber on expiry; interruption
+    // reaches the provider fetch through tryPromise's AbortSignal. Do not
+    // raise either side without the other.
+    const photoDeadlineMs = resolveCopilotVisionConfig(process.env).timeoutMs + 10_000;
+
+    let output;
+
+    try {
+      output = await runApp(
+        identifyFoodPhoto(
+          { scanId: data.scanId, assetId: data.assetId, language: data.language },
+          scanPrincipal,
+        ),
+        "fn/copilot-photo/identify",
+        photoDeadlineMs,
+        requestId,
+      );
+    } catch (error) {
+      // Transport boundary: request timeouts and unexpected defects become
+      // the safe Zod-shaped fallback, never a raw stack or provider body.
+      // Thrown Responses (429/503 dies) keep their HTTP semantics.
+      if (error instanceof Response) {
+        throw error;
+      }
+
+      output = {
+        candidates: [],
+        unmatchedNote: "This photo could not be analyzed. Try another image.",
+        status: "unavailable" as const,
+      };
+    }
 
     const checked = copilotIdentifyPhotoOutputSchema.safeParse(output);
 
@@ -297,6 +431,8 @@ export const copilotDraftOrderFn = createServerFn({ method: "POST" })
       server,
       { resolveIdentityFromHeaders },
       { appConfig },
+      { serverEnv },
+      { createHash },
     ] = await loadDraftServer();
 
     const headers = server.getRequestHeaders();
@@ -305,7 +441,7 @@ export const copilotDraftOrderFn = createServerFn({ method: "POST" })
     await runApp(
       effects.Effect.flatMap(RateLimitPolicy, (policy) =>
         effects.Effect.flatMap(appConfig, (config) =>
-          policy.check("search", resolveIdentityFromHeaders(headers, config)).pipe(
+          policy.check("copilot-ai", resolveIdentityFromHeaders(headers, config)).pipe(
             effects.Effect.catchTag("RateLimitExceeded", (failure) =>
               effects.Effect.die(
                 new Response(
@@ -349,18 +485,48 @@ export const copilotDraftOrderFn = createServerFn({ method: "POST" })
       requestId,
     );
 
-    const output = await runApp(
-      draftOrder({
-        venueId: data.venueId,
-        scanId: data.scanId,
-        items: data.items,
-        instructions: data.instructions,
-        actor,
-      }),
-      "fn/copilot-draft/order",
-      30000,
-      requestId,
-    );
+    const memberUserId = Actor.$match(actor, {
+      Guest: () => null,
+      Member: ({ userId }) => userId,
+    });
+
+    let betterAuthUrl = "";
+
+    try {
+      betterAuthUrl = serverEnv().BETTER_AUTH_URL;
+    } catch {
+      betterAuthUrl = "";
+    }
+
+    let output;
+
+    try {
+      output = await runApp(
+        draftOrder({
+          venueId: data.venueId,
+          scanId: data.scanId,
+          items: data.items,
+          instructions: data.instructions,
+          actor,
+          scanPrincipal: resolveScanPrincipal(headers, memberUserId, betterAuthUrl, createHash),
+        }),
+        "fn/copilot-draft/order",
+        30000,
+        requestId,
+      );
+    } catch (error) {
+      if (error instanceof Response) {
+        throw error;
+      }
+
+      output = {
+        lines: [],
+        subtotalMinor: null,
+        currency: "",
+        incomplete: true,
+        warnings: ["This draft could not be completed. Please try again."],
+      };
+    }
 
     const checked = copilotDraftOrderOutputSchema.safeParse(output);
 

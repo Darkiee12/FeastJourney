@@ -161,6 +161,19 @@ Operator checklist per variable group:
   `muse-wonder-*` id + https base; misconfiguration fails loudly (HTTP
   500). Server-side key only — browser keys forbidden; no Contributor-tier
   key for staging experiments.
+- `COPILOT_VISION_*` / `WEB_RESEARCH_*` / `MENU_SCANNER_*` / `MENU_SCAN_*`
+  / `REVIEW_INTELLIGENCE_*` — each feature stays disabled unless its
+  `*_ENABLED` flag is exactly `true`; all reuse the `MODEL_*` transport.
+  Swarm forwards them under `services.app.environment` with code-matching
+  defaults, so an unset Dokploy variable means "disabled", never a
+  half-configured provider call. Copilot chat synthesis additionally requires
+  a signed-in member and first-party facts; guests keep deterministic catalog
+  answers.
+- `FX_ENDPOINT` / `FX_REFRESH_HOURS` / `FX_MAX_AGE_HOURS` — reference FX
+  for local-currency display (Frankfurter v2, display only, never a
+  conversion feature flag). Forwarded with the Effect-Config defaults
+  (`https://api.frankfurter.dev/v2/`, 24h refresh, 72h max age); override
+  only for a mirror endpoint or a different refresh/staleness policy.
 - CI deploy secrets (GitHub `staging` environment only, never the app):
   `DOKPLOY_URL`, `DOKPLOY_API_KEY` (deploy-scoped `x-api-key`),
   `DOKPLOY_COMPOSE_ID` (the Dokploy **Compose** service id — not the

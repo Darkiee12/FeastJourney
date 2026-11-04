@@ -293,6 +293,10 @@ jobs:
             --prefix "${{ env.GHCR_REGISTRY }}/${owner}" \
             --in docker-compose.swarm.yml \
             --out /tmp/docker-compose.release.yml
+      - name: Validate rendered stack (blocks misconfigured deploys)
+        run: |
+          node .github/workflows/scripts/validate-release-stack.mjs \
+            --in /tmp/docker-compose.release.yml
       - name: Update Dokploy stack definition
         env:
           DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
