@@ -8,8 +8,8 @@ import {
   type GetDishDetailsInput,
   type SearchDishesInput,
 } from "@/modules/food-discovery/server/agent/protocol";
-import { MAX_REASON_LENGTH } from "@/server/integrations/meta-client";
 import type { ServerEnv } from "@/server/env";
+import { MAX_REASON_LENGTH } from "@/server/integrations/meta-client";
 
 /**
  * Agentic Muse provider transport (workstream B).
@@ -56,7 +56,7 @@ import type { ServerEnv } from "@/server/env";
  *   in-flight fetch via the combined AbortSignal, matching `meta-client`.
  */
 
-/** Total orchestration budget source: protocol AGENT_BOUNDS via resolveAgentConfig. */
+/** Chat Completions endpoint relative to the operator-configured base URL. */
 export const META_AGENT_CHAT_PATH = "/chat/completions";
 
 /** Per-round fan-out cap (plan section 5 requires a per-round bound). */
@@ -133,8 +133,7 @@ export type AgentFailureDisposition = Data.TaggedEnum<{
 
 export const AgentFailureDisposition = Data.taggedEnum<AgentFailureDisposition>();
 
-const AGENT_RATE_LIMIT_WARNING =
-  "Muse agent was rate-limited; used deterministic order instead.";
+const AGENT_RATE_LIMIT_WARNING = "Muse agent was rate-limited; used deterministic order instead.";
 
 const AGENT_TRANSIENT_WARNING = "Muse agent was unavailable; used deterministic order instead.";
 
@@ -170,29 +169,19 @@ export interface MetaAgentConfig {
  * Explicit opt-in: only the literal string "true" enables agentic mode.
  * Unset or any other value keeps the existing single-shot rank() path.
  */
-export const isAgentEnabled = (env: ServerEnv): boolean =>
-  env[RECOMMEND_AGENT_FLAG] === "true";
+export const isAgentEnabled = (env: ServerEnv): boolean => env[RECOMMEND_AGENT_FLAG] === "true";
 
-const clampAgentTimeoutMs = (value: number | undefined, fallback: number): number => {
-  if (value === undefined || Number.isNaN(value)) {
-    return fallback;
-  }
-
-  return Math.min(Math.max(Math.floor(value), 1000), 60000);
-};
-
-const clampAgentDeadlineMs = (value: number | undefined, fallback: number): number => {
-  if (value === undefined || Number.isNaN(value)) {
-    return fallback;
-  }
-
-  return Math.min(Math.max(Math.floor(value), 5000), 180000);
-};
+const agentTimingSchema = z.object({
+  providerTimeoutMs: z.number().int().positive(),
+  orchestrationDeadlineMs: z.number().int().positive(),
+});
 
 /**
  * Additive agent knobs over an already-resolved Muse config. Takes the Muse
  * variant (never Deterministic/Misconfigured) so misconfiguration keeps
  * failing loudly upstream instead of degrading silently here.
+ * Both timing values are required and preserved exactly; invalid or missing
+ * operator configuration throws a ZodError instead of supplying defaults.
  */
 export const agentConfigFromMuse = (
   muse: {
@@ -207,14 +196,10 @@ export const agentConfigFromMuse = (
   baseUrl: muse.baseUrl,
   modelId: muse.modelId,
   maxTokens: muse.maxTokens,
-  providerTimeoutMs: clampAgentTimeoutMs(
-    env.MODEL_AGENT_TIMEOUT_MS,
-    AGENT_BOUNDS.providerTimeoutMs,
-  ),
-  orchestrationDeadlineMs: clampAgentDeadlineMs(
-    env.RECOMMEND_AGENT_DEADLINE_MS,
-    AGENT_BOUNDS.orchestrationDeadlineMs,
-  ),
+  ...agentTimingSchema.parse({
+    providerTimeoutMs: env.MODEL_AGENT_TIMEOUT_MS,
+    orchestrationDeadlineMs: env.RECOMMEND_AGENT_DEADLINE_MS,
+  }),
 });
 
 export interface AgentToolCall {
@@ -286,10 +271,7 @@ const searchDishesArgsSchema = z.object({
 });
 
 const getDishDetailsArgsSchema = z.object({
-  ids: z
-    .array(z.string().min(1).max(64))
-    .min(1)
-    .max(AGENT_BOUNDS.detailsPerCall),
+  ids: z.array(z.string().min(1).max(64)).min(1).max(AGENT_BOUNDS.detailsPerCall),
 });
 
 const providerToolCallSchema = z.object({
@@ -592,9 +574,7 @@ const decodeAssistantTurn = (
   try {
     parsed = JSON.parse(bodyText);
   } catch {
-    return Effect.fail(
-      new MetaAgentInvalidOutput({ reason: "Muse agent response was not JSON" }),
-    );
+    return Effect.fail(new MetaAgentInvalidOutput({ reason: "Muse agent response was not JSON" }));
   }
 
   const envelope = chatEnvelopeSchema.safeParse(parsed);
@@ -751,12 +731,8 @@ const executeToolRound = (
       }
 
       const outcome = yield* executeTool(validated).pipe(
-        Effect.catchIf(
-          (cause) => cause instanceof MetaAgentToolError,
-          (cause) =>
-            Effect.succeed(
-              toolErrorContent("tool_failed", `The tool call failed: ${cause.reason}`),
-            ),
+        Effect.catchTag("MetaAgentToolError", (cause) =>
+          Effect.succeed(toolErrorContent("tool_failed", `The tool call failed: ${cause.reason}`)),
         ),
       );
 
