@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { DEFAULT_MODEL_BASE_URL } from "@/server/env";
+import { DEFAULT_MODEL_BASE_URL, DEFAULT_MODEL_ID, isSupportedModelId } from "@/server/env";
 
 /**
  * Review-intelligence contracts (Muse Spark 1.3, structured output only).
@@ -34,14 +34,19 @@ import { DEFAULT_MODEL_BASE_URL } from "@/server/env";
 
 export const REVIEW_INTELLIGENCE_PROVIDER = "muse";
 
-export const REVIEW_INTELLIGENCE_MODEL_ID = "muse-spark-1.3";
-
 export const REVIEW_INTELLIGENCE_PROMPT_VERSION = "review-highlights-v1";
 
 export const REVIEW_INTELLIGENCE_ENABLED_VALUE = "true";
 
 export const REVIEW_INTELLIGENCE_DEFAULT_TIMEOUT_MS = 20000;
 
+/**
+ * Default response-body budget (bytes). The documented unset default, not a
+ * ceiling — REVIEW_INTELLIGENCE_MAX_RESPONSE_BYTES overrides it exactly when
+ * explicitly set. Cache TTLs/entries and per-review char bounds stay
+ * hardcoded: they are output-contract or deployment constants, not
+ * load-bearing operational budgets.
+ */
 export const REVIEW_INTELLIGENCE_MAX_RESPONSE_BYTES = 24 * 1024;
 
 /** Minimum meaningful published reviews required before summarizing. */
@@ -50,8 +55,24 @@ export const REVIEW_INTELLIGENCE_MIN_MEANINGFUL = 5;
 /** Minimum trimmed body characters for a review to count as meaningful. */
 export const REVIEW_INTELLIGENCE_MIN_MEANINGFUL_CHARS = 20;
 
-/** Upper bound on reviews sent to the provider in one call (sampling budget). */
+/**
+ * Default sampling budget: upper bound on reviews sent to the provider in
+ * one call. This constant is the documented unset default, not a ceiling —
+ * REVIEW_INTELLIGENCE_MAX_SAMPLE overrides it exactly when explicitly set.
+ * Output-contract bounds (overview/bullet/snippet lengths and counts below)
+ * stay hardcoded; only this operational budget is operator-owned.
+ */
 export const REVIEW_INTELLIGENCE_MAX_SAMPLE = 12;
+
+/**
+ * Default completion-token budget for one review-intelligence call. The
+ * previous hardcoded 2000-token output truncated 12-review prompts
+ * (12 x 1000 input chars), surfacing as indistinguishable decode failures.
+ * 12000 matches the menu-scanner completion budget for the same endpoint
+ * family; the provider's own limit is still the final authority and
+ * surfaces as a provider failure, never a silent rewrite.
+ */
+export const REVIEW_INTELLIGENCE_DEFAULT_MAX_COMPLETION_TOKENS = 12000;
 
 /** Per-review prompt bound: flattened text is truncated to this length. */
 export const REVIEW_INTELLIGENCE_MAX_REVIEW_CHARS = 1000;
@@ -210,6 +231,20 @@ export interface ReviewIntelligenceConfig {
   readonly modelId: string;
   readonly timeoutMs: number;
   readonly maxResponseBytes: number;
+  /**
+   * Completion-token budget serialized as `max_tokens` on the
+   * `/chat/completions` request (see the client for the field choice).
+   * Operator-owned: REVIEW_INTELLIGENCE_MAX_COMPLETION_TOKENS flows through
+   * exactly as configured; unset uses
+   * REVIEW_INTELLIGENCE_DEFAULT_MAX_COMPLETION_TOKENS.
+   */
+  readonly maxCompletionTokens: number;
+  /**
+   * Reviews sent to the provider in one call. Operator-owned:
+   * REVIEW_INTELLIGENCE_MAX_SAMPLE flows through exactly as configured;
+   * unset uses REVIEW_INTELLIGENCE_MAX_SAMPLE.
+   */
+  readonly maxSample: number;
 }
 
 /**
@@ -235,6 +270,78 @@ const parseOperatorTimeoutMs = (raw: string | undefined): number => {
 };
 
 /**
+ * Operator-owned positive integer: a valid explicitly configured value flows
+ * through exactly as set and the default applies only when the variable is
+ * unset. There is intentionally no upper bound — provider-side limits are
+ * the provider's responsibility and surface as provider failures, never as
+ * silent configuration rewrites. Strict whole-string matching:
+ * Number.parseInt alone would accept "12000abc" as 12000, so anything that
+ * is not all digits fails loudly naming field + reason.
+ */
+const parseOperatorPositiveInt = (
+  raw: string | undefined,
+  field: string,
+  fallback: number,
+): number => {
+  if (raw === undefined) {
+    return fallback;
+  }
+
+  if (!/^[0-9]+$/.test(raw)) {
+    throw new Error(`${field} must be a positive safe integer or unset (unset uses ${fallback}).`);
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(`${field} must be a positive safe integer or unset (unset uses ${fallback}).`);
+  }
+
+  return parsed;
+};
+
+/**
+ * Model ownership: the shared MODEL_MODEL_ID is the default so review
+ * summaries move with the rest of the Muse fleet with no extra configuration.
+ * REVIEW_INTELLIGENCE_MODEL_ID is a dedicated override for operators who must
+ * pin review output independently of ranking experiments — the highlights
+ * contract (strict schema, verbatim evidence snippets) is validated against a
+ * specific model's behavior, so ranking model churn must never silently
+ * change review output. Either way the resolved id must satisfy the shared
+ * supported-model shape; an explicitly set unusable id throws naming field +
+ * reason at startup instead of silently falling back to another model. There
+ * is no silent fallback anywhere on this path: unset means the documented
+ * default, invalid means a loud startup failure.
+ */
+const resolveReviewIntelligenceModelId = (env: Record<string, string | undefined>): string => {
+  const override = env["REVIEW_INTELLIGENCE_MODEL_ID"];
+
+  if (override !== undefined) {
+    if (!isSupportedModelId(override)) {
+      throw new Error(
+        "REVIEW_INTELLIGENCE_MODEL_ID is not a supported Muse model id (expected muse-spark-<major>.<minor>[-contributor] or muse-wonder-<major>.<minor>).",
+      );
+    }
+
+    return override;
+  }
+
+  const shared = env["MODEL_MODEL_ID"];
+
+  if (shared !== undefined) {
+    if (!isSupportedModelId(shared)) {
+      throw new Error(
+        "MODEL_MODEL_ID is not a supported Muse model id (expected muse-spark-<major>.<minor>[-contributor] or muse-wonder-<major>.<minor>).",
+      );
+    }
+
+    return shared;
+  }
+
+  return DEFAULT_MODEL_ID;
+};
+
+/**
  * Pure resolver over the raw environment bag (`process.env` in production).
  * Takes `Record<string, string | undefined>` deliberately: the env bag is an
  * untrusted external boundary, not an application map. Disabled unless
@@ -248,7 +355,21 @@ export const resolveReviewIntelligenceConfig = (
   enabled: env["REVIEW_INTELLIGENCE_ENABLED"] === REVIEW_INTELLIGENCE_ENABLED_VALUE,
   apiKey: env["MODEL_API_KEY"] ?? "",
   baseUrl: env["MODEL_BASE_URL"] ?? DEFAULT_MODEL_BASE_URL,
-  modelId: REVIEW_INTELLIGENCE_MODEL_ID,
+  modelId: resolveReviewIntelligenceModelId(env),
   timeoutMs: parseOperatorTimeoutMs(env["REVIEW_INTELLIGENCE_TIMEOUT_MS"]),
-  maxResponseBytes: REVIEW_INTELLIGENCE_MAX_RESPONSE_BYTES,
+  maxResponseBytes: parseOperatorPositiveInt(
+    env["REVIEW_INTELLIGENCE_MAX_RESPONSE_BYTES"],
+    "REVIEW_INTELLIGENCE_MAX_RESPONSE_BYTES",
+    REVIEW_INTELLIGENCE_MAX_RESPONSE_BYTES,
+  ),
+  maxCompletionTokens: parseOperatorPositiveInt(
+    env["REVIEW_INTELLIGENCE_MAX_COMPLETION_TOKENS"],
+    "REVIEW_INTELLIGENCE_MAX_COMPLETION_TOKENS",
+    REVIEW_INTELLIGENCE_DEFAULT_MAX_COMPLETION_TOKENS,
+  ),
+  maxSample: parseOperatorPositiveInt(
+    env["REVIEW_INTELLIGENCE_MAX_SAMPLE"],
+    "REVIEW_INTELLIGENCE_MAX_SAMPLE",
+    REVIEW_INTELLIGENCE_MAX_SAMPLE,
+  ),
 });

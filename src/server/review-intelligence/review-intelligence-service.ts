@@ -16,7 +16,6 @@ import {
 import {
   REVIEW_INTELLIGENCE_EXTREME_POOL,
   REVIEW_INTELLIGENCE_MAX_REVIEW_CHARS,
-  REVIEW_INTELLIGENCE_MAX_SAMPLE,
   REVIEW_INTELLIGENCE_MIN_MEANINGFUL,
   REVIEW_INTELLIGENCE_MIN_MEANINGFUL_CHARS,
   REVIEW_INTELLIGENCE_PROMPT_VERSION,
@@ -320,7 +319,7 @@ export const makeReviewIntelligence = (deps: ReviewIntelligenceDeps): ReviewInte
         return ReviewHighlightsOutcome.Insufficient();
       }
 
-      const sampled = stratifySample(meaningful, REVIEW_INTELLIGENCE_MAX_SAMPLE);
+      const sampled = stratifySample(meaningful, deps.config.maxSample);
 
       const fingerprint = fingerprintSample({
         venueId: input.venueId,
