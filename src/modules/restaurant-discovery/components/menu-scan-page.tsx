@@ -920,7 +920,17 @@ export function MenuScanPage({
   const canRetry =
     failure !== null && !busy && (failure.retryable || classifyScanError(failure) === "expired");
 
-  const capturePhase = capturePhaseFor(status !== null && document === null, uploading, reading);
+  // The preparing bar requires pending work: after a reload the photo
+  // File objects are gone, so only server-side assets (or an active
+  // upload/read) justify it. Otherwise a bare restoring status would wrongly
+  // claim photos are being prepared.
+  const hasPendingPhotos = photos.length > 0 || (view?.assets.length ?? 0) > 0;
+
+  const capturePhase = capturePhaseFor(
+    status !== null && document === null && hasPendingPhotos,
+    uploading,
+    reading,
+  );
 
   const previewPhotos: ReadonlyArray<ScanPreviewPhoto> = photos.map((photo) => ({
     id: photo.id,
