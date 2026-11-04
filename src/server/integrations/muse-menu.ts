@@ -8,7 +8,7 @@ import {
   type CurrencyContext,
 } from "@/modules/restaurant-discovery/menu-price-evidence";
 import {
-  menuExtractionSchema,
+  menuExtractionStrictSchema,
   type MenuExtraction,
   type MenuScanDocument,
 } from "@/modules/restaurant-discovery/menu-scan.schema";
@@ -45,6 +45,11 @@ export class ExtractionUnavailable extends Data.TaggedError("ExtractionUnavailab
     MuseFailureCategory,
     "unavailable" | "timeout" | "rate-limited" | "auth-rejected"
   >;
+  /** Validated provider-envelope diagnostics (capped, never body text). */
+  readonly providerCode?: string | undefined;
+  readonly providerType?: string | undefined;
+  readonly providerParam?: string | undefined;
+  readonly providerMessage?: string | undefined;
 }> {}
 
 export class InvalidModelOutput extends Data.TaggedError("InvalidModelOutput")<{
@@ -91,6 +96,80 @@ export class MenuExtractor extends Context.Service<
   }
 >()("feastjourney/integrations/MenuExtractor") {}
 
+/** Provider error envelope (diagnostics only; user-facing reasons stay generic). */
+const providerErrorSchema = z.object({
+  error: z
+    .object({
+      message: z.string().max(200).optional(),
+      type: z.string().max(100).optional(),
+      code: z.union([z.string().max(100), z.number().int()]).optional(),
+      param: z.string().max(200).nullable().optional(),
+    })
+    .optional(),
+});
+
+interface ProviderErrorDiagnostic {
+  readonly code?: string | undefined;
+  readonly errorType?: string | undefined;
+  readonly param?: string | undefined;
+  readonly message?: string | undefined;
+}
+
+/**
+ * Bounded provider-error read: at most 4 KiB, validated envelope, never
+ * throws. Returns null for empty/oversize/non-JSON/unexpected bodies so a
+ * malformed error response degrades to status-only diagnostics.
+ */
+async function readProviderError(response: Response): Promise<ProviderErrorDiagnostic | null> {
+  try {
+    if (response.body === null) return null;
+
+    const reader = response.body.getReader();
+    const chunks: Array<Uint8Array> = [];
+    let byteLength = 0;
+
+    try {
+      for (;;) {
+        // oxlint-disable-next-line no-await-in-loop -- Bounded error-body drain, one chunk at a time.
+        const chunk = await reader.read();
+
+        if (chunk.done) break;
+
+        byteLength += chunk.value.byteLength;
+
+        if (byteLength > 4096) return null;
+
+        chunks.push(chunk.value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(Buffer.concat(chunks, byteLength).toString("utf8"));
+    } catch {
+      return null;
+    }
+
+    const envelope = providerErrorSchema.safeParse(parsed);
+
+    if (!envelope.success || envelope.data.error === undefined) return null;
+
+    const details = envelope.data.error;
+
+    return {
+      code: details.code === undefined ? undefined : String(details.code),
+      errorType: details.type,
+      param: details.param ?? undefined,
+      message: details.message,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Owner contract for the extraction-failure log line (allow-list only). */
 interface MenuExtractionFailureAnnotations {
   readonly requestId: string;
@@ -102,6 +181,10 @@ interface MenuExtractionFailureAnnotations {
   status?: number | undefined;
   finish?: string | undefined;
   issues?: string | undefined;
+  providerCode?: string | undefined;
+  providerType?: string | undefined;
+  providerParam?: string | undefined;
+  providerMessage?: string | undefined;
 }
 
 // Zod custom refinements (ISO currency and exact decimal) remain enforced when
@@ -121,7 +204,7 @@ export const MENU_EXTRACTION_RESPONSE_FORMAT = {
   json_schema: {
     name: "menu_scan_v1",
     strict: true,
-    schema: z.toJSONSchema(menuExtractionSchema),
+    schema: z.toJSONSchema(menuExtractionStrictSchema),
   },
 } as const;
 
@@ -158,6 +241,7 @@ const SYSTEM_PROMPT = [
   "Currency provenance: printed only when a currency symbol or code is visibly printed next to the price; inferred only when credible venue or menu-location evidence names a single-currency country; user-confirmed never comes from the model; otherwise unknown with currency null. A printed symbol always wins over location evidence, and menu language alone is never location evidence.",
   "A menu in a country using multiple currencies, or a bare $ with no reliable region, means currency null and currencyProvenance unknown; never assume USD.",
   "Association: clear only when the same row and column header prove the pairing; ambiguous with a short associationNote when the pairing is uncertain; unavailable when no price is printed. Uncertain association keeps the raw observation and explains the doubt; never invent bounding boxes or pixel coordinates.",
+  "Always populate currencyProvenance, association, and associationNote explicitly on every price (null only where the schema allows null, never omitted): the response contract requires every field.",
   "If item or variant association, separators, currency, or text are ambiguous, use null and explain the uncertainty; never guess.",
   "Use only supported ISO 4217 monetary currencies; use null for unknown or ambiguous currencies.",
   "Uncertainty states: set price null when its item or variant association, separator, or currency is uncertain; set a translated field null when its translation is uncertain; record each doubt as a short entry in uncertainties; never guess.",
@@ -284,7 +368,7 @@ function parseModelContent(content: string, finish: string): MenuExtraction {
     });
   }
 
-  const extraction = menuExtractionSchema.safeParse(parsed);
+  const extraction = menuExtractionStrictSchema.safeParse(parsed);
 
   if (!extraction.success) {
     throw new InvalidModelOutput({
@@ -473,8 +557,18 @@ export function makeMuseMenuExtractor(
 
             if (!response.ok) {
               const retryAfterSeconds = retryAfter(response);
+              const diagnostic = await readProviderError(response);
 
               controller.abort();
+
+              // Validated envelope fields only (capped lengths, no body text);
+              // absent when the error body was empty, oversize, or malformed.
+              const providerFields = {
+                providerCode: diagnostic?.code,
+                providerType: diagnostic?.errorType,
+                providerParam: diagnostic?.param,
+                providerMessage: diagnostic?.message,
+              };
 
               if (response.status === 401 || response.status === 403) {
                 throw new ExtractionUnavailable({
@@ -482,6 +576,7 @@ export function makeMuseMenuExtractor(
                   retryable: false,
                   status: response.status,
                   category: "auth-rejected",
+                  ...providerFields,
                 });
               }
 
@@ -492,6 +587,7 @@ export function makeMuseMenuExtractor(
                   retryAfterSeconds,
                   status: response.status,
                   category: "timeout",
+                  ...providerFields,
                 });
               }
 
@@ -501,6 +597,7 @@ export function makeMuseMenuExtractor(
                 retryAfterSeconds,
                 status: response.status,
                 category: response.status === 429 ? "rate-limited" : "unavailable",
+                ...providerFields,
               });
             }
 
@@ -612,6 +709,18 @@ export function makeMuseMenuExtractor(
 
               if (Predicate.isTagged(failure, "ExtractionUnavailable")) {
                 if (failure.status !== undefined) annotations.status = failure.status;
+
+                if (failure.providerCode !== undefined)
+                  annotations.providerCode = failure.providerCode;
+
+                if (failure.providerType !== undefined)
+                  annotations.providerType = failure.providerType;
+
+                if (failure.providerParam !== undefined)
+                  annotations.providerParam = failure.providerParam;
+
+                if (failure.providerMessage !== undefined)
+                  annotations.providerMessage = failure.providerMessage;
               } else {
                 if (failure.finish !== undefined) annotations.finish = failure.finish;
 

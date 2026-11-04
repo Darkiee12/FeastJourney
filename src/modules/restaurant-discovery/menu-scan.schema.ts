@@ -87,6 +87,43 @@ export const menuExtractionSchema = z.strictObject({
 
 export type MenuExtraction = z.infer<typeof menuExtractionSchema>;
 
+/**
+ * Provider-facing strict variant of the extraction contract (Meta
+ * `strict: true` structured output). Zod `.optional()` fields are absent
+ * from the generated `required` array, which strict mode rejects; this
+ * variant redeclares the same leaf constraints with every property
+ * required (nullable where null is legal), derived from the persisted
+ * shapes above rather than duplicated. The three V3 price-evidence fields
+ * that caused the HTTP 400 — `currencyProvenance`, `association`, and
+ * `associationNote` (required but nullable) — are required here while
+ * staying optional in the persisted schema so historical documents without
+ * them keep decoding. Use only for constructing the provider
+ * `response_format` and validating provider output; never for storage.
+ */
+const strictPriceSchema = z.strictObject({
+  ...scanPriceSchema.shape,
+  currencyProvenance: currencyProvenanceSchema,
+  association: priceAssociationSchema,
+  associationNote: associationNoteSchema.nullable(),
+});
+
+const strictVariantSchema = z.strictObject({
+  ...extractedVariant.shape,
+  price: strictPriceSchema.nullable(),
+});
+
+const strictItemSchema = z.strictObject({
+  ...extractedItem.shape,
+  variants: z.array(strictVariantSchema).min(1).max(20),
+});
+
+export const menuExtractionStrictSchema = z.strictObject({
+  ...menuExtractionSchema.shape,
+  items: z.array(strictItemSchema).max(100),
+});
+
+export type StrictMenuExtraction = z.infer<typeof menuExtractionStrictSchema>;
+
 export const menuScanDocumentSchema = menuExtractionSchema.extend({
   schemaVersion: z.literal(1),
   targetLanguage: menuLanguageSchema,
