@@ -26,6 +26,7 @@ import {
   type RecommendDishesInput,
   RecommendationOutcome,
   type RecommendationError,
+  RecommendationMisconfigured,
   RecommendationService,
   RankingProvenance,
   hydrateAgentFallback,
@@ -258,8 +259,13 @@ export const agentPipeline: StreamPipeline = (input, report, requestId) =>
                 return Effect.void;
               }
 
+              // Narrowed copies: the guard above removes terminal stages, but
+              // narrowing does not cross the Effect.sync closure boundary.
+              const stage = event.stage;
+              const detail = event.detail;
+
               return Effect.sync(() => {
-                report(event.stage, event.detail);
+                report(stage, detail);
               });
             },
           }).pipe(Effect.provide(makeAgentModelClientLive(agentConfig)));
