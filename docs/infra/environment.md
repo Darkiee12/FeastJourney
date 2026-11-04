@@ -57,9 +57,70 @@ fast when a required value is missing; see `.env.example` for the full list):
 
 **Important:** local Compose intentionally publishes no database port, so a host `DATABASE_URL=postgres://localhost:5432/...` is **not** reachable without a separate, explicitly approved dev access arrangement. Never solve this by exposing 0.0.0.0:5432.
 
-## Map frontend configuration (when the UI lands)
+## Map frontend configuration
 
-`VITE_MAP_STYLE_URL` is a **public browser-visible** MapLibre vector-style URL; a MapTiler-hosted style is the initial recommendation. Domain/referrer-restrict the map provider key and monitor API usage. **Never** use this browser variable for private database, AI, or S3 credentials. Provider terms and pricing must be reviewed before production.
+`VITE_MAP_STYLE_URL` is a **public browser-visible** MapLibre vector-style
+URL for the `/restaurants` map (gated by `z.url().safeParse` at
+`src/modules/restaurant-discovery/components/restaurant-search-page.tsx:85`
+and `restaurant-map.tsx:318`, plus
+`restaurant-editor.tsx:95`). The single validated default is the CARTO
+Positron style (`https://basemaps.cartocdn.com/gl/positron-gl-style/style.json`,
+no key required); the canonical constant lives in
+`src/shared/map-style-url.ts`. Domain/referrer-restrict any keyed provider
+key and monitor API usage. **Never** use this browser variable for private
+database, AI, or S3 credentials. Provider terms and pricing must be reviewed
+before production.
+
+### Why build-time, not runtime
+
+Vite replaces `import.meta.env.VITE_MAP_STYLE_URL` with a string literal
+while compiling the client bundle, and `infra/Dockerfile.prod` packages only
+that prebuilt `.output/` artifact. A Swarm/Dokploy runtime value therefore
+cannot change the served map — the bundle already froze the old value in.
+Setting `VITE_MAP_STYLE_URL` in the stack environment is informational only
+(so operators can see which style a release expects); the compiled bundle
+is the truth.
+
+### How to configure in Actions
+
+Both `quality.yml` (PR gate) and `release.yml` (release gate) run
+`.github/workflows/scripts/resolve-map-style-url.ts` before `bun run build`:
+
+- Source: the GitHub Actions **repository variable** `vars.VITE_MAP_STYLE_URL`
+  (Settings → Secrets and variables → Actions → Variables). Variables, not
+  secrets: the value is public and the step stays fork-safe.
+- A set and valid override wins; an unset or blank variable falls back to
+  the validated default — deterministic, never silently map-less.
+- Malformed or non-HTTPS overrides fail the step with a named fix
+  (variable name + remediation, never the value). The resolved value is
+  exported into the build step env so Vite embeds it, and a follow-up step
+  greps `.output/public` for the exact URL to prove the bundle carries it.
+
+### When a rebuild is required
+
+Any style change (new provider, new key, new style JSON) requires a new
+image build plus a stack redeploy; editing the Dokploy stack environment
+alone changes nothing user-visible. Roll back the same way: rebuild (or
+re-promote a previous immutable `:sha-` tag) and redeploy.
+
+### Missing-config vs tile-failure diagnosis
+
+- **Missing config** (bundle built without a value): the map area shows
+  "Map tiles are not configured here (VITE_MAP_STYLE_URL is unset)" while
+  the list, addresses, and directions keep working. Fix: set the Actions
+  variable (or accept the default) and rebuild — not a runtime env edit.
+- **Tile failure** (value embedded but tiles do not load): the map area shows
+  "The map could not load. The list and directions remain available."
+  Fix on the provider side: key restrictions, quota/billing, network egress
+  from the browser to the tile host — the bundle is fine, do not rebuild.
+
+### Migrating to MapTiler
+
+MapTiler is the recommended keyed provider (subject to pricing/license
+review, see `docs/architecture/maps.md`): create a style, restrict the key
+by domain/referrer, set `vars.VITE_MAP_STYLE_URL` to the style JSON URL,
+rebuild, and confirm the embed-proof step passes. Monitor usage and set
+billing alerts before production.
 
 ## Production and staging configuration
 

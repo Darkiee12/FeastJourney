@@ -122,8 +122,31 @@ jobs:
         # venue component suites (router.routesById TypeError). Isolation
         # keeps every file's module handles to itself.
         run: bun test --isolate tests/
+      - name: Resolve map style URL (build-time, public)
+        # Vite embeds import.meta.env.VITE_MAP_STYLE_URL into the client
+        # bundle at build time; a runtime Swarm value cannot fix a bundle
+        # built without it. Resolve the public value here: the repository
+        # variable VITE_MAP_STYLE_URL when set and valid, else the validated
+        # CARTO Positron default. Malformed or non-HTTPS overrides fail this
+        # step with a named fix. Fork-safe: vars (not secrets) only.
+        env:
+          VITE_MAP_STYLE_URL: ${{ vars.VITE_MAP_STYLE_URL }}
+        run: |
+          resolved="$(bun .github/workflows/scripts/resolve-map-style-url.ts)"
+          echo "VITE_MAP_STYLE_URL=${resolved}" >> "$GITHUB_ENV"
+      # VITE_MAP_STYLE_URL arrives here from $GITHUB_ENV (set by the resolve
+      # step above), so it is present in every later step's shell environment
+      # without re-declaring it. Do not remove that step.
       - name: Production build
         run: bun run build
+      - name: Prove the map style URL is embedded in the bundle
+        # Fail-closed: the app gate (z.url().safeParse on
+        # VITE_MAP_STYLE_URL) renders its fallback when Vite compiled the
+        # bundle without a value. Grep the emitted client assets for the
+        # exact resolved URL.
+        run: |
+          test -n "${VITE_MAP_STYLE_URL:?resolved style URL missing}"
+          grep -rF -- "${VITE_MAP_STYLE_URL}" .output/public
       - name: Stop disposable services
         if: always()
         run: docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml down --remove-orphans
