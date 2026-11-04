@@ -179,7 +179,9 @@ async function waitForExtractionDocument(principal: ScanPrincipal, scanId: strin
   }
 }
 
-async function extractedScan(principal = guest) {
+async function extractedScan(
+  principal = guest,
+): Promise<{ scanId: string; assetId: string; document: MenuScanDocument }> {
   const created = await run(createMenuScan(principal, { targetLanguage: "en", venueId }));
   scanIds.push(created.id);
   const asset = await run(attachMenuPhoto(principal, created.id, 1, await photo, "image/png"));
@@ -187,6 +189,8 @@ async function extractedScan(principal = guest) {
   // view promptly, so poll the scan view until the document lands.
   await run(extractMenu(principal, created.id, crypto.randomUUID()));
   const view = await waitForExtractionDocument(principal, created.id);
+
+  if (view.document === null) throw new Error("synthetic extraction document missing");
 
   return { scanId: created.id, assetId: asset.assetId, document: view.document };
 }

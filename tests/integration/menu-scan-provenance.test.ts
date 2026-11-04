@@ -5,7 +5,10 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import postgres from "postgres";
 import sharp from "sharp";
 
-import type { MenuExtraction } from "@/modules/restaurant-discovery/menu-scan.schema";
+import type {
+  MenuExtraction,
+  MenuScanDocument,
+} from "@/modules/restaurant-discovery/menu-scan.schema";
 import {
   attachMenuPhoto,
   createMenuScan,
@@ -143,7 +146,7 @@ async function waitForExtractionDocument(scanId: string) {
   }
 }
 
-async function extractedScan() {
+async function extractedScan(): Promise<{ scanId: string; document: MenuScanDocument }> {
   const created = await run(createMenuScan(guest, { targetLanguage: "en", venueId: null }));
   scanIds.push(created.id);
   await run(attachMenuPhoto(guest, created.id, 1, await photo, "image/png"));
@@ -151,6 +154,8 @@ async function extractedScan() {
   // view promptly, so poll the scan view until the document lands.
   await run(extractMenu(guest, created.id, crypto.randomUUID()));
   const view = await waitForExtractionDocument(created.id);
+
+  if (view.document === null) throw new Error("synthetic extraction document missing");
 
   return { scanId: created.id, document: view.document };
 }
