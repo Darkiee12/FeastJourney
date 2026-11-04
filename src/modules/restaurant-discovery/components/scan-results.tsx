@@ -101,14 +101,18 @@ function ScanDeleteAction({
 }
 
 /**
- * Post-analysis results shell. Single heading ("Your menu is ready" +
- * "Choose what you'd like to order"), then one compact context row
- * (restaurant / location / source → target language / currency status),
- * the single menu-wide currency control, and the dishes. Overflow actions
- * (scan another / reload / delete with confirmation) live in a compact
- * disclosure — never giant stacked buttons above the food. IDs, model,
- * revision, provenance, and expiry detail collapse into "Scan details";
- * the visible UI keeps only a concise privacy/expiry line.
+ * Post-analysis results shell. Visible success heading ("Your menu is ready"
+ * + "Choose what you'd like to order"), then one compact context summary
+ * (venue / menu location / source → target language / dish count / currency
+ * status) with a quiet expiry line, the single compact menu-wide currency
+ * control, and one concise scan-wide notice (allergy/dietary always, price
+ * clarity only when unclear). Dishes are the dominant element: the shared
+ * InteractiveMenuView/MenuItemRow board renders immediately after the
+ * notice, with MenuItemDetail on demand. Supporting groups follow —
+ * Menu tools (photo thumbnails via MenuPhotoViewer, corrections), then
+ * More (overflow: scan another / reload / delete with confirmation;
+ * collapsed scan details). IDs, model, revision, provenance, and expiry
+ * detail stay collapsed; the visible UI keeps only concise lines.
  *
  * Price research is intentionally NOT rendered here: the single research
  * trigger per screen stays with S1's ScanPriceResearch, mounted as a sibling
@@ -285,11 +289,12 @@ export function ScanResults({
   const targetName = menuLanguageNames.get(document.targetLanguage) ?? document.targetLanguage;
 
   const contextLine = [
-    venueName,
+    venueName === null ? null : copy.atVenue.replace("{name}", venueName),
     menuLocation?.label ?? null,
     sourceName === null
       ? null
       : copy.contextLanguages.replace("{source}", sourceName).replace("{target}", targetName),
+    document.items.length.toLocaleString(locale),
     currency.enabled && currency.target !== ""
       ? copy.currencyConverted.replace("{target}", currency.target)
       : copy.currencyOriginalOnly,
@@ -297,14 +302,17 @@ export function ScanResults({
     .flatMap((part) => (part === null ? [] : [part]))
     .join(" · ");
 
+  // One concise scan-wide notice: allergy/dietary wording is always
+  // visible but quiet; the unclear-price sentence joins it only when at
+  // least one variant lacks a usable price.
+  const noticeText = priceUnclear(document)
+    ? `${copy.dietNote} ${copy.priceUnclear}`
+    : copy.dietNote;
+
   return (
     <article className="scan-results" lang={menuBcp47TagFor(locale)}>
       <header className="scan-results-head">
-        <h1
-          id="scan-results-title"
-          tabIndex={-1}
-          className="scan-results-title font-display text-4xl"
-        >
+        <h1 id="scan-results-title" tabIndex={-1} className="font-display">
           {copy.ready}
         </h1>
         <p>{copy.subtitle}</p>
@@ -316,8 +324,19 @@ export function ScanResults({
         />
         {expiry !== null && <p className="scan-results-expiry">{expiry}</p>}
       </header>
-      <p className="scan-results-diet">{copy.dietNote}</p>
-      {priceUnclear(document) && <p className="scan-results-price-note">{copy.priceUnclear}</p>}
+      <p className="scan-results-diet">{noticeText}</p>
+      <InteractiveMenuView
+        key={`${view.scan.id}:${view.scan.current_revision ?? "draft"}`}
+        menu={presentScan(document, venueName)}
+        locale={locale}
+        photoUrl={(assetId) => `/api/menu-scans?scanId=${view.scan.id}&assetId=${assetId}`}
+        rates={currency.rates}
+        onEditDish={handleEditDish}
+      />
+      {/* Price-research mount point (S1): render ScanPriceResearch as a
+          page-level sibling of ScanResults (aside column of the results
+          grid) with locale + items. ScanResults renders no research
+          trigger so the screen keeps exactly one (single-trigger rule). */}
       {assets.length > 0 && (
         <section className="scan-results-photos" aria-label={copy.photosTitle}>
           <h2>{copy.photosTitle}</h2>
@@ -329,40 +348,6 @@ export function ScanResults({
           />
         </section>
       )}
-      <InteractiveMenuView
-        key={`${view.scan.id}:${view.scan.current_revision ?? "draft"}`}
-        menu={presentScan(document, venueName)}
-        locale={locale}
-        photoUrl={(assetId) => `/api/menu-scans?scanId=${view.scan.id}&assetId=${assetId}`}
-        rates={currency.rates}
-        onEditDish={handleEditDish}
-      />
-      {/* Price-research mount point (S1): render ScanPriceResearch as a sibling
-          directly below ScanResults with locale + items. ScanResults renders no
-          research trigger so the screen keeps exactly one (single-trigger rule). */}
-      <details className="scan-results-overflow">
-        <summary>{copy.overflowLabel}</summary>
-        <div className="scan-results-overflow-actions">
-          {onScanAnother !== undefined && (
-            <button type="button" onClick={onScanAnother}>
-              {copy.scanAnother}
-            </button>
-          )}
-          <button type="button" onClick={reload}>
-            {copy.reloadAction}
-          </button>
-          {onDeleteScan !== undefined && (
-            <ScanDeleteAction
-              label={copy.deleteAction}
-              confirm={copy.deleteConfirm}
-              yes={copy.deleteYes}
-              no={copy.deleteNo}
-              busy={loading}
-              onDelete={onDeleteScan}
-            />
-          )}
-        </div>
-      </details>
       <details
         ref={correctionsRef}
         className="scan-results-corrections"
@@ -390,6 +375,29 @@ export function ScanResults({
         >
           {copy.saveFixes}
         </button>
+      </details>
+      <details className="scan-results-overflow">
+        <summary>{copy.overflowLabel}</summary>
+        <div className="scan-results-overflow-actions">
+          {onScanAnother !== undefined && (
+            <button type="button" onClick={onScanAnother}>
+              {copy.scanAnother}
+            </button>
+          )}
+          <button type="button" onClick={reload}>
+            {copy.reloadAction}
+          </button>
+          {onDeleteScan !== undefined && (
+            <ScanDeleteAction
+              label={copy.deleteAction}
+              confirm={copy.deleteConfirm}
+              yes={copy.deleteYes}
+              no={copy.deleteNo}
+              busy={loading}
+              onDelete={onDeleteScan}
+            />
+          )}
+        </div>
       </details>
       <details className="scan-results-meta">
         <summary>{copy.techDetails}</summary>
