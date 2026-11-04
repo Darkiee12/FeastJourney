@@ -56,7 +56,7 @@ release contract:
 | Stage | What | Fail-closed behavior |
 | --- | --- | --- |
 | Trigger | `push` of tags `v*.*.*`, or `workflow_dispatch` | No `pull_request` trigger: fork PRs cannot run it or reach secrets |
-| `quality` | Same backend flow as quality.yml against disposable PG18+PostGIS: migrate → validate → `check-types` → `bun test tests/` → `bun run build` → prove `.output/server/index.mjs` + `.output/public` exist → upload `.output` artifact | Any failure stops the release; `publish` never runs |
+| `quality` | Same backend flow as quality.yml against disposable PG18+PostGIS: migrate → validate → `check-types` → `bun test tests/` → resolve `VITE_MAP_STYLE_URL` (Actions variable or validated CARTO default) → `bun run build` → prove `.output/server/index.mjs` + `.output/public` exist and the style URL is embedded → upload `.output` artifact | Any failure stops the release; `publish` never runs |
 | `publish` | Downloads the **verified artifact** (same commit), `docker build -f infra/Dockerfile.prod`, pushes SHA tags to GHCR (`packages:write` scoped to this job only, `GITHUB_TOKEN`) | Build requires the artifact proof file; tags are `:sha-<SHA>` plus `:<tag>` on tag events — never `latest`-only |
 | `deploy-staging` | `workflow_dispatch` + `deploy_staging=true` ONLY. Triggers Dokploy staging rollout through Cloudflare Access (service token + deploy-scoped `x-api-key`), then polls `…/health/ready` for ≤ 10 min | Never runs on tag push; production is never auto-deployed |
 
@@ -174,6 +174,15 @@ Operator checklist per variable group:
   conversion feature flag). Forwarded with the Effect-Config defaults
   (`https://api.frankfurter.dev/v2/`, 24h refresh, 72h max age); override
   only for a mirror endpoint or a different refresh/staleness policy.
+- `VITE_MAP_STYLE_URL` — public MapLibre style URL, **build-time only**:
+  Vite embeds it into the client bundle from the Actions repository
+  variable (validated default: CARTO Positron, no key), and the Swarm value
+  is informational — it never changes the served bundle. Changing the
+  style means setting the Actions variable, rebuilding the image, and
+  redeploying the stack. Never a secret; never put private keys in `VITE_*`.
+  Missing value → honest map fallback (list still works); tiles failing to
+  load → provider key/quota/egress issue, not a rebuild (see
+  [environment](environment.md)).
 - CI deploy secrets (GitHub `staging` environment only, never the app):
   `DOKPLOY_URL`, `DOKPLOY_API_KEY` (deploy-scoped `x-api-key`),
   `DOKPLOY_COMPOSE_ID` (the Dokploy **Compose** service id — not the
