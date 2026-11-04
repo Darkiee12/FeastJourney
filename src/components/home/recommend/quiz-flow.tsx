@@ -9,7 +9,7 @@ import {
   SlidersHorizontalIcon,
   SparklesIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { DishCarousel } from "@/components/dish/dish-carousel";
 import { useMobileHomeOptional } from "@/components/home/mobile/mobile-home-context";
@@ -76,7 +76,13 @@ import {
   ResultsLoadingSkeleton,
 } from "@/components/home/recommend/results-loading";
 import { SidebarPrefsCard, YourPicksCard } from "@/components/home/recommend/results-sidebar";
-import { useAgentProgress } from "@/components/home/recommend/use-agent-progress";
+import {
+  mapStreamWireToResult,
+  peekStreamResult,
+  streamCacheKeyFor,
+  useAgentRecommendationStream,
+  type AgentStreamRequest,
+} from "@/components/home/recommend/use-agent-progress";
 import { usePreciseLocation } from "@/components/home/recommend/use-precise-location";
 import { listCountriesFn, recommendDishesFn } from "@/modules/food-discovery/food.functions";
 import { getQuizRegionFn } from "@/modules/food-discovery/quiz.functions";
@@ -316,6 +322,84 @@ export function RecommendSection() {
       ? recommendationCacheKey(cacheKeyInputFor(toTransportPayload(submitted), userIdOrGuest))
       : null;
 
+  /**
+   * Stream-first submission state. One entry per submit with a fresh
+   * request id for the `x-request-id` header; null means the submission is
+   * served from the React Query cache (repeat submission with a fresh hit)
+   * with zero new requests. Retry reuses the key with a fresh id and no
+   * cache read, so exactly one new request fires.
+   */
+  const [streamAttempt, setStreamAttempt] = useState<{
+    readonly key: string;
+    readonly requestId: string;
+    readonly useCache: boolean;
+  } | null>(null);
+
+  /**
+   * Open the stream attempt for one submitted payload, or stand down when a
+   * cache already holds the entry (QueryClient from either transport, or the
+   * controller's terminal-result cache): the cached outcome renders with no
+   * fetch at all. Called from every submit path so stream and JSON never run
+   * for one submission.
+   */
+  const beginStreamAttempt = useCallback(
+    (payload: RecommendPayload, useCache: boolean): void => {
+      const transport = toTransportPayload(payload);
+      const queryKey = recommendationCacheKey(cacheKeyInputFor(transport, userIdOrGuest));
+      const streamKey = streamCacheKeyFor(transport, userIdOrGuest);
+
+      if (useCache) {
+        if (queryClient.getQueryData(queryKey) !== undefined) {
+          setStreamAttempt(null);
+
+          return;
+        }
+
+        const cached = peekStreamResult(streamKey);
+
+        if (cached !== null) {
+          queryClient.setQueryData(queryKey, mapStreamWireToResult(cached));
+          setStreamAttempt(null);
+
+          return;
+        }
+      }
+
+      setStreamAttempt({
+        key: streamKey,
+        requestId: crypto.randomUUID(),
+        useCache,
+      });
+    },
+    [queryClient, userIdOrGuest],
+  );
+
+  const streamRequest = useMemo<AgentStreamRequest | null>(() => {
+    if (!showResults || submitted === null || streamAttempt === null) {
+      return null;
+    }
+
+    return {
+      key: streamAttempt.key,
+      requestId: streamAttempt.requestId,
+      payload: toTransportPayload(submitted),
+      actorId: userIdOrGuest,
+      useCache: streamAttempt.useCache,
+    };
+  }, [showResults, submitted, streamAttempt, userIdOrGuest]);
+
+  /**
+   * Agentic recommendation stream (workstream C consumer). Active only for
+   * a live attempt: cache-served and quiz-phase renders pass `null` and
+   * never open a stream. Progress folds into the existing presence chain
+   * (`presenceForSnapshot` → `muse-presence`), so streaming shows live
+   * stages while progress without a stream still never claims curation.
+   * Pre-stream failures (disabled flag, 404, network) flip
+   * `fallbackToJson` and the JSON query below runs byte-identical;
+   * post-open failures surface as the existing error state with retry.
+   */
+  const agentProgress = useAgentRecommendationStream(streamRequest);
+
   const resultsQuery = useQuery({
     queryKey: submittedKey ?? [DISH_RECOMMENDATIONS_KEY, "idle", lang, userIdOrGuest],
     queryFn: () => {
@@ -325,36 +409,40 @@ export function RecommendSection() {
 
       return recommendDishesFn({ data: toTransportPayload(submitted) });
     },
-    enabled: submittedKey !== null,
+    enabled: submittedKey !== null && (streamAttempt === null || agentProgress.fallbackToJson),
     staleTime: RECOMMENDATION_CACHE_STALE_MS,
     gcTime: RECOMMENDATION_CACHE_GC_MS,
     refetchOnWindowFocus: false,
     retry: 1,
   });
 
+  /**
+   * Stream commits land in the same QueryClient entry the JSON path uses:
+   * validated wire only (the controller gates terminal + requestId; the
+   * hook validates the envelope), mapped to the `RecommendResult` shape
+   * with `aiReason` stripped outside ai mode — the same projection
+   * `recommendDishesFn` applies. Back-navigation then restores from cache
+   * with zero new requests, exactly like the JSON path.
+   */
+  useEffect(() => {
+    if (agentProgress.wire !== null && submittedKey !== null) {
+      queryClient.setQueryData(submittedKey, mapStreamWireToResult(agentProgress.wire));
+    }
+  }, [agentProgress.wire, submittedKey, queryClient]);
+
   // Adapter preserving the outcome shape the render paths read: data is
   // visible only while results are shown, so disabling the query on
   // back-to-quiz can never flash a stale list.
+  const streamFailed = agentProgress.errorCode !== null && !agentProgress.fallbackToJson;
+
   const recommend = {
     data: showResults ? (resultsQuery.data ?? null) : null,
-    isPending: submittedKey !== null && (resultsQuery.isPending || resultsQuery.isFetching),
-    isError: submittedKey !== null && resultsQuery.isError,
+    isPending:
+      submittedKey !== null &&
+      (agentProgress.pending || resultsQuery.isPending || resultsQuery.isFetching),
+    isError: submittedKey !== null && (streamFailed || resultsQuery.isError),
     refetch: resultsQuery.refetch,
   };
-
-  /**
-   * Agentic progress stream (workstream C consumer). Active only while a
-   * fresh request is pending with no cached outcome: back-navigation cache
-   * hits and quiz-phase renders pass `null` and never open a stream. No
-   * opener is wired yet — the streaming transport endpoint is owned by the
-   * transport workstream — so this stays idle and the neutral skeleton
-   * renders, with zero extra requests. Passing the opener later is the
-   * only change needed to light up live presence.
-   */
-  const streamRequestId =
-    showResults && submitted !== null && recommend.isPending ? outcomeKey : null;
-
-  const agentProgress = useAgentProgress(streamRequestId);
 
   /** Guest-storage mirror of persisted exclusions; guest submits write through here. Signed-in submits write the account instead and leave this copy independent for explicit import. */
   const [guestExclusions, setGuestExclusions] = useState<ReadonlyArray<string>>(
@@ -477,10 +565,12 @@ export function RecommendSection() {
     setStepError(null);
 
     if (submitted !== null && showResults) {
-      setSubmitted({ ...submitted, locale: lang });
+      const relocalized = { ...submitted, locale: lang };
+      setSubmitted(relocalized);
+      beginStreamAttempt(relocalized, true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lang, submitted, showResults]);
+  }, [lang, submitted, showResults, beginStreamAttempt]);
 
   // Trusted approximate region: applies only while the visitor has made no
   // explicit region choice (no saved preference, no journey choice, no manual
@@ -663,6 +753,9 @@ export function RecommendSection() {
     setShowResults(true);
     // The results query fetches on the new key (or serves the cache when
     // this exact request already ran) — no manual mutate, no duplicate.
+    // The stream attempt runs first unless the cache already holds the
+    // entry; the JSON query stays disabled until a pre-stream fallback.
+    beginStreamAttempt(payload, true);
   };
 
   const currentPayload = (seed: number): RecommendPayload =>
@@ -818,7 +911,9 @@ export function RecommendSection() {
     setSubmitted(payload);
     setStepError(null);
     setShowResults(true);
-    // New seed keys a new cache entry: exactly one fetch per surprise tap.
+    beginStreamAttempt(payload, true);
+    // New key streams (or serves the cache); the JSON query stays disabled
+    // until a pre-stream fallback: exactly one fetch per surprise tap.
   };
 
   /** Wipe saved preferences and reset the whole form; storage first. */
@@ -830,6 +925,7 @@ export function RecommendSection() {
     setGuestExclusions([]);
     clearJourneySnapshot();
 
+    setStreamAttempt(null);
     setDraft(EMPTY_DRAFT);
     setMeal("anything");
     setMood("any");
@@ -868,9 +964,21 @@ export function RecommendSection() {
     }
   };
 
-  /** Explicit refresh / Try-again: exactly one new request, on demand only. */
+  /** Explicit refresh / Try-again: exactly one new request, on demand only.
+   * Stream-mode failures retry through the stream with a fresh request id
+   * and no cache read; fallback mode retries the JSON query as before. */
   const retry = (): void => {
     if (submitted === null) {
+      return;
+    }
+
+    if (streamAttempt !== null && !agentProgress.fallbackToJson) {
+      setStreamAttempt({
+        key: streamAttempt.key,
+        requestId: crypto.randomUUID(),
+        useCache: false,
+      });
+
       return;
     }
 
@@ -890,6 +998,7 @@ export function RecommendSection() {
   const startOver = (): void => {
     clearJourneySnapshot();
 
+    setStreamAttempt(null);
     setDraft(EMPTY_DRAFT);
     setMeal("anything");
     setMood("any");
