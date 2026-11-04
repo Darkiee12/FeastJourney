@@ -3,7 +3,7 @@ import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from "react";
 import MapLibreMap, { Marker, NavigationControl } from "react-map-gl/maplibre";
 import type { MapRef } from "react-map-gl/maplibre";
-import { z } from "zod";
+import type { z } from "zod";
 
 import {
   AdminDialog,
@@ -192,7 +192,7 @@ function CoordinatePicker({
     (longitude: number, latitude: number) => {
       const map = mapRef.current?.getMap();
 
-      if (map === undefined || map === null) return;
+      if (map === undefined) return;
 
       const zoom = Math.max(map.getZoom(), 14);
 
@@ -215,13 +215,14 @@ function CoordinatePicker({
   // force a resize once tiles start loading and once more right after so
   // the canvas never stays a blank white rectangle.
   useEffect(() => {
-    if (!ready || failed) return;
+    if (!ready || failed) return undefined;
 
     const map = mapRef.current?.getMap();
 
-    if (map === undefined || map === null) return;
+    if (map === undefined) return undefined;
 
     map.resize();
+
     const timer = setTimeout(() => {
       map.resize();
     }, 150);
@@ -229,7 +230,7 @@ function CoordinatePicker({
     return () => {
       clearTimeout(timer);
     };
-  }, [ready, retryKey, failed]);
+  }, [ready, failed]);
 
   const useMyLocation = () => {
     if (disabled) return;
@@ -297,22 +298,21 @@ function CoordinatePicker({
           field, or pick the pin on the map.
         </p>
         {areaWarning !== null && (
-          <p role="status" className="text-sm font-semibold text-amber-800">
-            {areaWarning}
-          </p>
+          <output className="block text-sm font-semibold text-amber-800">{areaWarning}</output>
         )}
       </fieldset>
 
       <fieldset className="flex flex-col gap-2">
         <legend className="text-sm font-semibold">Map location</legend>
-        {styleError !== null || styleUrl === null ? (
+        {(styleError !== null || styleUrl === null) && (
           <div role="alert" className="rounded-xl border border-border-soft bg-white px-3 py-2">
             <p className="text-sm font-semibold text-red-800">{styleError ?? "Map unavailable."}</p>
             <p className="mt-1 text-sm text-muted">
               Type the coordinates above — valid manual coordinates can still be saved.
             </p>
           </div>
-        ) : failed ? (
+        )}
+        {styleError === null && styleUrl !== null && failed && (
           <div
             role="alert"
             className="flex flex-col gap-2 rounded-xl border border-border-soft bg-white px-3 py-2"
@@ -333,7 +333,8 @@ function CoordinatePicker({
               </AdminGhostButton>
             </div>
           </div>
-        ) : (
+        )}
+        {styleError === null && styleUrl !== null && !failed && (
           <div
             className="relative h-64 w-full overflow-hidden rounded-xl border border-border-soft"
             aria-label="Branch location picker"
@@ -354,7 +355,7 @@ function CoordinatePicker({
               onLoad={() => {
                 const map = mapRef.current?.getMap();
 
-                if (map !== undefined && map !== null) {
+                if (map !== undefined) {
                   applyWarmBasemap(map);
                   map.resize();
                 }
@@ -377,12 +378,9 @@ function CoordinatePicker({
               />
             </MapLibreMap>
             {!ready && (
-              <p
-                role="status"
-                className="absolute inset-0 flex items-center justify-center bg-white/70 text-sm text-muted"
-              >
+              <output className="absolute inset-0 flex items-center justify-center bg-white/70 text-sm text-muted">
                 Loading map…
-              </p>
+              </output>
             )}
           </div>
         )}
@@ -468,20 +466,25 @@ export function RestaurantEditor({
   const [address, setAddress] = useState(venue?.address ?? "");
   const [area, setArea] = useState(venue?.area ?? "");
   const [countryCode, setCountryCode] = useState(venue?.countryCode ?? "VN");
+
   const [committed, setCommitted] = useState<CommittedCoordinates>(() =>
     persistedValid !== null && persistedValid.success
       ? { longitude: persistedValid.data.longitude, latitude: persistedValid.data.latitude }
       : { longitude: DEFAULT_MAP_CENTER.longitude, latitude: DEFAULT_MAP_CENTER.latitude },
   );
+
   const [latitudeText, setLatitudeText] = useState(() =>
     venue === null ? String(DEFAULT_MAP_CENTER.latitude) : String(venue.latitude),
   );
+
   const [longitudeText, setLongitudeText] = useState(() =>
     venue === null ? String(DEFAULT_MAP_CENTER.longitude) : String(venue.longitude),
   );
+
   const [frame, setFrame] = useState<CameraFrame | null>(null);
   const [status, setStatus] = useState<EditorVenue["status"]>(venue?.status ?? "draft");
   const [cuisineIds, setCuisineIds] = useState<ReadonlyArray<string>>(venue?.cuisineIds ?? []);
+
   const [formError, setFormError] = useState(() =>
     venue !== null && !(persistedValid !== null && persistedValid.success)
       ? "The saved coordinates for this branch look invalid. Enter a valid latitude and longitude, then save."
@@ -500,23 +503,27 @@ export function RestaurantEditor({
 
   const parsedLatitude = parseCoordinateText(latitudeText);
   const parsedLongitude = parseCoordinateText(longitudeText);
+
   const coordsValid = coordinatePairSchema.safeParse({
     latitude: parsedLatitude,
     longitude: parsedLongitude,
   }).success;
 
-  const latitudeError =
-    latitudeText.trim() === ""
-      ? "Latitude is required."
-      : latitudeSchema.safeParse(parsedLatitude).success
-        ? null
-        : "Enter a latitude between -90 and 90.";
-  const longitudeError =
-    longitudeText.trim() === ""
-      ? "Longitude is required."
-      : longitudeSchema.safeParse(parsedLongitude).success
-        ? null
-        : "Enter a longitude between -180 and 180.";
+  let latitudeError: string | null = null;
+
+  if (latitudeText.trim() === "") {
+    latitudeError = "Latitude is required.";
+  } else if (!latitudeSchema.safeParse(parsedLatitude).success) {
+    latitudeError = "Enter a latitude between -90 and 90.";
+  }
+
+  let longitudeError: string | null = null;
+
+  if (longitudeText.trim() === "") {
+    longitudeError = "Longitude is required.";
+  } else if (!longitudeSchema.safeParse(parsedLongitude).success) {
+    longitudeError = "Enter a longitude between -180 and 180.";
+  }
 
   const areaWarning = areaWarningFor(area, committed);
 

@@ -100,10 +100,7 @@ export const resolveScannerOrFail = Effect.fn("menu.scannerConfig")(function* ()
  * Upload caps for attachMenuPhoto. Derived from the operator's MENU_SCAN_*
  * configuration when the scanner resolves; historical defaults otherwise.
  */
-export const resolveUploadCaps = (): {
-  readonly maxImages: number;
-  readonly maxImageBytes: number;
-} => {
+export const resolveUploadCaps = () => {
   try {
     const scanner = menuScanConfig();
 

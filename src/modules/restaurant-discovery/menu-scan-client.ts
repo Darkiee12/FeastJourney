@@ -174,6 +174,7 @@ const sleepAbortable = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
     if (signal?.aborted === true) {
       reject(signal.reason);
+
       return;
     }
 
