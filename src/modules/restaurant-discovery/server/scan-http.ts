@@ -84,6 +84,22 @@ const resolveAttachBodyCap = (): number => {
 };
 
 /**
+ * Per-action request-transport budgets (ms). These bound hung transports
+ * only — guest-accessible cancellation protection, never an operator-value
+ * ceiling. JSON actions (claim, reads, writes, extraction accept) are quick
+ * local work, so the existing 60 s stands confirmed; multipart photo
+ * uploads carry megabytes over slow links plus two storage roundtrips
+ * (each internally capped at STORAGE_OP_TIMEOUT_MS), so they get a
+ * generous bound — previously a slow upload could die to the shared 60 s
+ * mid-transfer. Extraction itself runs detached under the operator's
+ * MENU_SCAN_TIMEOUT_MS, so no value here can defeat it. Documented
+ * constants, not new env: no deployment tunes per-action HTTP budgets, so
+ * an operator knob would be surface without a use case.
+ */
+const SCAN_HTTP_JSON_TIMEOUT_MS = 60000;
+const SCAN_HTTP_UPLOAD_TIMEOUT_MS = 120000;
+
+/**
  * Retry-After is advisory: it invites the client to retry, so it is sent
  * only when the client error contract says the failure is retryable. A
  * non-retryable failure that happens to carry provider timing data must not
@@ -324,13 +340,20 @@ export async function handleMenuScanRequest(request: Request): Promise<Response>
     }
   }).pipe(Effect.annotateLogs({ requestId, operation: "menu-scans/http" }));
 
-  // Request-transport budget only: every action (claim, reads, writes,
-  // extraction accept) is quick local work. Extraction itself runs detached
-  // under the operator's MENU_SCAN_TIMEOUT_MS, so this bound can never
-  // defeat it — it only cancels hung transports (guest-accessible
-  // cancellation protection, not an operator-value ceiling).
+  // Per-action request-transport budget only (see SCAN_HTTP_*_TIMEOUT_MS):
+  // multipart photo uploads are slow by nature, every other action is quick
+  // local work. Extraction itself runs detached under the operator's
+  // MENU_SCAN_TIMEOUT_MS, so this bound can never defeat it.
+  const isUpload =
+    request.method === "POST" &&
+    (request.headers.get("content-type") ?? "").startsWith("multipart/form-data");
+
   const exit = await appRuntime.runPromiseExit(
-    withRequestTimeout(operation, "menu-scans/http", 60000),
+    withRequestTimeout(
+      operation,
+      "menu-scans/http",
+      isUpload ? SCAN_HTTP_UPLOAD_TIMEOUT_MS : SCAN_HTTP_JSON_TIMEOUT_MS,
+    ),
     { signal: request.signal },
   );
 
