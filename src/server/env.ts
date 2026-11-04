@@ -164,9 +164,7 @@ const parseOperatorPositiveInt = (
   }
 
   if (!Number.isSafeInteger(value) || value < 1) {
-    throw new Error(
-      `${field} must be a positive safe integer or unset (unset uses ${fallback}).`,
-    );
+    throw new Error(`${field} must be a positive safe integer or unset (unset uses ${fallback}).`);
   }
 
   return value;
@@ -194,6 +192,7 @@ export const resolveRankingConfig = (env: ServerEnv): RankingConfig => {
     "MODEL_CANDIDATE_LIMIT",
     60,
   );
+
   const outputLimit = parseOperatorPositiveInt(env.MODEL_OUTPUT_LIMIT, "MODEL_OUTPUT_LIMIT", 10);
 
   if (env.RECOMMENDATION_PROVIDER !== "muse") {

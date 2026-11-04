@@ -1,7 +1,9 @@
 # Recommendations agent transport (streaming progress)
 
-Workstream D. Status: transport + client controller + eval implemented;
-the tool-using agent pipeline (lane B) plugs into `StreamPipeline`.
+**Status: Partially implemented; not merge-ready.** The stream transport,
+client controller, and offline fixture eval exist. Production agent/provider
+wiring and quiz stream consumption remain incomplete. CI validation is pending;
+the fixture eval is not evidence of live agent recommendation quality.
 
 ## Decision
 
@@ -17,7 +19,7 @@ Server: `src/modules/food-discovery/server/agent/progress-transport.ts`
 (`handleRecommendStream`), route
 `src/routes/api/v1/recommendations.stream.ts`, codec
 `src/modules/food-discovery/server/agent/stream-codec.ts` (isomorphic —
-no server imports, shared by route and browser).
+no server runtime imports; domain imports are type-only).
 Client: `src/components/home/recommend/agent-progress-controller.ts`
 (framework-agnostic; lane C wires it into the quiz UI).
 
@@ -31,6 +33,7 @@ results (flag-off path). Rollback = unset the flag.
 ```
 POST /api/v1/recommendations/stream
 content-type: application/json
+x-request-id: <fresh request correlation ID>
 body: <recommendationQuerySchema>   (same payload as recommendDishesFn)
 ```
 
@@ -86,7 +89,7 @@ The whole pipeline also races `RECOMMEND_TIMEOUT_MS` (default 120 s).
 - Only a terminal-gated result commits: progress alone, terminal without
   a result, or a truncated stream never commit data (retryable errors).
 - Stale guard: only the latest started attempt commits (`attempt` serial);
-  older attempts resolve without committing.
+  older attempts cannot update progress, result, or error state.
 - Concurrent duplicate submissions share one in-flight fetch (no competing
   results); different keys run independently.
 - Back-nav cache: terminal results cached by canonical key with 5 min TTL
@@ -98,9 +101,10 @@ The whole pipeline also races `RECOMMEND_TIMEOUT_MS` (default 120 s).
 
 | bound | value | source |
 | --- | --- | --- |
-| agent rounds / tool calls / pool / final | 3 / 8 / 60 / 10 | `AGENT_BOUNDS` (protocol) |
-| provider call timeout | 20 s | `AGENT_BOUNDS.providerTimeoutMs` |
-| orchestration deadline | 90 s | `AGENT_BOUNDS.orchestrationDeadlineMs` |
+| agent rounds / tool calls / pool / final | explicit operator values | `RECOMMEND_AGENT_MAX_ROUNDS`, `RECOMMEND_AGENT_MAX_TOOL_CALLS`, `RECOMMEND_AGENT_CANDIDATE_POOL_CAP`, `RECOMMEND_AGENT_FINAL_LIMIT` |
+| details per call | explicit operator value | `RECOMMEND_AGENT_DETAILS_PER_CALL` |
+| provider call timeout | explicit operator value | `MODEL_AGENT_TIMEOUT_MS` |
+| orchestration deadline | explicit operator value | `RECOMMEND_AGENT_DEADLINE_MS` |
 | stream pipeline timeout | `RECOMMEND_TIMEOUT_MS` default 120 s | `appConfig` |
 | search rate budget | 20 / 60 s default | `RATE_LIMIT_SEARCH*` |
 | heartbeat | 15 s comment | transport |
@@ -117,6 +121,13 @@ per-replica, not global (same as the existing path).
 # Agentic streaming progress (new endpoint live; old endpoint unchanged)
 RECOMMEND_AGENT_ENABLED=1
 RECOMMEND_TIMEOUT_MS=120000
+RECOMMEND_AGENT_MAX_ROUNDS=3
+RECOMMEND_AGENT_MAX_TOOL_CALLS=8
+RECOMMEND_AGENT_DETAILS_PER_CALL=10
+RECOMMEND_AGENT_CANDIDATE_POOL_CAP=60
+RECOMMEND_AGENT_FINAL_LIMIT=10
+MODEL_AGENT_TIMEOUT_MS=20000
+RECOMMEND_AGENT_DEADLINE_MS=90000
 
 # Provider for lane B member ranking (existing contract, unchanged)
 RECOMMENDATION_PROVIDER=muse
@@ -125,9 +136,9 @@ MODEL_MODEL_ID=muse-spark-1.3-contributor
 MODEL_BASE_URL=https://api.meta.ai/v1
 ```
 
-Note: `.env.example` and `src/server/env.ts` are coordinator-owned; the
-flag above is read directly from `process.env` by the transport until the
-coordinator adopts it into the validated env schema.
+These are example operator choices, not built-in agent defaults. The transport
+currently recognizes `1`, `true`, and `yes`; the provider recognizes only `true`.
+Flag parsing must be unified before production wiring is considered complete.
 
 ## Lane B handoff
 
@@ -146,8 +157,11 @@ reasoning, coordinates, or raw exclusions.
 
 ## Open risks
 
-- `protocol.ts` currently fails Bun's runtime parse (`readonly` in the
-  `AGENT_BOUNDS` literal); the transport mirrors the flag name locally
-  until the coordinator fixes the contract (reported, not edited here).
+- `protocol.ts` eagerly resolves agent bounds on a server value import,
+  including when agent mode is disabled. Separate pure protocol types from
+  enabled-only configuration before production wiring.
+- The default stream pipeline still invokes the legacy recommendation service;
+  the quiz still uses JSON RPC. Branch consolidation alone does not activate
+  tool-using recommendations or real quiz progress.
 - No member-path stream test (needs a live session); covered by existing
   actor tests + the guest stream path.

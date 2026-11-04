@@ -1490,7 +1490,8 @@ export const RecommendationServiceLive = Layer.effect(
         try {
           ranking = resolveRankingConfig(serverEnv());
         } catch (error) {
-          const reason = error instanceof Error ? error.message : "MODEL_* configuration is invalid";
+          const reason =
+            error instanceof Error ? error.message : "MODEL_* configuration is invalid";
 
           yield* Effect.logError("Recommendation ranking misconfigured").pipe(
             Effect.annotateLogs({ backend: "muse", reason }),

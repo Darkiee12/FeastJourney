@@ -19,11 +19,7 @@ export const MAX_IMAGE_PIXELS = 20_000_000;
 const MAX_DIMENSION = 12000;
 
 /** Decoding, orientation and re-encoding strip metadata, EXIF and trailing payloads. */
-export const validateMenuImage = (
-  bytes: Uint8Array,
-  declaredType: string,
-  maxBytes: number,
-) =>
+export const validateMenuImage = (bytes: Uint8Array, declaredType: string, maxBytes: number) =>
   Effect.tryPromise({
     try: async () => {
       if (bytes.length === 0 || bytes.length > maxBytes)
@@ -98,10 +94,7 @@ export class PrivateMenuStorage extends Context.Service<
   PrivateMenuStorage,
   {
     readonly put: (key: string, bytes: Uint8Array) => Effect.Effect<void, StorageUnavailable>;
-    readonly read: (
-      key: string,
-      maxBytes: number,
-    ) => Effect.Effect<Uint8Array, StorageUnavailable>;
+    readonly read: (key: string, maxBytes: number) => Effect.Effect<Uint8Array, StorageUnavailable>;
     readonly remove: (key: string) => Effect.Effect<void, StorageUnavailable>;
   }
 >()("feastjourney/integrations/PrivateMenuStorage") {}

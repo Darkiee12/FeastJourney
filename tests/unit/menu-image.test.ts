@@ -17,6 +17,7 @@ describe("private menu photograph validation", () => {
     const verified = await Effect.runPromise(
       validateMenuImage(original, "image/png", MAX_IMAGE_BYTES),
     );
+
     const metadata = await sharp(verified.bytes).metadata();
     expect(verified).toMatchObject({ mediaType: "image/jpeg", width: 48, height: 64 });
     expect(verified.checksum).toMatch(/^[0-9a-f]{64}$/);
@@ -33,6 +34,7 @@ describe("private menu photograph validation", () => {
     const failure = await Effect.runPromise(
       Effect.flip(validateMenuImage(png, "image/jpeg", MAX_IMAGE_BYTES)),
     );
+
     expect(failure._tag).toBe("InvalidImage");
   });
 
@@ -41,11 +43,10 @@ describe("private menu photograph validation", () => {
       new Uint8Array(),
       new TextEncoder().encode("<svg><script>bad()</script></svg>"),
     ];
+
     const failures = await Promise.all(
       inputs.map((bytes) =>
-        Effect.runPromise(
-          Effect.flip(validateMenuImage(bytes, "image/png", MAX_IMAGE_BYTES)),
-        ),
+        Effect.runPromise(Effect.flip(validateMenuImage(bytes, "image/png", MAX_IMAGE_BYTES))),
       ),
     );
 
@@ -56,6 +57,7 @@ describe("private menu photograph validation", () => {
 
   test("rejects byte sizes above the passed bound before attempting to decode", async () => {
     const oversized = new Uint8Array(MAX_IMAGE_BYTES + 1);
+
     const failure = await Effect.runPromise(
       Effect.flip(validateMenuImage(oversized, "image/jpeg", MAX_IMAGE_BYTES)),
     );
@@ -73,6 +75,7 @@ describe("private menu photograph validation", () => {
     const failure = await Effect.runPromise(
       Effect.flip(validateMenuImage(png, "image/png", MAX_IMAGE_BYTES)),
     );
+
     expect(failure._tag).toBe("InvalidImage");
   });
 });

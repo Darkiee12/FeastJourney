@@ -36,7 +36,14 @@ describe("agentic recommendation eval", () => {
       );
     }
 
-    expect((summary.agentic.meanUniqueExplored as number) >= (summary.singleShot.meanUniqueExplored as number)).toBe(true);
+    const agentMean = summary.agentic.meanUniqueExplored;
+    const singleMean = summary.singleShot.meanUniqueExplored;
+
+    if (agentMean === null || singleMean === null) {
+      throw new Error("The non-empty eval fixture must produce exploration means.");
+    }
+
+    expect(agentMean).toBeGreaterThanOrEqual(singleMean);
   });
 
   test("agentic respects round/call caps and degrades on provider failure", () => {
@@ -54,6 +61,7 @@ describe("agentic recommendation eval", () => {
     // Degraded runs still select eligible, valid dishes.
     const degraded = summary.cases.filter((metrics) => metrics.agentic.fallback);
     expect(degraded.length).toBe(2);
+
     for (const metrics of degraded) {
       expect(metrics.agentic.eligibleCorrect).toBe(true);
       expect(metrics.agentic.valid).toBe(true);

@@ -83,30 +83,222 @@ export interface AggregateMetrics {
 
 /** Hand-maintained catalog: 24 dishes across 4 regions, mixed metadata depth. */
 export const FIXTURE_DISHES: ReadonlyArray<FixtureDish> = [
-  { id: "d01", name: "Pho Bo", cuisines: ["vietnamese"], categories: ["lunch", "dinner"], region: "VN", ingredients: ["beef", "rice-noodle", "star-anise"], description: "Aromatic beef noodle soup." },
-  { id: "d02", name: "Banh Mi", cuisines: ["vietnamese"], categories: ["lunch", "snack"], region: "VN", ingredients: ["pork", "baguette", "pickled-carrot"], description: "Crisp baguette sandwich." },
-  { id: "d03", name: "Bun Cha", cuisines: ["vietnamese"], categories: ["lunch"], region: "VN", ingredients: ["pork", "rice-noodle"], description: null },
-  { id: "d04", name: "Com Tam", cuisines: ["vietnamese"], categories: ["lunch", "dinner"], region: "VN", ingredients: ["pork", "rice"], description: null },
-  { id: "d05", name: "Goi Cuon", cuisines: ["vietnamese"], categories: ["snack", "lunch"], region: "VN", ingredients: ["shrimp", "rice-paper"], description: "Fresh rice-paper rolls." },
-  { id: "d06", name: "Cao Lau", cuisines: ["vietnamese"], categories: ["dinner"], region: "VN", ingredients: ["pork", "noodle"], description: null },
-  { id: "d07", name: "Sushi Moriawase", cuisines: ["japanese"], categories: ["dinner"], region: "JP", ingredients: ["rice", "tuna", "salmon"], description: "Assorted nigiri and maki." },
-  { id: "d08", name: "Ramen", cuisines: ["japanese"], categories: ["lunch", "dinner"], region: "JP", ingredients: ["pork", "noodle", "egg"], description: "Rich broth noodle soup." },
-  { id: "d09", name: "Tempura", cuisines: ["japanese"], categories: ["dinner"], region: "JP", ingredients: ["shrimp", "wheat"], description: null },
-  { id: "d10", name: "Onigiri", cuisines: ["japanese"], categories: ["snack", "breakfast"], region: "JP", ingredients: ["rice", "seaweed"], description: null },
-  { id: "d11", name: "Udon", cuisines: ["japanese"], categories: ["lunch"], region: "JP", ingredients: ["wheat", "egg"], description: null },
-  { id: "d12", name: "Miso Soup", cuisines: ["japanese"], categories: ["breakfast", "lunch"], region: "JP", ingredients: ["tofu", "seaweed"], description: "Fermented soybean broth." },
-  { id: "d13", name: "Tacos al Pastor", cuisines: ["mexican"], categories: ["lunch", "dinner"], region: "MX", ingredients: ["pork", "corn", "pineapple"], description: "Marinated pork tacos." },
-  { id: "d14", name: "Pozole", cuisines: ["mexican"], categories: ["dinner"], region: "MX", ingredients: ["pork", "corn"], description: null },
-  { id: "d15", name: "Chilaquiles", cuisines: ["mexican"], categories: ["breakfast"], region: "MX", ingredients: ["corn", "egg", "cheese"], description: "Fried tortilla in salsa." },
-  { id: "d16", name: "Elote", cuisines: ["mexican"], categories: ["snack"], region: "MX", ingredients: ["corn", "cheese"], description: null },
-  { id: "d17", name: "Tamales", cuisines: ["mexican"], categories: ["breakfast", "lunch"], region: "MX", ingredients: ["corn", "pork"], description: null },
-  { id: "d18", name: "Guacamole", cuisines: ["mexican"], categories: ["snack"], region: "MX", ingredients: ["avocado"], description: "Mashed avocado with lime." },
-  { id: "d19", name: "Margherita Pizza", cuisines: ["italian"], categories: ["lunch", "dinner"], region: "IT", ingredients: ["wheat", "cheese", "tomato"], description: "Wood-fired classic." },
-  { id: "d20", name: "Risotto", cuisines: ["italian"], categories: ["dinner"], region: "IT", ingredients: ["rice", "cheese"], description: null },
-  { id: "d21", name: "Bruschetta", cuisines: ["italian"], categories: ["snack"], region: "IT", ingredients: ["wheat", "tomato"], description: null },
-  { id: "d22", name: "Lasagna", cuisines: ["italian"], categories: ["dinner"], region: "IT", ingredients: ["wheat", "beef", "cheese"], description: "Layered baked pasta." },
-  { id: "d23", name: "Tiramisu", cuisines: ["italian"], categories: ["dessert"], region: "IT", ingredients: ["egg", "cheese", "coffee"], description: null },
-  { id: "d24", name: "Minestrone", cuisines: ["italian"], categories: ["lunch"], region: "IT", ingredients: ["tomato", "bean"], description: "Hearty vegetable soup." },
+  {
+    id: "d01",
+    name: "Pho Bo",
+    cuisines: ["vietnamese"],
+    categories: ["lunch", "dinner"],
+    region: "VN",
+    ingredients: ["beef", "rice-noodle", "star-anise"],
+    description: "Aromatic beef noodle soup.",
+  },
+  {
+    id: "d02",
+    name: "Banh Mi",
+    cuisines: ["vietnamese"],
+    categories: ["lunch", "snack"],
+    region: "VN",
+    ingredients: ["pork", "baguette", "pickled-carrot"],
+    description: "Crisp baguette sandwich.",
+  },
+  {
+    id: "d03",
+    name: "Bun Cha",
+    cuisines: ["vietnamese"],
+    categories: ["lunch"],
+    region: "VN",
+    ingredients: ["pork", "rice-noodle"],
+    description: null,
+  },
+  {
+    id: "d04",
+    name: "Com Tam",
+    cuisines: ["vietnamese"],
+    categories: ["lunch", "dinner"],
+    region: "VN",
+    ingredients: ["pork", "rice"],
+    description: null,
+  },
+  {
+    id: "d05",
+    name: "Goi Cuon",
+    cuisines: ["vietnamese"],
+    categories: ["snack", "lunch"],
+    region: "VN",
+    ingredients: ["shrimp", "rice-paper"],
+    description: "Fresh rice-paper rolls.",
+  },
+  {
+    id: "d06",
+    name: "Cao Lau",
+    cuisines: ["vietnamese"],
+    categories: ["dinner"],
+    region: "VN",
+    ingredients: ["pork", "noodle"],
+    description: null,
+  },
+  {
+    id: "d07",
+    name: "Sushi Moriawase",
+    cuisines: ["japanese"],
+    categories: ["dinner"],
+    region: "JP",
+    ingredients: ["rice", "tuna", "salmon"],
+    description: "Assorted nigiri and maki.",
+  },
+  {
+    id: "d08",
+    name: "Ramen",
+    cuisines: ["japanese"],
+    categories: ["lunch", "dinner"],
+    region: "JP",
+    ingredients: ["pork", "noodle", "egg"],
+    description: "Rich broth noodle soup.",
+  },
+  {
+    id: "d09",
+    name: "Tempura",
+    cuisines: ["japanese"],
+    categories: ["dinner"],
+    region: "JP",
+    ingredients: ["shrimp", "wheat"],
+    description: null,
+  },
+  {
+    id: "d10",
+    name: "Onigiri",
+    cuisines: ["japanese"],
+    categories: ["snack", "breakfast"],
+    region: "JP",
+    ingredients: ["rice", "seaweed"],
+    description: null,
+  },
+  {
+    id: "d11",
+    name: "Udon",
+    cuisines: ["japanese"],
+    categories: ["lunch"],
+    region: "JP",
+    ingredients: ["wheat", "egg"],
+    description: null,
+  },
+  {
+    id: "d12",
+    name: "Miso Soup",
+    cuisines: ["japanese"],
+    categories: ["breakfast", "lunch"],
+    region: "JP",
+    ingredients: ["tofu", "seaweed"],
+    description: "Fermented soybean broth.",
+  },
+  {
+    id: "d13",
+    name: "Tacos al Pastor",
+    cuisines: ["mexican"],
+    categories: ["lunch", "dinner"],
+    region: "MX",
+    ingredients: ["pork", "corn", "pineapple"],
+    description: "Marinated pork tacos.",
+  },
+  {
+    id: "d14",
+    name: "Pozole",
+    cuisines: ["mexican"],
+    categories: ["dinner"],
+    region: "MX",
+    ingredients: ["pork", "corn"],
+    description: null,
+  },
+  {
+    id: "d15",
+    name: "Chilaquiles",
+    cuisines: ["mexican"],
+    categories: ["breakfast"],
+    region: "MX",
+    ingredients: ["corn", "egg", "cheese"],
+    description: "Fried tortilla in salsa.",
+  },
+  {
+    id: "d16",
+    name: "Elote",
+    cuisines: ["mexican"],
+    categories: ["snack"],
+    region: "MX",
+    ingredients: ["corn", "cheese"],
+    description: null,
+  },
+  {
+    id: "d17",
+    name: "Tamales",
+    cuisines: ["mexican"],
+    categories: ["breakfast", "lunch"],
+    region: "MX",
+    ingredients: ["corn", "pork"],
+    description: null,
+  },
+  {
+    id: "d18",
+    name: "Guacamole",
+    cuisines: ["mexican"],
+    categories: ["snack"],
+    region: "MX",
+    ingredients: ["avocado"],
+    description: "Mashed avocado with lime.",
+  },
+  {
+    id: "d19",
+    name: "Margherita Pizza",
+    cuisines: ["italian"],
+    categories: ["lunch", "dinner"],
+    region: "IT",
+    ingredients: ["wheat", "cheese", "tomato"],
+    description: "Wood-fired classic.",
+  },
+  {
+    id: "d20",
+    name: "Risotto",
+    cuisines: ["italian"],
+    categories: ["dinner"],
+    region: "IT",
+    ingredients: ["rice", "cheese"],
+    description: null,
+  },
+  {
+    id: "d21",
+    name: "Bruschetta",
+    cuisines: ["italian"],
+    categories: ["snack"],
+    region: "IT",
+    ingredients: ["wheat", "tomato"],
+    description: null,
+  },
+  {
+    id: "d22",
+    name: "Lasagna",
+    cuisines: ["italian"],
+    categories: ["dinner"],
+    region: "IT",
+    ingredients: ["wheat", "beef", "cheese"],
+    description: "Layered baked pasta.",
+  },
+  {
+    id: "d23",
+    name: "Tiramisu",
+    cuisines: ["italian"],
+    categories: ["dessert"],
+    region: "IT",
+    ingredients: ["egg", "cheese", "coffee"],
+    description: null,
+  },
+  {
+    id: "d24",
+    name: "Minestrone",
+    cuisines: ["italian"],
+    categories: ["lunch"],
+    region: "IT",
+    ingredients: ["tomato", "bean"],
+    description: "Hearty vegetable soup.",
+  },
 ];
 
 /** Deterministic query matrix: regions × moods × meals × exclusions. */
@@ -140,18 +332,27 @@ const eligiblePool = (query: EvalQuery): Array<FixtureDish> =>
  */
 const scoreDish = (dish: FixtureDish, query: EvalQuery, cuisine: string | null): number => {
   let score = 1;
+
   if (cuisine !== null && dish.cuisines.includes(cuisine)) {
     score += 2;
   }
+
   if (query.meal !== "anything" && dish.categories.includes(query.meal)) {
     score += 1;
   }
+
   return score;
 };
 
 /** IDs, in order, for stable selection (id ASC keeps the order deterministic). */
 const orderStable = (dishes: ReadonlyArray<FixtureDish>): Array<FixtureDish> =>
-  [...dishes].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  dishes.toSorted((a, b) => {
+    if (a.id === b.id) {
+      return 0;
+    }
+
+    return a.id < b.id ? -1 : 1;
+  });
 
 const FINAL_LIMIT = 10;
 const SINGLE_SHOT_WINDOW = 10;
@@ -169,13 +370,20 @@ interface RunOptions {
  * (first 10 of the stable order), then selects up to 10. Explores exactly
  * the window it sees — candidates beyond it can never surface.
  */
-const runSingleShot = (pool: Array<FixtureDish>, query: EvalQuery, options: RunOptions): StrategySelection => {
+const runSingleShot = (
+  pool: Array<FixtureDish>,
+  query: EvalQuery,
+  options: RunOptions,
+): StrategySelection => {
   const window = orderStable(pool).slice(0, SINGLE_SHOT_WINDOW);
-  const ranked = [...window].sort(
+
+  const ranked = window.toSorted(
     (a, b) => scoreDish(b, query, options.cuisine) - scoreDish(a, query, options.cuisine),
   );
+
   const ids = ranked.slice(0, FINAL_LIMIT).map((dish) => dish.id);
   const promptChars = JSON.stringify(window.map((dish) => dish.id)).length;
+
   return {
     ids,
     reasons: ids.map((id) => `Fits the ${query.meal} occasion (${id}).`),
@@ -200,7 +408,11 @@ const AGENT_POOL_CAP = 60;
  * When `providerDown`, the run degrades to the deterministic head order and
  * reports fallback (mirrors the service's degraded disposition).
  */
-const runAgentic = (pool: Array<FixtureDish>, query: EvalQuery, options: RunOptions): StrategySelection => {
+const runAgentic = (
+  pool: Array<FixtureDish>,
+  query: EvalQuery,
+  options: RunOptions,
+): StrategySelection => {
   const stable = orderStable(pool);
   const explored = new Map<string, FixtureDish>();
   let rounds = 0;
@@ -211,8 +423,10 @@ const runAgentic = (pool: Array<FixtureDish>, query: EvalQuery, options: RunOpti
     if (calls >= AGENT_MAX_CALLS || explored.size >= AGENT_POOL_CAP) {
       return;
     }
+
     calls += 1;
     promptChars += JSON.stringify(candidates.map((dish) => dish.id)).length;
+
     for (const dish of candidates.slice(0, AGENT_PAGE_LIMIT)) {
       explored.set(dish.id, dish);
     }
@@ -220,26 +434,32 @@ const runAgentic = (pool: Array<FixtureDish>, query: EvalQuery, options: RunOpti
 
   rounds += 1;
   takePage(stable);
+
   if (options.cuisine !== null && rounds < AGENT_MAX_ROUNDS) {
     rounds += 1;
     const cuisine: string = options.cuisine;
     takePage(stable.filter((dish) => dish.cuisines.includes(cuisine)));
   }
+
   if (explored.size < Math.min(stable.length, AGENT_POOL_CAP) && rounds < AGENT_MAX_ROUNDS) {
     rounds += 1;
     takePage(stable.filter((dish) => !explored.has(dish.id)));
   }
 
   const exploredList = [...explored.values()];
-  const ranked = exploredList.sort(
+
+  const ranked = exploredList.toSorted(
     (a, b) =>
       scoreDish(b, query, options.cuisine) - scoreDish(a, query, options.cuisine) ||
       (a.id < b.id ? -1 : 1),
   );
+
   const head = options.providerDown
     ? orderStable(exploredList).slice(0, FINAL_LIMIT)
     : ranked.slice(0, FINAL_LIMIT);
+
   const ids = head.map((dish) => dish.id);
+
   return {
     ids,
     reasons: ids.map((id) => `Fits the ${query.meal} occasion (${id}).`),
@@ -255,6 +475,7 @@ const cuisineOf = (query: EvalQuery): string | null => {
   const match = FIXTURE_DISHES.find(
     (dish) => query.region !== null && dish.region === query.region,
   );
+
   return match?.cuisines[0] ?? null;
 };
 
@@ -262,37 +483,48 @@ const assess = (
   selection: StrategySelection,
   pool: ReadonlyArray<FixtureDish>,
   query: EvalQuery,
-): { eligibleCorrect: boolean; relevance: number; variety: number; valid: boolean } => {
+) => {
   const poolIds = new Set(pool.map((dish) => dish.id));
   const byId = new Map(pool.map((dish) => [dish.id, dish] as const));
   const eligibleCorrect = selection.ids.every((id) => poolIds.has(id));
+
   const relevance =
     selection.ids.length === 0
       ? 1
-      : selection.ids.reduce(
-          (sum, id) => sum + scoreDish(byId.get(id) as FixtureDish, query, cuisineOf(query)),
-          0,
-        ) / selection.ids.length;
-  const variety = new Set(
-    selection.ids.flatMap((id) => (byId.get(id) as FixtureDish | undefined)?.cuisines ?? []),
-  ).size;
+      : selection.ids.reduce((sum, id) => {
+          const dish = byId.get(id);
+
+          // Invented IDs fail eligibility and earn no relevance credit.
+          if (dish === undefined) {
+            return sum;
+          }
+
+          return sum + scoreDish(dish, query, cuisineOf(query));
+        }, 0) / selection.ids.length;
+
+  const variety = new Set(selection.ids.flatMap((id) => byId.get(id)?.cuisines ?? [])).size;
+
   const valid =
     selection.ids.length <= FINAL_LIMIT &&
     new Set(selection.ids).size === selection.ids.length &&
     selection.reasons.length === selection.ids.length &&
     eligibleCorrect;
+
   return { eligibleCorrect, relevance, variety, valid };
 };
+
+const rate = (values: ReadonlyArray<boolean>): number | null =>
+  values.length === 0 ? null : values.filter(Boolean).length / values.length;
+
+const mean = (values: ReadonlyArray<number>): number | null =>
+  values.length === 0 ? null : values.reduce((a, b) => a + b, 0) / values.length;
 
 const aggregate = (
   cases: ReadonlyArray<CaseMetrics>,
   pick: (metrics: CaseMetrics) => CaseMetrics["singleShot"],
 ): AggregateMetrics => {
   const rows = cases.map(pick);
-  const rate = (values: ReadonlyArray<boolean>): number | null =>
-    values.length === 0 ? null : values.filter(Boolean).length / values.length;
-  const mean = (values: ReadonlyArray<number>): number | null =>
-    values.length === 0 ? null : values.reduce((a, b) => a + b, 0) / values.length;
+
   return {
     cases: rows.length,
     eligibleCorrectRate: rate(rows.map((row) => row.eligibleCorrect)),
@@ -321,6 +553,7 @@ export const runAgentEval = (providerDownQueries = 2): EvalSummary => {
     const down = index < providerDownQueries;
     const singleShot = runSingleShot(pool, query, { cuisine, providerDown: false });
     const agentic = runAgentic(pool, query, { cuisine, providerDown: down });
+
     return {
       query,
       eligibleCount: pool.length,
@@ -328,6 +561,7 @@ export const runAgentEval = (providerDownQueries = 2): EvalSummary => {
       agentic: { ...agentic, ...assess(agentic, pool, query) },
     };
   });
+
   return {
     cases,
     singleShot: aggregate(cases, (metrics) => metrics.singleShot),
@@ -335,10 +569,11 @@ export const runAgentEval = (providerDownQueries = 2): EvalSummary => {
   };
 };
 
+const row = (label: string, metrics: AggregateMetrics): string =>
+  `| ${label} | ${metrics.eligibleCorrectRate} | ${metrics.meanRelevance?.toFixed(2)} | ${metrics.meanVariety?.toFixed(2)} | ${metrics.meanUniqueExplored?.toFixed(1)} | ${metrics.validityRate} | ${metrics.totalRounds} | ${metrics.totalProviderCalls} | ${metrics.totalEstimatedTokens} | ${metrics.fallbackRate} |`;
+
 /** Markdown evidence table for the final report (computed, never hand-written). */
 export const evalTable = (summary: EvalSummary): string => {
-  const row = (label: string, metrics: AggregateMetrics): string =>
-    `| ${label} | ${metrics.eligibleCorrectRate} | ${metrics.meanRelevance?.toFixed(2)} | ${metrics.meanVariety?.toFixed(2)} | ${metrics.meanUniqueExplored?.toFixed(1)} | ${metrics.validityRate} | ${metrics.totalRounds} | ${metrics.totalProviderCalls} | ${metrics.totalEstimatedTokens} | ${metrics.fallbackRate} |`;
   return [
     "| strategy | eligible-correct | relevance | variety | unique-explored | validity | rounds | calls | est-tokens | fallback |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",

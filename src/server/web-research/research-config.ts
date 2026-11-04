@@ -53,9 +53,7 @@ const parseOperatorPositiveInt = (
   const parsed = Number.parseInt(raw, 10);
 
   if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new Error(
-      `${field} must be a positive safe integer or unset (unset uses ${fallback}).`,
-    );
+    throw new Error(`${field} must be a positive safe integer or unset (unset uses ${fallback}).`);
   }
 
   return parsed;

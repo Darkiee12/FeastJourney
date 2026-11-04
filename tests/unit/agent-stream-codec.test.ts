@@ -12,6 +12,7 @@ import {
   progressEventSchema,
   streamResponseHeaders,
 } from "@/modules/food-discovery/server/agent/stream-codec";
+import { RankingProvenance } from "@/modules/food-discovery/server/operations/recommendation-service";
 
 const event = (overrides: Partial<ProgressEvent> = {}): ProgressEvent => ({
   requestId: "req-1",
@@ -51,6 +52,7 @@ describe("SSE framing", () => {
     expect(frames.length).toBe(1);
     const first = frames[0];
     expect(first?.kind).toBe("progress");
+
     if (first?.kind === "progress") {
       expect(first.event.seq).toBe(2);
       expect(first.event.stage).toBe("finalizing");
@@ -59,7 +61,10 @@ describe("SSE framing", () => {
 
   test("split chunks reassemble; heartbeats and unknown events are skipped", () => {
     const parser = new SseParser();
-    const wire = encodeProgressEvent(event({ seq: 0 })) + HEARTBEAT_COMMENT + "event: future\ndata: {}\n\n";
+
+    const wire =
+      encodeProgressEvent(event({ seq: 0 })) + HEARTBEAT_COMMENT + "event: future\ndata: {}\n\n";
+
     const part = Math.floor(wire.length / 2);
     expect(parser.push(wire.slice(0, part)).length).toBe(0);
     const frames = parser.push(wire.slice(part));
@@ -78,13 +83,21 @@ describe("SSE framing", () => {
 
   test("result and error events decode", () => {
     const parser = new SseParser();
+
     const frames = parser.push(
-      encodeResultEvent("req-9", { mode: "ai", dishes: [] }) +
-        encodeErrorEvent("req-9", "rate_limited", 7),
+      encodeResultEvent("req-9", {
+        mode: "empty",
+        dishes: [],
+        warnings: [],
+        reasons: [],
+        ranking: RankingProvenance.DeterministicCatalog(),
+      }) + encodeErrorEvent("req-9", "rate_limited", 7),
     );
+
     expect(frames.length).toBe(2);
     expect(frames[0]?.kind).toBe("result");
     expect(frames[1]?.kind).toBe("error");
+
     if (frames[1]?.kind === "error") {
       expect(frames[1].error.retryAfterSeconds).toBe(7);
     }
@@ -120,10 +133,14 @@ describe("ProgressSink", () => {
 
   test("drops terminal/stage mismatches and enforces terminal-once", () => {
     const sink = new ProgressSink();
-    expect(sink.push(event({ seq: 0, stage: "completed", terminal: false }))).toBe("drop-malformed");
+    expect(sink.push(event({ seq: 0, stage: "completed", terminal: false }))).toBe(
+      "drop-malformed",
+    );
     expect(sink.push(event({ seq: 0, stage: "preparing", terminal: true }))).toBe("drop-malformed");
     expect(sink.push(event({ seq: 0, stage: "degraded", terminal: true }))).toBe("accept");
-    expect(sink.push(event({ seq: 1, stage: "failed", terminal: true }))).toBe("drop-after-terminal");
+    expect(sink.push(event({ seq: 1, stage: "failed", terminal: true }))).toBe(
+      "drop-after-terminal",
+    );
     expect(sink.seenTerminalCount()).toBe(1);
   });
 
@@ -157,11 +174,13 @@ describe("ProgressEmitter", () => {
 
     // The emitted stream replays cleanly through the sink: single terminal.
     const sink = new ProgressSink();
+
     for (const frame of frames) {
       if (frame.kind === "progress") {
         expect(sink.push(frame.event)).toBe("accept");
       }
     }
+
     expect(sink.seenTerminalCount()).toBe(1);
   });
 });

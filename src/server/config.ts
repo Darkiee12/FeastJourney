@@ -60,9 +60,7 @@ export const appConfig: Config.Config<AppConfig> = Config.unwrap({
   // Agentic loop budgets. Defaults mirror protocol AGENT_BOUNDS
   // (20s per provider call, 90s total orchestration) so the agent can
   // never outlive the 120s recommend operation budget above.
-  recommendAgentEnabled: Config.Boolean("RECOMMEND_AGENT_ENABLED").pipe(
-    Config.withDefault(false),
-  ),
+  recommendAgentEnabled: Config.Boolean("RECOMMEND_AGENT_ENABLED").pipe(Config.withDefault(false)),
   recommendAgentTimeoutMs: Config.Int("MODEL_AGENT_TIMEOUT_MS").pipe(Config.withDefault(20000)),
   recommendAgentDeadlineMs: Config.Int("RECOMMEND_AGENT_DEADLINE_MS").pipe(
     Config.withDefault(90000),

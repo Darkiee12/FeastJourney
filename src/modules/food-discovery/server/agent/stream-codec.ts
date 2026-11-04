@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { ProgressEvent, ProgressStage } from "@/modules/food-discovery/server/agent/protocol";
+import type { RecommendationWireOutcome } from "@/modules/food-discovery/server/operations/recommendation-service";
 
 /**
  * Isomorphic SSE framing for agentic recommendation progress (workstream D).
@@ -70,13 +71,13 @@ const sseBlock = (name: string, payload: string): string => `event: ${name}\ndat
 export const encodeProgressEvent = (event: ProgressEvent): string =>
   sseBlock(PROGRESS_EVENT_NAME, JSON.stringify(event));
 
-export const encodeResultEvent = (requestId: string, wire: unknown): string =>
+export const encodeResultEvent = (requestId: string, wire: RecommendationWireOutcome): string =>
   sseBlock(RESULT_EVENT_NAME, JSON.stringify({ requestId, wire }));
 
 export const encodeErrorEvent = (
   requestId: string,
   code: StreamErrorCode,
-  retryAfterSeconds?: number | undefined,
+  retryAfterSeconds?: number,
 ): string =>
   sseBlock(
     ERROR_EVENT_NAME,
@@ -93,7 +94,17 @@ export const HEARTBEAT_COMMENT = ": ping\n\n";
 export type ParsedServerEvent =
   | { readonly kind: "progress"; readonly event: ProgressEvent }
   | { readonly kind: "result"; readonly requestId: string; readonly wire: unknown }
-  | { readonly kind: "error"; readonly requestId: string; readonly error: z.infer<typeof streamErrorSchema> };
+  | {
+      readonly kind: "error";
+      readonly requestId: string;
+      readonly error: z.infer<typeof streamErrorSchema>;
+    };
+
+const resultEventSchema = z.object({
+  requestId: z.string().min(1).max(64),
+  // The consumer validates its own result contract before committing data.
+  wire: z.unknown(),
+});
 
 /**
  * Incremental SSE parser. Feed arbitrary chunk splits; complete `\n\n`
@@ -112,12 +123,15 @@ export class SseParser {
 
     for (;;) {
       const boundary = this.buffer.indexOf("\n\n");
+
       if (boundary < 0) {
         return out;
       }
+
       const frame = this.buffer.slice(0, boundary);
       this.buffer = this.buffer.slice(boundary + 2);
       const parsed = parseFrame(frame);
+
       if (parsed === null) {
         this.droppedFrames += 1;
       } else {
@@ -135,6 +149,7 @@ const parseFrame = (frame: string): ParsedServerEvent | null => {
     if (line.startsWith(":")) {
       continue;
     }
+
     if (line.startsWith("event:")) {
       name = line.slice("event:".length).trim();
     } else if (line.startsWith("data:")) {
@@ -147,29 +162,32 @@ const parseFrame = (frame: string): ParsedServerEvent | null => {
   }
 
   let payload: unknown;
+
   try {
-    payload = JSON.parse(dataLines.join("\n")) as unknown;
+    payload = JSON.parse(dataLines.join("\n"));
   } catch {
     return null;
   }
 
   if (name === PROGRESS_EVENT_NAME) {
     const parsed = progressEventSchema.safeParse(payload);
+
     return parsed.success ? { kind: "progress", event: parsed.data } : null;
   }
 
   if (name === RESULT_EVENT_NAME) {
-    if (typeof payload !== "object" || payload === null) {
+    const parsed = resultEventSchema.safeParse(payload);
+
+    if (!parsed.success) {
       return null;
     }
-    const record = payload as { readonly requestId?: unknown; readonly wire?: unknown };
-    return typeof record.requestId === "string"
-      ? { kind: "result", requestId: record.requestId, wire: record.wire }
-      : null;
+
+    return { kind: "result", requestId: parsed.data.requestId, wire: parsed.data.wire };
   }
 
   if (name === ERROR_EVENT_NAME) {
     const parsed = streamErrorSchema.safeParse(payload);
+
     return parsed.success
       ? { kind: "error", requestId: parsed.data.requestId, error: parsed.data }
       : null;
@@ -203,17 +221,22 @@ export class ProgressSink {
     if (this.terminated) {
       return "drop-after-terminal";
     }
+
     if (event.terminal !== isTerminalStage(event.stage)) {
       return "drop-malformed";
     }
+
     if (event.seq <= this.lastSeq) {
       return "drop-stale";
     }
+
     this.lastSeq = event.seq;
+
     if (event.terminal) {
       this.terminated = true;
       this.terminalCount += 1;
     }
+
     return "accept";
   }
 }
@@ -239,6 +262,7 @@ export class ProgressEmitter {
     if (this.closed) {
       return null;
     }
+
     const event: ProgressEvent = {
       requestId: this.requestId,
       seq: this.seq,
@@ -246,7 +270,9 @@ export class ProgressEmitter {
       detail,
       terminal: false,
     };
+
     this.seq += 1;
+
     return encodeProgressEvent(event);
   }
 
@@ -257,6 +283,7 @@ export class ProgressEmitter {
     if (this.closed) {
       return null;
     }
+
     const event: ProgressEvent = {
       requestId: this.requestId,
       seq: this.seq,
@@ -264,8 +291,10 @@ export class ProgressEmitter {
       detail,
       terminal: true,
     };
+
     this.seq += 1;
     this.closed = true;
+
     return encodeProgressEvent(event);
   }
 }
@@ -282,5 +311,6 @@ export const streamResponseHeaders = (requestId: string): Headers => {
   headers.set("Connection", "keep-alive");
   headers.set("X-Accel-Buffering", "no");
   headers.set("X-Request-Id", requestId);
+
   return headers;
 };

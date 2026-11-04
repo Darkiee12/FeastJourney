@@ -1,4 +1,6 @@
-import { Data, Effect, Fiber } from "effect";
+import { clearInterval, setInterval } from "node:timers";
+
+import { Data, Effect, Exit, Fiber } from "effect";
 import type * as PersistenceRateLimiter from "effect/persistence/RateLimiter";
 
 import { recommendationQuerySchema } from "@/modules/food-discovery/food.schema";
@@ -16,6 +18,7 @@ import {
   RecommendationOutcome,
   type RecommendationError,
   RecommendationService,
+  RankingProvenance,
   toWireOutcome,
 } from "@/modules/food-discovery/server/operations/recommendation-service";
 import type { IngredientRepository } from "@/modules/food-discovery/server/repository/ingredient-repository";
@@ -73,24 +76,26 @@ class InvalidJsonBody extends Data.TaggedError("InvalidJsonBody") {}
 
 interface PreStreamRejection {
   readonly status: number;
-  readonly body: Record<string, unknown>;
+  readonly body: {
+    readonly error: string;
+    readonly message?: string;
+    readonly retryAfterSeconds?: number;
+  };
   readonly retryAfterSeconds?: number | undefined;
 }
 
 /**
- * Agentic-mode flag name. Mirrors `RECOMMEND_AGENT_FLAG` from the
- * coordinator-owned `protocol.ts` WITHOUT importing its value: that module
- * currently uses `readonly` modifiers inside its `AGENT_BOUNDS` object
- * literal, which Bun's runtime transpiler rejects at load time (tsc accepts
- * it). The value import is restored once the coordinator fixes the contract
- * file; until then this literal keeps the transport testable. Do NOT change
- * this string without coordinator approval.
+ * Keep the disabled-path guard independent of protocol.ts value imports:
+ * that module currently resolves all agent bounds eagerly at import time.
+ * The guard must be able to reject disabled requests without requiring
+ * configuration for a feature that will not run.
  */
 const RECOMMEND_AGENT_FLAG = "RECOMMEND_AGENT_ENABLED";
 
 /** Pure flag parse so tests never touch process.env through the handler. */
 export const isAgentStreamEnabled = (env: Record<string, string | undefined>): boolean => {
   const raw = env[RECOMMEND_AGENT_FLAG]?.trim().toLowerCase();
+
   return raw === "1" || raw === "true" || raw === "yes";
 };
 
@@ -106,12 +111,14 @@ export const mergeExcludedIngredients = (data: {
 }): Array<string> => {
   const seen = new Set<string>();
   const merged: Array<string> = [];
+
   for (const term of [...data.excludedIngredients, ...data.avoid, ...data.allergies]) {
     if (!seen.has(term)) {
       seen.add(term);
       merged.push(term);
     }
   }
+
   return merged;
 };
 
@@ -128,6 +135,7 @@ export const deterministicPipeline: StreamPipeline = (input, report) =>
     const service = yield* RecommendationService;
     const outcome = yield* service.recommend(input);
     report("finalizing", null);
+
     return outcome;
   });
 
@@ -136,9 +144,11 @@ const jsonError = (requestId: string, rejection: PreStreamRejection): Response =
     status: rejection.status,
     headers: { "content-type": "application/json; charset=utf-8", "X-Request-Id": requestId },
   });
+
   if (rejection.retryAfterSeconds !== undefined) {
     response.headers.set("Retry-After", String(rejection.retryAfterSeconds));
   }
+
   return response;
 };
 
@@ -162,23 +172,23 @@ const guardRequest = (
   RateLimitPolicy | PersistenceRateLimiter.RateLimiter
 > =>
   Effect.gen(function* () {
-    if (!isAgentStreamEnabled(process.env as Record<string, string | undefined>)) {
+    if (!isAgentStreamEnabled(process.env)) {
       return yield* Effect.fail<PreStreamRejection>({
         status: 404,
         body: { error: "agent_disabled" },
       });
     }
 
-    const raw = yield* Effect.tryPromise({
-      try: () => request.json() as Promise<unknown>,
+    const parsed = yield* Effect.tryPromise({
+      try: async () => recommendationQuerySchema.safeParse(await request.json()),
       catch: () => new InvalidJsonBody(),
     }).pipe(
-      Effect.mapError(
-        (): PreStreamRejection => ({ status: 400, body: { error: "invalid_input" } }),
-      ),
+      Effect.mapError((): PreStreamRejection => ({
+        status: 400,
+        body: { error: "invalid_input" },
+      })),
     );
 
-    const parsed = recommendationQuerySchema.safeParse(raw);
     if (!parsed.success) {
       return yield* Effect.fail<PreStreamRejection>({
         status: 400,
@@ -190,10 +200,12 @@ const guardRequest = (
     }
 
     const config = yield* appConfig.pipe(
-      Effect.mapError(
-        (): PreStreamRejection => ({ status: 500, body: { error: "temporarily_unavailable" } }),
-      ),
+      Effect.mapError((): PreStreamRejection => ({
+        status: 500,
+        body: { error: "temporarily_unavailable" },
+      })),
     );
+
     const policy = yield* RateLimitPolicy;
 
     const verdict: RateVerdict = yield* policy
@@ -229,19 +241,19 @@ const guardRequest = (
     const actor: Actor = yield* resolveSession(request.headers).pipe(
       Effect.map((trusted): Actor => Actor.Member({ userId: trusted.userId })),
       Effect.catchTag("SignInRequired", () => Effect.succeed<Actor>(Actor.Guest())),
-      Effect.catchTag(
-        "UserSuspended",
-        (): Effect.Effect<Actor, PreStreamRejection> =>
-          Effect.fail<PreStreamRejection>({ status: 403, body: { error: "forbidden" } }),
+      Effect.catchTag("UserSuspended", (): Effect.Effect<Actor, PreStreamRejection> =>
+        Effect.fail<PreStreamRejection>({ status: 403, body: { error: "forbidden" } }),
       ),
-      Effect.catchTag(
-        "DatabaseUnavailable",
-        (): Effect.Effect<Actor, PreStreamRejection> =>
-          Effect.fail<PreStreamRejection>({ status: 503, body: { error: "temporarily_unavailable" } }),
+      Effect.catchTag("DatabaseUnavailable", (): Effect.Effect<Actor, PreStreamRejection> =>
+        Effect.fail<PreStreamRejection>({
+          status: 503,
+          body: { error: "temporarily_unavailable" },
+        }),
       ),
     );
 
     const data = parsed.data;
+
     return {
       actor,
       input: {
@@ -287,6 +299,7 @@ const streamOutcome = (
       if (chunk === null || live === null) {
         return;
       }
+
       try {
         live.enqueue(chunk);
       } catch {
@@ -305,12 +318,14 @@ const streamOutcome = (
         clearInterval(timer);
         timer = undefined;
       }
+
       if (live !== null) {
         try {
           live.close();
         } catch {
           // Already closed by disconnect; nothing left to do.
         }
+
         live = null;
       }
     };
@@ -321,17 +336,15 @@ const streamOutcome = (
         timer = setInterval(() => {
           enqueue(HEARTBEAT_COMMENT);
         }, 15000);
-        const maybeUnref = timer as unknown as { unref?: () => void };
         // Heartbeats must never hold the process open (tests, idle workers).
-        if (typeof maybeUnref.unref === "function") {
-          maybeUnref.unref();
-        }
+        timer.unref();
       },
       cancel() {
         if (timer !== undefined) {
           clearInterval(timer);
           timer = undefined;
         }
+
         live = null;
       },
     });
@@ -340,6 +353,7 @@ const streamOutcome = (
       actor,
       Effect.gen(function* () {
         enqueue(emitter.stage("preparing", null));
+
         return yield* pipeline(input, (stage, detail) => {
           enqueue(emitter.stage(stage, detail));
         });
@@ -359,6 +373,7 @@ const streamOutcome = (
         },
         { once: true },
       );
+
       if (request.signal.aborted) {
         Effect.runFork(Fiber.interrupt(worker));
       }
@@ -367,29 +382,33 @@ const streamOutcome = (
       Fiber.await(worker).pipe(
         Effect.flatMap((exit) =>
           Effect.sync(() => {
-            if (exit._tag === "Success") {
-              const outcome = exit.value;
-              const terminal = RecommendationOutcome.$match(outcome, {
-                ReadyMuse: () => emitter.terminal("completed", "Recommendations ready"),
-                ReadyDeterministic: ({ ranking }) =>
-                  emitter.terminal(
-                    ranking._tag === "DegradedMuse" ? "degraded" : "completed",
-                    ranking._tag === "DegradedMuse"
-                      ? "AI ranking degraded; showing catalog order"
-                      : "Recommendations ready",
-                  ),
-                Uncertain: () => emitter.terminal("completed", "Recommendations ready"),
-                Empty: () => emitter.terminal("completed", "Recommendations ready"),
-              });
-              enqueue(terminal);
-              if (terminal !== null) {
-                enqueue(encodeResultEvent(requestId, toWireOutcome(outcome)));
-              }
-            } else {
+            Exit.match(exit, {
+              onSuccess: (outcome) => {
+                const terminal = RecommendationOutcome.$match(outcome, {
+                  ReadyMuse: () => emitter.terminal("completed", "Recommendations ready"),
+                  ReadyDeterministic: ({ ranking }) =>
+                    RankingProvenance.$match(ranking, {
+                      LiveMuse: () => emitter.terminal("completed", "Recommendations ready"),
+                      DeterministicCatalog: () =>
+                        emitter.terminal("completed", "Recommendations ready"),
+                      DegradedMuse: () =>
+                        emitter.terminal("degraded", "AI ranking degraded; showing catalog order"),
+                    }),
+                  Uncertain: () => emitter.terminal("completed", "Recommendations ready"),
+                  Empty: () => emitter.terminal("completed", "Recommendations ready"),
+                });
+
+                enqueue(terminal);
+
+                if (terminal !== null) {
+                  enqueue(encodeResultEvent(requestId, toWireOutcome(outcome)));
+                }
+              },
               // Timeout, interruption, or typed pipeline failure: one failed
               // terminal plus an error event, never a silent hang.
-              failTerminal("unavailable", "Recommendation stream failed");
-            }
+              onFailure: () => failTerminal("unavailable", "Recommendation stream failed"),
+            });
+
             closeStream();
           }),
         ),
