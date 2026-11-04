@@ -43,6 +43,13 @@ const envSchema = z.object({
   MODEL_CANDIDATE_LIMIT: z.coerce.number().int().max(100).optional(),
   MODEL_OUTPUT_LIMIT: z.coerce.number().int().optional(),
   MODEL_MAX_TOKENS: z.coerce.number().int().optional(),
+  // Agentic recommendation mode (workstream B, additive only). Explicit
+  // opt-in: only the literal "true" enables the tool-calling loop; unset
+  // or any other value keeps the existing single-shot rank() path
+  // byte-identical. Timeout knobs fall back to AGENT_BOUNDS defaults.
+  RECOMMEND_AGENT_ENABLED: z.string().optional(),
+  MODEL_AGENT_TIMEOUT_MS: z.coerce.number().int().optional(),
+  RECOMMEND_AGENT_DEADLINE_MS: z.coerce.number().int().optional(),
   // Scanner configuration is validated lazily when enabled; unrelated reads
   // never depend on Muse or private image storage configuration.
   MENU_SCANNER_ENABLED: z.string().optional(),
