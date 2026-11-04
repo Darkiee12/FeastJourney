@@ -101,6 +101,7 @@ export interface MetaResponsesClientConfig {
   readonly baseUrl: string;
   readonly modelId: string;
   readonly timeoutMs: number;
+  readonly maxOutputTokens: number;
   readonly maxResponseBytes: number;
 }
 
@@ -131,11 +132,41 @@ const resolveMetaResponsesTimeoutMs = (): number => {
   return parsed;
 };
 
+/**
+ * Operator-owned research output-token budget: a valid explicitly
+ * configured value flows through exactly as set; the default applies only
+ * when unset. No upper bound — upstream provider limits surface as
+ * provider failures. An explicitly set non-positive-integer fails loudly
+ * naming field + reason instead of silently falling back. Strict coercion
+ * (not parseInt): trailing junk such as "2000oops" is rejected, not
+ * truncated. Serialized as `max_output_tokens`: the research call uses the
+ * Responses endpoint, whose token-budget field is `max_output_tokens`
+ * (not Chat Completions `max_tokens`).
+ */
+const resolveMetaResponsesMaxOutputTokens = (): number => {
+  const raw = process.env["WEB_RESEARCH_MAX_OUTPUT_TOKENS"];
+
+  if (raw === undefined) {
+    return META_RESPONSES_MAX_OUTPUT_TOKENS;
+  }
+
+  const parsed = z.coerce.number().int().min(1).safeParse(raw);
+
+  if (!parsed.success || !Number.isSafeInteger(parsed.data)) {
+    throw new Error(
+      `WEB_RESEARCH_MAX_OUTPUT_TOKENS must be a positive safe integer of output tokens or unset (unset uses ${META_RESPONSES_MAX_OUTPUT_TOKENS}).`,
+    );
+  }
+
+  return parsed.data;
+};
+
 export const defaultMetaResponsesConfig = (): MetaResponsesClientConfig => ({
   apiKey: process.env["MODEL_API_KEY"] ?? "",
   baseUrl: normalizeMetaResponsesBaseUrl(process.env["MODEL_BASE_URL"] ?? DEFAULT_MODEL_BASE_URL),
   modelId: RESEARCH_MODEL_ID,
   timeoutMs: resolveMetaResponsesTimeoutMs(),
+  maxOutputTokens: resolveMetaResponsesMaxOutputTokens(),
   maxResponseBytes: META_RESPONSES_MAX_BYTES,
 });
 
@@ -353,7 +384,7 @@ const buildResponsesBody = (
     model: config.modelId,
     input: buildResponsesInput(input),
     tools: [{ type: "web_search" }],
-    max_output_tokens: META_RESPONSES_MAX_OUTPUT_TOKENS,
+    max_output_tokens: config.maxOutputTokens,
     store: false,
   });
 

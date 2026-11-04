@@ -113,6 +113,16 @@ export const MAX_LOCALIZATION_CALLS_PER_MONTH = 500;
 /** Monthly source-character ceiling across all venues (shared budget). */
 export const MAX_LOCALIZATION_CHARS_PER_MONTH = 2000000;
 
+/**
+ * Default ceiling on one localization call's completion tokens. The operator
+ * owns this value via MENU_LOCALIZATION_MAX_COMPLETION_TOKENS: any positive
+ * safe integer flows through exactly as configured and only the provider's
+ * own limit can reject it (surfaced as a provider failure, never silently
+ * reduced). Serialized as `max_tokens`: localization uses the Chat
+ * Completions endpoint, whose token-budget field is `max_tokens`.
+ */
+export const MENU_LOCALIZATION_DEFAULT_MAX_COMPLETION_TOKENS = 4000;
+
 /** Upper bound for one translated display name (1-2 mobile lines). */
 export const MAX_LOCALIZED_NAME_LENGTH = 120;
 
@@ -282,7 +292,37 @@ interface MuseLocalizationConfig {
   readonly modelId: string;
   readonly baseUrl: string;
   readonly timeoutMs: number;
+  readonly maxCompletionTokens: number;
 }
+
+/**
+ * Operator-owned token budget: a valid explicitly configured value flows
+ * through exactly as set and the default applies only when unset. There is
+ * intentionally no upper bound — upstream provider limits are the
+ * provider's responsibility and surface as provider failures, never as
+ * silent rewrites. An explicitly set value that is not a positive safe
+ * integer fails loudly naming field + reason. Strict coercion (not
+ * parseInt): trailing junk such as "4000oops" is rejected, not truncated.
+ */
+const parseOperatorTokenBudget = (
+  raw: string | undefined,
+  field: string,
+  fallback: number,
+): number => {
+  if (raw === undefined) {
+    return fallback;
+  }
+
+  const parsed = z.coerce.number().int().min(1).safeParse(raw);
+
+  if (!parsed.success || !Number.isSafeInteger(parsed.data)) {
+    throw new Error(
+      `${field} must be a positive safe integer of tokens or unset (unset uses ${fallback}).`,
+    );
+  }
+
+  return parsed.data;
+};
 
 const resolveMuseConfig = Effect.gen(function* () {
   const env = yield* Effect.try({
@@ -290,6 +330,20 @@ const resolveMuseConfig = Effect.gen(function* () {
     catch: () =>
       new LocalizationUnavailable({
         reason: "Menu localization is not configured; showing the original menu text.",
+      }),
+  });
+
+  const maxCompletionTokens = yield* Effect.try({
+    try: () =>
+      parseOperatorTokenBudget(
+        process.env["MENU_LOCALIZATION_MAX_COMPLETION_TOKENS"],
+        "MENU_LOCALIZATION_MAX_COMPLETION_TOKENS",
+        MENU_LOCALIZATION_DEFAULT_MAX_COMPLETION_TOKENS,
+      ),
+    catch: (cause) =>
+      new LocalizationUnavailable({
+        reason:
+          cause instanceof Error ? cause.message : "Menu localization token budget is invalid.",
       }),
   });
 
@@ -301,6 +355,7 @@ const resolveMuseConfig = Effect.gen(function* () {
       modelId: muse.modelId,
       baseUrl: muse.baseUrl,
       timeoutMs: muse.timeoutMs,
+      maxCompletionTokens,
     }),
     Deterministic: (): MuseLocalizationConfig | null => null,
     Misconfigured: (): MuseLocalizationConfig | null => null,
@@ -396,7 +451,7 @@ const localizeBatch = (
         { role: "user", content: buildBatchPrompt(units, target) },
       ],
       response_format: LOCALIZATION_RESPONSE_FORMAT,
-      max_tokens: 4000,
+      max_tokens: config.maxCompletionTokens,
       store: false,
       stream: false,
       n: 1,

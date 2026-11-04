@@ -902,13 +902,25 @@ const COPILOT_SYNTHESIS_DEFAULT_TIMEOUT_MS = 15000;
 
 const COPILOT_SYNTHESIS_MAX_RESPONSE_BYTES = 65536;
 
-const COPILOT_SYNTHESIS_MAX_TOKENS = 1200;
+/**
+ * Default ceiling on one synthesis call's completion tokens. The operator
+ * owns this value via COPILOT_SYNTHESIS_MAX_COMPLETION_TOKENS: any positive
+ * safe integer flows through exactly as configured and only the provider's
+ * own limit can reject it (surfaced as a provider failure, never silently
+ * reduced). Deliberately separate from MODEL_MAX_TOKENS (the ranking
+ * default): synthesis rewrites one short paragraph, not a ranked list, so
+ * the operations have genuinely different budgets. Serialized as
+ * `max_tokens`: synthesis uses the Chat Completions endpoint, whose
+ * token-budget field is `max_tokens`.
+ */
+const COPILOT_SYNTHESIS_DEFAULT_MAX_COMPLETION_TOKENS = 1200;
 
 interface CopilotSynthesisConfig {
   readonly apiKey: string;
   readonly baseUrl: string;
   readonly modelId: string;
   readonly timeoutMs: number;
+  readonly maxCompletionTokens: number;
 }
 
 const resolveCopilotSynthesisConfig = (
@@ -920,6 +932,22 @@ const resolveCopilotSynthesisConfig = (
     throw new Error(
       "MODEL_MODEL_ID is not a supported Muse model id (expected muse-spark-<major>.<minor>[-contributor] or muse-wonder-<major>.<minor>).",
     );
+  }
+
+  const rawTokens = env["COPILOT_SYNTHESIS_MAX_COMPLETION_TOKENS"];
+
+  let maxCompletionTokens = COPILOT_SYNTHESIS_DEFAULT_MAX_COMPLETION_TOKENS;
+
+  if (rawTokens !== undefined) {
+    const parsedTokens = z.coerce.number().int().min(1).safeParse(rawTokens);
+
+    if (!parsedTokens.success || !Number.isSafeInteger(parsedTokens.data)) {
+      throw new Error(
+        `COPILOT_SYNTHESIS_MAX_COMPLETION_TOKENS must be a positive safe integer of tokens or unset (unset uses ${COPILOT_SYNTHESIS_DEFAULT_MAX_COMPLETION_TOKENS}).`,
+      );
+    }
+
+    maxCompletionTokens = parsedTokens.data;
   }
 
   const raw = env["MODEL_TIMEOUT_MS"];
@@ -938,6 +966,7 @@ const resolveCopilotSynthesisConfig = (
       baseUrl: env["MODEL_BASE_URL"] ?? DEFAULT_MODEL_BASE_URL,
       modelId: modelId ?? DEFAULT_MODEL_ID,
       timeoutMs: parsed,
+      maxCompletionTokens,
     };
   }
 
@@ -946,6 +975,7 @@ const resolveCopilotSynthesisConfig = (
     baseUrl: env["MODEL_BASE_URL"] ?? DEFAULT_MODEL_BASE_URL,
     modelId: modelId ?? DEFAULT_MODEL_ID,
     timeoutMs: COPILOT_SYNTHESIS_DEFAULT_TIMEOUT_MS,
+    maxCompletionTokens,
   };
 };
 
@@ -1034,7 +1064,7 @@ const runSynthesisAttempt = (
               { role: "user", content: prompt },
             ],
             response_format: { type: "json_object" },
-            max_tokens: COPILOT_SYNTHESIS_MAX_TOKENS,
+            max_tokens: config.maxCompletionTokens,
             store: false,
           }),
           signal: AbortSignal.any([signal, AbortSignal.timeout(config.timeoutMs)]),

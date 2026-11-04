@@ -37,12 +37,23 @@ export const COPILOT_VISION_MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 export const COPILOT_VISION_MAX_CANDIDATES = 3;
 
+/**
+ * Default ceiling on one vision call's completion tokens. The operator owns
+ * this value via COPILOT_VISION_MAX_COMPLETION_TOKENS: any positive safe
+ * integer flows through exactly as configured and only the provider's own
+ * limit can reject it (surfaced as a provider failure, never silently
+ * reduced). Serialized as `max_tokens`: the vision call uses the Chat
+ * Completions endpoint, whose token-budget field is `max_tokens`.
+ */
+export const COPILOT_VISION_DEFAULT_MAX_COMPLETION_TOKENS = 2000;
+
 export interface CopilotVisionConfig {
   readonly enabled: boolean;
   readonly apiKey: string;
   readonly baseUrl: string;
   readonly modelId: string;
   readonly timeoutMs: number;
+  readonly maxCompletionTokens: number;
   readonly maxResponseBytes: number;
 }
 
@@ -74,6 +85,35 @@ const parseOperatorTimeoutMs = (
   return parsed;
 };
 
+/**
+ * Operator-owned token budget: a valid explicitly configured value flows
+ * through exactly as set and the default applies only when unset. There is
+ * intentionally no upper bound — upstream provider limits are the
+ * provider's responsibility and surface as provider failures, never as
+ * silent rewrites. An explicitly set value that is not a positive safe
+ * integer fails loudly naming field + reason. Strict coercion (not
+ * parseInt): trailing junk such as "2000oops" is rejected, not truncated.
+ */
+const parseOperatorTokenBudget = (
+  raw: string | undefined,
+  field: string,
+  fallback: number,
+): number => {
+  if (raw === undefined) {
+    return fallback;
+  }
+
+  const parsed = z.coerce.number().int().min(1).safeParse(raw);
+
+  if (!parsed.success || !Number.isSafeInteger(parsed.data)) {
+    throw new Error(
+      `${field} must be a positive safe integer of tokens or unset (unset uses ${fallback}).`,
+    );
+  }
+
+  return parsed.data;
+};
+
 export const resolveCopilotVisionConfig = (
   env: Record<string, string | undefined>,
 ): CopilotVisionConfig => {
@@ -94,6 +134,11 @@ export const resolveCopilotVisionConfig = (
       env["COPILOT_VISION_TIMEOUT_MS"],
       "COPILOT_VISION_TIMEOUT_MS",
       COPILOT_VISION_DEFAULT_TIMEOUT_MS,
+    ),
+    maxCompletionTokens: parseOperatorTokenBudget(
+      env["COPILOT_VISION_MAX_COMPLETION_TOKENS"],
+      "COPILOT_VISION_MAX_COMPLETION_TOKENS",
+      COPILOT_VISION_DEFAULT_MAX_COMPLETION_TOKENS,
     ),
     maxResponseBytes: COPILOT_VISION_MAX_RESPONSE_BYTES,
   };
@@ -505,7 +550,7 @@ const runVisionCall = (
               },
             ],
             response_format: { type: "json_object" },
-            max_tokens: 2000,
+            max_tokens: config.maxCompletionTokens,
             store: false,
           }),
           // Surface fiber interruption (request timeout, client disconnect)

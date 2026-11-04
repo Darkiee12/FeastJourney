@@ -1,5 +1,8 @@
 import { DEFAULT_MODEL_BASE_URL } from "@/server/env";
-import { RESEARCH_MODEL_ID } from "@/server/integrations/meta-responses";
+import {
+  META_RESPONSES_MAX_OUTPUT_TOKENS,
+  RESEARCH_MODEL_ID,
+} from "@/server/integrations/meta-responses";
 
 /**
  * Standalone web-research configuration. Reads only its own WEB_RESEARCH_*
@@ -27,6 +30,14 @@ export interface ResearchConfig {
   readonly baseUrl: string;
   readonly modelId: string;
   readonly timeoutMs: number;
+  /**
+   * Operator-owned Responses output-token budget (WEB_RESEARCH_MAX_OUTPUT_TOKENS,
+   * default META_RESPONSES_MAX_OUTPUT_TOKENS). Informational here: the
+   * operative gate for the /responses call lives in MetaResponsesClientConfig
+   * (meta-responses.ts), which parses the same variable with identical
+   * strict semantics, so the two can never silently diverge.
+   */
+  readonly maxOutputTokens: number;
   readonly maxSources: number;
   readonly maxResults: number;
   readonly cacheTtlMs: number;
@@ -88,6 +99,11 @@ export const resolveResearchConfig = (env: Record<string, string | undefined>): 
     env["WEB_RESEARCH_TIMEOUT_MS"],
     "WEB_RESEARCH_TIMEOUT_MS",
     RESEARCH_DEFAULT_TIMEOUT_MS,
+  ),
+  maxOutputTokens: parseOperatorPositiveInt(
+    env["WEB_RESEARCH_MAX_OUTPUT_TOKENS"],
+    "WEB_RESEARCH_MAX_OUTPUT_TOKENS",
+    META_RESPONSES_MAX_OUTPUT_TOKENS,
   ),
   maxSources: parseOperatorPositiveInt(
     env["WEB_RESEARCH_MAX_SOURCES"],
