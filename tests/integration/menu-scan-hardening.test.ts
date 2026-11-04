@@ -163,13 +163,30 @@ const photo = sharp({ create: { width: 48, height: 48, channels: 3, background: 
   .png()
   .toBuffer();
 
+async function waitForExtractionDocument(principal: ScanPrincipal, scanId: string) {
+  const deadline = Date.now() + 10000;
+
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- Status polling is sequential by design.
+    const current = await run(getMenuScan(principal, scanId));
+
+    if (current.document !== null) return current;
+
+    if (Date.now() >= deadline) throw new Error("synthetic extraction document missing");
+
+    // oxlint-disable-next-line no-await-in-loop -- Status polling is sequential by design.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 async function extractedScan(principal = guest) {
   const created = await run(createMenuScan(principal, { targetLanguage: "en", venueId }));
   scanIds.push(created.id);
   const asset = await run(attachMenuPhoto(principal, created.id, 1, await photo, "image/png"));
-  const view = await run(extractMenu(principal, created.id, crypto.randomUUID()));
-
-  if (view.document === null) throw new Error("synthetic extraction document missing");
+  // Extraction runs detached server-side; the accept returns the processing
+  // view promptly, so poll the scan view until the document lands.
+  await run(extractMenu(principal, created.id, crypto.randomUUID()));
+  const view = await waitForExtractionDocument(principal, created.id);
 
   return { scanId: created.id, assetId: asset.assetId, document: view.document };
 }

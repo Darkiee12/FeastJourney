@@ -310,10 +310,16 @@ describe("agent stream failure paths", () => {
     const runtime = track(makeRuntime());
 
     let interrupted = false;
+    let markStarted!: () => void;
+
+    const startedGate = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
 
     const hanging: StreamPipeline = (_input, report) =>
       Effect.gen(function* () {
         report("searching-catalog", "Scanning eligible dishes");
+        yield* Effect.sync(() => markStarted());
         yield* Effect.never.pipe(
           Effect.onInterrupt(() =>
             Effect.sync(() => {
@@ -337,6 +343,10 @@ describe("agent stream failure paths", () => {
     const response = await runtime.runPromise(handleRecommendStream(request, hanging));
     expect(response.status).toBe(200);
 
+    // The worker runs detached: abort only after the pipeline truly started,
+    // otherwise interruption lands before onInterrupt attaches and the flag
+    // never flips.
+    await startedGate;
     aborter.abort();
     // The stream must settle (not hang) after disconnect.
     await response.text();
