@@ -611,8 +611,24 @@ export const menuScanClient = {
       // oxlint-disable-next-line no-await-in-loop -- Status polling is sequential by design.
       await sleepAbortable(SCAN_POLL_INTERVAL_MS, signal);
 
-      // oxlint-disable-next-line no-await-in-loop -- Status polling is sequential by design.
-      const current = await menuScanClient.get(accepted.scan.id, signal);
+      let current: ScanView;
+
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- Status polling is sequential by design.
+        current = await menuScanClient.get(accepted.scan.id, signal);
+      } catch (error) {
+        // A 429 mid-poll is recovery, not failure: honor the server's
+        // Retry-After, keep the processing state, and keep polling the same
+        // scan id. Anything else fails loudly so the UI offers retry.
+        if (error instanceof MenuScanClientError && error.transportKind === "rate-limited") {
+          // oxlint-disable-next-line no-await-in-loop -- Backoff then resume the same sequential poll.
+          await sleepAbortable(Math.min((error.retryAfterSeconds ?? 3) * 1000, 60000), signal);
+
+          continue;
+        }
+
+        throw error;
+      }
 
       if (current.document !== null) {
         return current;

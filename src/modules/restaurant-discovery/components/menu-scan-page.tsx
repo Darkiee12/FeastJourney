@@ -794,7 +794,7 @@ export function MenuScanPage({
       return next;
     });
 
-  const analyze = (): void => {
+  const analyze = (resume = false): void => {
     if (submitGuard.current || busy) return;
 
     submitGuard.current = true;
@@ -805,21 +805,41 @@ export function MenuScanPage({
         const branch = verifiedBranch === null ? null : verifiedBranch.id;
 
         try {
-          if (scanId !== null) await menuScanClient.remove(scanId, signal);
-          const created = await menuScanClient.create({ targetLanguage, venueId: branch }, signal);
-          setScanId(created.id);
-          sessionStorage.setItem(storageScan, created.id);
-          sessionStorage.setItem(storageOwner, owner);
+          // Resume keeps server-side work: when every photo is already
+          // uploaded for this scan, skip delete/recreate/re-upload and poll
+          // the same scan id. A fresh start is required when there is no
+          // scan, photos changed, or the previous attempt never uploaded.
+          const canResume =
+            resume && scanId !== null && uploaded === photos.length && photos.length > 0;
 
-          setUploaded(0);
-          setUploadTotal(photos.length);
+          let id = scanId;
 
-          for (const [index, photo] of photos.entries()) {
-            setStatus(`${copy.uploading} ${index + 1}/${photos.length}`);
-            // oxlint-disable-next-line no-await-in-loop -- Photos upload in page order so progress matches the visible list.
-            await menuScanClient.attach(created.id, index + 1, photo.file, signal);
-            setUploaded(index + 1);
+          if (!canResume) {
+            if (id !== null) await menuScanClient.remove(id, signal);
+
+            const created = await menuScanClient.create(
+              { targetLanguage, venueId: branch },
+              signal,
+            );
+
+            setScanId(created.id);
+            sessionStorage.setItem(storageScan, created.id);
+            sessionStorage.setItem(storageOwner, owner);
+
+            setUploaded(0);
+            setUploadTotal(photos.length);
+
+            for (const [index, photo] of photos.entries()) {
+              setStatus(`${copy.uploading} ${index + 1}/${photos.length}`);
+              // oxlint-disable-next-line no-await-in-loop -- Photos upload in page order so progress matches the visible list.
+              await menuScanClient.attach(created.id, index + 1, photo.file, signal);
+              setUploaded(index + 1);
+            }
+
+            id = created.id;
           }
+
+          if (id === null) throw new Error(copy.empty);
 
           setReading(true);
           setStatus(copy.analyzing);
@@ -828,11 +848,7 @@ export function MenuScanPage({
           // provider call detached under MENU_SCAN_TIMEOUT_MS; this polls the
           // scan view until the document lands. A retry resumes polling
           // idempotently — server work is never lost or duplicated.
-          const next = await menuScanClient.extractAndWait(
-            created.id,
-            signal,
-            menuLocation?.cityId,
-          );
+          const next = await menuScanClient.extractAndWait(id, signal, menuLocation?.cityId);
 
           if (!signal.aborted) adoptView(next);
         } finally {
@@ -869,7 +885,7 @@ export function MenuScanPage({
   };
 
   const retryFailure = (): void => {
-    if (failure?.action === "analyze") analyze();
+    if (failure?.action === "analyze") analyze(true);
 
     if (failure?.action === "contribute") submitContribution();
 
