@@ -156,19 +156,77 @@ const transportError = (failure: ScanTransportFailure): MenuScanClientError =>
     failure._tag,
   );
 
-/** Transport round-trip budget (ms) for one scan-service request. */
-const SCAN_REQUEST_TIMEOUT_MS = 30000;
+/**
+ * Transport round-trip budgets (ms), split by action class. Small JSON
+ * reads/writes and the extraction accept are quick local work, so they stay
+ * tight; multipart photo uploads carry megabytes over slow mobile links and
+ * get a generous bound. Neither bound can defeat a configured provider
+ * budget: extraction itself runs detached server-side under the operator's
+ * MENU_SCAN_TIMEOUT_MS and is tracked by polling the scan view.
+ */
+const SCAN_RPC_TIMEOUT_MS = 30000;
+const SCAN_UPLOAD_TIMEOUT_MS = 120000;
 
 /**
  * Status-polling parameters for extraction. Extraction runs detached
  * server-side under the operator's MENU_SCAN_TIMEOUT_MS (uncapped), so the
- * browser never holds one request open for it. These bounds are a client UX
- * safeguard only: when rounds run out the work continues server-side and a
- * retry resumes polling idempotently from the current view — never lost,
- * never duplicated.
+ * browser never holds one request open for it. Observation is decoupled
+ * from fixed poll rounds: there is no round ceiling — a running scan stays
+ * observable until it reaches a terminal state, becomes inaccessible, or
+ * the caller cancels. The UX safeguard is therefore cancellation,
+ * visibility-aware pausing, and bounded waits (below), not an abandonment
+ * counter: when rounds would previously have run out, the work continued
+ * server-side and a retry resumed polling idempotently from the current
+ * view — never lost, never duplicated.
  */
 const SCAN_POLL_INTERVAL_MS = 2500;
-const SCAN_POLL_MAX_ROUNDS = 120;
+
+/**
+ * Ceiling (ms) for one Retry-After-driven poll backoff. The server keeps
+ * working under its own operator timeout while the browser waits; the wait
+ * never becomes a retry (the same scan id keeps polling, extraction is
+ * never re-fired) and caller cancellation still aborts it immediately.
+ */
+const SCAN_RETRY_AFTER_MAX_WAIT_MS = 60000;
+
+/**
+ * Visibility-aware polling gate: a hidden tab suspends status reads and
+ * resumes on the next visible frame, so background tabs neither burn the
+ * public status budget nor abandon a running scan. Resolves immediately
+ * outside a browser (no document) or when already visible; caller
+ * cancellation propagates through the same signal as every other wait.
+ */
+const waitForVisible = (signal?: AbortSignal): Promise<void> => {
+  if (typeof document === "undefined" || !document.hidden) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(signal.reason);
+
+      return;
+    }
+
+    const cleanup = (): void => {
+      document.removeEventListener("visibilitychange", onVisible);
+      signal?.removeEventListener("abort", onAbort);
+    };
+
+    const onVisible = (): void => {
+      if (!document.hidden) {
+        cleanup();
+        resolve();
+      }
+    };
+
+    const onAbort = (): void => {
+      cleanup();
+      reject(signal?.reason);
+    };
+
+    document.addEventListener("visibilitychange", onVisible);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+};
 
 const sleepAbortable = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -191,7 +249,20 @@ const sleepAbortable = (ms: number, signal?: AbortSignal): Promise<void> =>
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 
-/** Upper bound before parsing; bodies are never logged. */
+/**
+ * Upper bound before parsing; bodies are never logged.
+ *
+ * Derivation: the largest valid scan view is the stored menu document
+ * (server-capped at 1 MiB indented JSON by menuDocumentFitsStorage) plus a
+ * small envelope — the scan row, per-asset rows scaling with the
+ * operator's MENU_SCAN_MAX_IMAGES, and revision/contribution metadata.
+ * 2 MiB admits that maximum with headroom for any sane operator image
+ * count while every read stays bounded: the declared-length pre-check and
+ * the streaming byte-count below both enforce this cap, so oversize bodies
+ * fail fast without materializing unbounded strings. Provider response
+ * bodies are bounded separately, server-side, by the operator's
+ * MENU_SCAN_MAX_RESPONSE_BYTES — this client bound never relaxes that.
+ */
 const SCAN_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
 
 /**
@@ -424,6 +495,7 @@ export async function decodeScanResponse<A>(response: Response, schema: z.ZodTyp
         classified.retryable,
         classified.retryAfterSeconds,
         failure.data,
+        classified._tag,
       );
     }
 
@@ -524,7 +596,7 @@ async function requestScan<A>(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     },
-    SCAN_REQUEST_TIMEOUT_MS,
+    SCAN_RPC_TIMEOUT_MS,
     signal,
   );
 
@@ -588,9 +660,14 @@ export const menuScanClient = {
    * Accept extraction then poll the scan view until the document lands.
    * Terminal states: document present (done — returned), scan status other
    * than "processing" with no document (failed/expired — retryable error so
-   * the UI offers retry), or the poll-round safeguard (retryable error; a
-   * retry resumes polling idempotently because extraction continues
-   * server-side under the operator's timeout).
+   * the UI offers retry), or an inaccessible scan (auth/expiry surfaces the
+   * same way). There is no fixed round ceiling: a running scan stays
+   * observable until one of those states, so a retry resumes watching the
+   * same scan id idempotently — server work is never lost or duplicated.
+   * Hidden tabs suspend polling and resume on visible; every wait honors
+   * the server's Retry-After (capped) without re-firing extraction, and
+   * caller cancellation aborts every wait. Polling stops at the first
+   * terminal result and never continues past it.
    */
   extractAndWait: async (
     scanId: string,
@@ -607,12 +684,34 @@ export const menuScanClient = {
       throw new MenuScanClientError("Menu analysis did not finish. Please try again.", true, null);
     }
 
-    for (let round = 0; round < SCAN_POLL_MAX_ROUNDS; round += 1) {
+    for (;;) {
       // oxlint-disable-next-line no-await-in-loop -- Status polling is sequential by design.
       await sleepAbortable(SCAN_POLL_INTERVAL_MS, signal);
+      // oxlint-disable-next-line no-await-in-loop -- Hidden tabs suspend reads until visible again.
+      await waitForVisible(signal);
 
-      // oxlint-disable-next-line no-await-in-loop -- Status polling is sequential by design.
-      const current = await menuScanClient.get(accepted.scan.id, signal);
+      let current: ScanView;
+
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- Status polling is sequential by design.
+        current = await menuScanClient.get(accepted.scan.id, signal);
+      } catch (error) {
+        // A 429 mid-poll is recovery, not failure: honor the server's
+        // Retry-After (capped so a long delay stays a wait, never a retry),
+        // keep the processing state, and keep polling the same
+        // scan id. Anything else fails loudly so the UI offers retry.
+        if (error instanceof MenuScanClientError && error.transportKind === "rate-limited") {
+          // oxlint-disable-next-line no-await-in-loop -- Backoff then resume the same sequential poll.
+          await sleepAbortable(
+            Math.min((error.retryAfterSeconds ?? 3) * 1000, SCAN_RETRY_AFTER_MAX_WAIT_MS),
+            signal,
+          );
+
+          continue;
+        }
+
+        throw error;
+      }
 
       if (current.document !== null) {
         return current;
@@ -626,12 +725,6 @@ export const menuScanClient = {
         );
       }
     }
-
-    throw new MenuScanClientError(
-      "Menu analysis is still running. Retry to resume watching it.",
-      true,
-      null,
-    );
   },
   revise: (input: z.infer<typeof reviseScanSchema>, signal?: AbortSignal) =>
     requestScan({ action: "revise", ...input }, scanViewSchema, signal),
@@ -659,13 +752,19 @@ export const menuScanClient = {
     const body = new FormData();
     body.set("action", "attach");
     body.set("scanId", z.uuid().parse(scanId));
-    body.set("pageNumber", z.number().int().min(1).max(6).parse(pageNumber).toString());
+    // Presence/shape only: page numbers are 1-based sequence positions.
+    // The server owns the operator's MENU_SCAN_MAX_IMAGES bound at attach
+    // time (attachMenuPhoto), so this boundary never duplicates or
+    // contradicts it — an explicit larger operator value keeps working.
+    body.set("pageNumber", z.number().int().min(1).parse(pageNumber).toString());
     body.set("file", file);
 
+    // Uploads carry megabytes over slow links, so they use the generous
+    // upload budget; small JSON actions stay on the tight RPC budget.
     const response = await fetchScan(
       "/api/menu-scans",
       { method: "POST", credentials: "same-origin", body },
-      SCAN_REQUEST_TIMEOUT_MS,
+      SCAN_UPLOAD_TIMEOUT_MS,
       signal,
     );
 

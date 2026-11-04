@@ -104,6 +104,22 @@ interface StorageClient {
   readonly bucket: string;
 }
 
+/**
+ * Storage retry/timeout policy: technical protection, not operator-owned.
+ * Two SDK attempts absorb transient Garage hiccups without multiplying
+ * load; every operation also carries a 15 s internal timeout combined with
+ * the caller's signal via AbortSignal.any, so a hung loopback read can
+ * never stall a request while explicit cancellation (client abort, server
+ * transport budget) still propagates. Fixed here rather than
+ * environment-configured: payloads are already bounded (at most the
+ * operator's per-image bytes) and Garage is loopback-local, so no
+ * deployment tunes these against slow reads today — revisit only with
+ * measured evidence. Safe cancellation is never removed: both the internal
+ * timeout and the caller signal feed the same abort.
+ */
+const STORAGE_MAX_ATTEMPTS = 2;
+const STORAGE_OP_TIMEOUT_MS = 15000;
+
 /** The Layer owns the lazily created client and releases its connections at shutdown. */
 export const PrivateMenuStorageLive = Layer.effect(
   PrivateMenuStorage,
@@ -125,7 +141,7 @@ export const PrivateMenuStorageLive = Layer.effect(
                   accessKeyId: config.S3_ACCESS_KEY_ID,
                   secretAccessKey: config.S3_SECRET_ACCESS_KEY,
                 },
-                maxAttempts: 2,
+                maxAttempts: STORAGE_MAX_ATTEMPTS,
               }),
               bucket: config.S3_BUCKET_PRIVATE,
             };
@@ -134,7 +150,7 @@ export const PrivateMenuStorageLive = Layer.effect(
           return task(
             storage.client,
             storage.bucket,
-            AbortSignal.any([signal, AbortSignal.timeout(15000)]),
+            AbortSignal.any([signal, AbortSignal.timeout(STORAGE_OP_TIMEOUT_MS)]),
           );
         },
         catch: () => new StorageUnavailable(),

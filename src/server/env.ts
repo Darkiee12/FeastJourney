@@ -71,6 +71,18 @@ const envSchema = z.object({
   MENU_SCAN_MAX_IMAGES: z.string().optional(),
   MENU_SCAN_MAX_IMAGE_BYTES: z.string().optional(),
   MENU_SCAN_MAX_COMPLETION_TOKENS: z.string().optional(),
+  // Review-intelligence budgets (additive only). Every field stays optional
+  // so startup never depends on review configuration and existing ServerEnv
+  // literals keep compiling; resolveReviewIntelligenceConfig() in
+  // review-intelligence/review-schemas.ts applies the documented defaults at
+  // the use site and throws naming field + reason on explicitly set invalid
+  // values — never silently clamped or replaced. z.coerce.number().int()
+  // rejects trailing junk ("12000abc" is NaN); positivity is enforced at
+  // the use site, mirroring the MODEL_* knobs above.
+  REVIEW_INTELLIGENCE_MODEL_ID: z.string().optional(),
+  REVIEW_INTELLIGENCE_MAX_COMPLETION_TOKENS: z.coerce.number().int().optional(),
+  REVIEW_INTELLIGENCE_MAX_SAMPLE: z.coerce.number().int().optional(),
+  REVIEW_INTELLIGENCE_MAX_RESPONSE_BYTES: z.coerce.number().int().optional(),
 });
 
 export type ServerEnv = z.infer<typeof envSchema>;

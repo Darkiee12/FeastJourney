@@ -51,6 +51,27 @@ export class ReviewIntelligenceInvalidOutput extends Data.TaggedError(
   "ReviewIntelligenceInvalidOutput",
 )<{
   readonly reason: string;
+  /**
+   * Decode/body-budget diagnostic. The `_tag` stays coarse so the service's
+   * provider-failure mapping (by `_tag` only) is untouched; `category`
+   * carries the distinction and `reason` stays a safe user-facing message.
+   * Mirrors the muse-menu/copilot-vision taxonomy without sharing their
+   * module: review decoding has no photo-reference or retry concerns.
+   * Safe metadata only: `finish` is the provider finish_reason string and
+   * `issues` are Zod issue paths — never review bodies, model text,
+   * credentials, prompts, or identities.
+   */
+  readonly category:
+    | "envelope"
+    | "refusal"
+    | "non-stop"
+    | "truncated"
+    | "invalid-json"
+    | "schema-failure"
+    | "body-budget";
+  /** Safe schema issue paths only; never values, raw text, or responses. */
+  readonly issues?: ReadonlyArray<string> | undefined;
+  readonly finish?: string | undefined;
 }> {}
 
 export type ReviewIntelligenceError =
@@ -109,10 +130,13 @@ const TRANSLATION_RESPONSE_FORMAT = {
 } as const;
 
 const chatEnvelopeSchema = z.object({
+  // finish_reason stays a plain string (not z.literal("stop")) so decoding
+  // can distinguish refusal / truncation (length) / other non-stop finishes
+  // with a typed category instead of one undifferentiated failure.
   choices: z
     .array(
       z.object({
-        finish_reason: z.literal("stop"),
+        finish_reason: z.string(),
         message: z.object({
           content: z.string().min(1),
           refusal: z.string().nullable().optional(),
@@ -187,6 +211,7 @@ const readBoundedBody = (
       if (declared !== null && Number(declared) > maxBytes) {
         throw new ReviewIntelligenceInvalidOutput({
           reason: "The review response exceeded the size limit.",
+          category: "body-budget",
         });
       }
 
@@ -196,6 +221,7 @@ const readBoundedBody = (
         if (new TextEncoder().encode(fallback).length > maxBytes) {
           throw new ReviewIntelligenceInvalidOutput({
             reason: "The review response exceeded the size limit.",
+            category: "body-budget",
           });
         }
 
@@ -220,6 +246,7 @@ const readBoundedBody = (
           if (byteLength > maxBytes) {
             throw new ReviewIntelligenceInvalidOutput({
               reason: "The review response exceeded the size limit.",
+              category: "body-budget",
             });
           }
 
@@ -256,14 +283,46 @@ const decodeDraft = <A>(
     try {
       envelope = JSON.parse(body);
     } catch {
-      return yield* new ReviewIntelligenceInvalidOutput({ reason: emptyReason });
+      return yield* new ReviewIntelligenceInvalidOutput({
+        reason: emptyReason,
+        category: "envelope",
+      });
     }
 
     const decoded = chatEnvelopeSchema.safeParse(envelope);
-    const choice = decoded.success ? decoded.data.choices[0] : undefined;
 
-    if (choice === undefined || choice.message.refusal) {
-      return yield* new ReviewIntelligenceInvalidOutput({ reason: emptyReason });
+    if (!decoded.success) {
+      return yield* new ReviewIntelligenceInvalidOutput({
+        reason: emptyReason,
+        category: "envelope",
+      });
+    }
+
+    const choice = decoded.data.choices[0];
+
+    if (choice === undefined) {
+      return yield* new ReviewIntelligenceInvalidOutput({
+        reason: emptyReason,
+        category: "envelope",
+      });
+    }
+
+    if (choice.message.refusal) {
+      return yield* new ReviewIntelligenceInvalidOutput({
+        reason: emptyReason,
+        category: "refusal",
+        finish: choice.finish_reason,
+      });
+    }
+
+    if (choice.finish_reason !== "stop") {
+      const truncated = choice.finish_reason === "length";
+
+      return yield* new ReviewIntelligenceInvalidOutput({
+        reason: emptyReason,
+        category: truncated ? "truncated" : "non-stop",
+        finish: choice.finish_reason,
+      });
     }
 
     let content: unknown;
@@ -271,13 +330,22 @@ const decodeDraft = <A>(
     try {
       content = JSON.parse(choice.message.content);
     } catch {
-      return yield* new ReviewIntelligenceInvalidOutput({ reason: emptyReason });
+      return yield* new ReviewIntelligenceInvalidOutput({
+        reason: emptyReason,
+        category: "invalid-json",
+        finish: choice.finish_reason,
+      });
     }
 
     const draft = schema.safeParse(content);
 
     if (!draft.success) {
-      return yield* new ReviewIntelligenceInvalidOutput({ reason: emptyReason });
+      return yield* new ReviewIntelligenceInvalidOutput({
+        reason: emptyReason,
+        category: "schema-failure",
+        issues: draft.error.issues.map((issue) => issue.path.join(".")),
+        finish: choice.finish_reason,
+      });
     }
 
     return draft.data;
@@ -317,7 +385,20 @@ const postChatCompletions = (
               { role: "user", content: userPrompt },
             ],
             response_format: responseFormat,
-            max_tokens: 2000,
+            // Token-budget field choice: this request targets
+            // `POST {baseUrl}/chat/completions`, where the established
+            // in-repo contract is `max_tokens` (meta-client ranking,
+            // meta-agent, copilot synthesis/vision, and menu-localizations
+            // all serialize `max_tokens`; the ranking shape is pinned by
+            // tests/recommendation-muse-policy.test.ts). meta-responses uses
+            // `max_output_tokens`, but only on the different `/responses`
+            // endpoint family, which does not apply here. muse-menu is the
+            // sole `/chat/completions` caller using `max_completion_tokens`;
+            // this client keeps the dominant `max_tokens` key so the larger
+            // operator-owned budget changes volume, never wire semantics.
+            // Residual uncertainty: verified by repository contract only, no
+            // live provider check in this lane.
+            max_tokens: config.maxCompletionTokens,
             store: false,
             stream: false,
             n: 1,

@@ -1,5 +1,8 @@
 import { DEFAULT_MODEL_BASE_URL } from "@/server/env";
-import { RESEARCH_MODEL_ID } from "@/server/integrations/meta-responses";
+import {
+  META_RESPONSES_MAX_OUTPUT_TOKENS,
+  RESEARCH_MODEL_ID,
+} from "@/server/integrations/meta-responses";
 
 /**
  * Standalone web-research configuration. Reads only its own WEB_RESEARCH_*
@@ -27,6 +30,14 @@ export interface ResearchConfig {
   readonly baseUrl: string;
   readonly modelId: string;
   readonly timeoutMs: number;
+  /**
+   * Operator-owned Responses output-token budget (WEB_RESEARCH_MAX_OUTPUT_TOKENS,
+   * default META_RESPONSES_MAX_OUTPUT_TOKENS). Informational here: the
+   * operative gate for the /responses call lives in MetaResponsesClientConfig
+   * (meta-responses.ts), which parses the same variable with identical
+   * strict semantics, so the two can never silently diverge.
+   */
+  readonly maxOutputTokens: number;
   readonly maxSources: number;
   readonly maxResults: number;
   readonly cacheTtlMs: number;
@@ -38,8 +49,11 @@ export interface ResearchConfig {
  * default applies only when the variable is unset. There is intentionally
  * no upper bound — upstream provider limits are the provider's
  * responsibility and surface as provider failures, never as silent
- * rewrites. An explicitly set value that is not a positive safe integer
- * fails loudly naming field + reason.
+ * rewrites. Strict whole-string matching: Number.parseInt alone would accept
+ * "2000oops" as 2000, so anything that is not all digits fails loudly
+ * naming field + reason. This mirrors the strict gate in
+ * meta-responses.ts so the two parsers of WEB_RESEARCH_MAX_OUTPUT_TOKENS
+ * can never silently diverge.
  */
 const parseOperatorPositiveInt = (
   raw: string | undefined,
@@ -48,6 +62,10 @@ const parseOperatorPositiveInt = (
 ): number => {
   if (raw === undefined) {
     return fallback;
+  }
+
+  if (!/^[0-9]+$/.test(raw)) {
+    throw new Error(`${field} must be a positive safe integer or unset (unset uses ${fallback}).`);
   }
 
   const parsed = Number.parseInt(raw, 10);
@@ -88,6 +106,11 @@ export const resolveResearchConfig = (env: Record<string, string | undefined>): 
     env["WEB_RESEARCH_TIMEOUT_MS"],
     "WEB_RESEARCH_TIMEOUT_MS",
     RESEARCH_DEFAULT_TIMEOUT_MS,
+  ),
+  maxOutputTokens: parseOperatorPositiveInt(
+    env["WEB_RESEARCH_MAX_OUTPUT_TOKENS"],
+    "WEB_RESEARCH_MAX_OUTPUT_TOKENS",
+    META_RESPONSES_MAX_OUTPUT_TOKENS,
   ),
   maxSources: parseOperatorPositiveInt(
     env["WEB_RESEARCH_MAX_SOURCES"],

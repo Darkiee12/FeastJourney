@@ -8,7 +8,11 @@ import { researchCopyFor } from "@/components/research/research-copy";
 import { ResearchFindingsList } from "@/components/research/research-findings";
 import type { ResearchFinding } from "@/components/research/research-findings";
 import { SharedSelectField } from "@/components/ui/select";
-import { menuCopy, menuScanPageCopy } from "@/modules/restaurant-discovery/components/menu-copy";
+import {
+  menuCopy,
+  menuScanPageCopy,
+  menuScanResultsCopy,
+} from "@/modules/restaurant-discovery/components/menu-copy";
 import { parsePriceResearchOutcome } from "@/modules/restaurant-discovery/components/price-compare-panel";
 import { ScanCapture } from "@/modules/restaurant-discovery/components/scan-capture";
 import type { ScanMenuLocation } from "@/modules/restaurant-discovery/components/scan-capture";
@@ -254,9 +258,11 @@ const rememberTargetLanguage = (language: string): void => {
 function ScanPriceResearch({
   locale,
   items,
+  menuLocation,
 }: {
   readonly locale: string;
   readonly items: MenuScanDocument["items"];
+  readonly menuLocation?: ScanMenuLocation | null | undefined;
 }) {
   const language = locale === "vi" ? "vi" : "en";
   const strings = researchCopyFor(language);
@@ -272,7 +278,13 @@ function ScanPriceResearch({
       .find((currency): currency is string => currency !== null && isCurrency(currency)) ?? "";
 
   const [currency, setCurrency] = useState(selectedCurrency);
-  const [city, setCity] = useState("");
+  // Prefill comes from the traveler-selected menu location only: the
+  // label is the real stored city display name. resolveMenuCountry in
+  // menu-price-evidence needs a server-resolved CurrencyContext (place
+  // catalog country) that never travels with the client scan location,
+  // so the country field stays empty rather than inventing one.
+  // Currency still defaults from the dish.
+  const [city, setCity] = useState(menuLocation?.label ?? "");
   const [country, setCountry] = useState("");
   const [state, setState] = useState<ResearchStatusState>("idle");
   const [contextLine, setContextLine] = useState("");
@@ -414,7 +426,11 @@ function ScanPriceResearch({
         }))}
         size="regular"
       />
-      <div className="scan-research-place">
+      {/* Single column: the research group lives in the narrow results
+          aside on desktop, where the stylesheet's three-column place grid
+          would crush the inputs. Inline style wins over that unlayered
+          rule; stacked inputs stay readable at every width. */}
+      <div className="scan-research-place" style={{ gridTemplateColumns: "1fr" }}>
         <div>
           <label htmlFor="scan-research-city">{copy.researchCity}</label>
           <input
@@ -487,12 +503,15 @@ function ScanPriceResearch({
 }
 
 // S2 CONTRACT (scan-results): results body is the peer `ScanResults`
-// component (`scan-results.tsx`), mounted with the scan id. `onEditDish` is
-// intentionally omitted so dish edits open S2's internal corrections.
-// Corrections saving therefore lives inside S2; this page keeps the
-// surrounding chrome the peer does not render: revision/expiry line, model
-// chip, price-research sibling (single-trigger rule), contribution, and
-// session actions.
+// component (`scan-results.tsx`), mounted with the scan id in the dominant
+// main column. `onEditDish` is intentionally omitted so dish edits open
+// S2's internal corrections. Corrections saving therefore lives inside S2;
+// this page keeps the surrounding chrome the peer does not render:
+// transient status/failure above the grid, then a 70/30 desktop grid
+// (single readable column on mobile) with S2's dishes dominant, the S1
+// price-research sibling (single-trigger rule) and the contribution group
+// stacked in the aside. Consent wording, confirmations, and all scan
+// transport/polling/retry logic below are untouched.
 
 function prefersReducedMotion(): boolean {
   try {
@@ -678,6 +697,50 @@ export function MenuScanPage({
 
         if (abort.signal.aborted) return;
         adoptView(next);
+
+        // Refresh recovery: a remembered scan still processing server-side
+        // resumes observation automatically — no local photographs needed.
+        // Terminal states settle through the same adopt path as a fresh run.
+        if (next.document === null && next.scan.status === "processing") {
+          // The live flag is re-read on every check through this closure:
+          // a direct read here would be narrowed away by the early return above.
+          const isLive = (): boolean => !abort.signal.aborted;
+
+          setReading(true);
+          setStatus(copy.analyzing);
+
+          try {
+            const storedLocation = readStoredMenuLocation();
+
+            const followed = await menuScanClient.extractAndWait(
+              next.scan.id,
+              abort.signal,
+              storedLocation?.cityId,
+            );
+
+            if (isLive()) adoptView(followed);
+          } catch (followError) {
+            if (isLive())
+              setFailure({
+                message: followError instanceof Error ? followError.message : copy.failure,
+                retryable:
+                  followError instanceof MenuScanClientError ? followError.retryable : false,
+                retryAfterSeconds:
+                  followError instanceof MenuScanClientError ? followError.retryAfterSeconds : null,
+                action: null,
+                code:
+                  followError instanceof MenuScanClientError
+                    ? followError.failure?.code
+                    : undefined,
+                transportKind:
+                  followError instanceof MenuScanClientError
+                    ? followError.transportKind
+                    : undefined,
+              });
+          } finally {
+            if (isLive()) setReading(false);
+          }
+        }
       } catch (error) {
         if (!abort.signal.aborted)
           setFailure({
@@ -702,7 +765,7 @@ export function MenuScanPage({
       abort.abort();
       controller.current?.abort();
     };
-  }, [owner, adoptView, copy.failure]);
+  }, [owner, adoptView, copy.analyzing, copy.failure]);
 
   const runTask = async (
     label: string,
@@ -794,18 +857,63 @@ export function MenuScanPage({
       return next;
     });
 
-  const analyze = (): void => {
+  // Submit always analyzes what is selected: any locally selected photo
+  // set starts a fresh scan (delete + re-upload), because selected files are
+  // the source of truth and the server cannot prove they match a previous
+  // upload. Resume observes an existing scan id and never uploads.
+  const analyze = (resume = false): void => {
     if (submitGuard.current || busy) return;
 
     submitGuard.current = true;
     void runTask(
       copy.analyzing,
       async (signal) => {
-        if (photos.length === 0) throw new Error(copy.empty);
         const branch = verifiedBranch === null ? null : verifiedBranch.id;
 
         try {
-          if (scanId !== null) await menuScanClient.remove(scanId, signal);
+          if (resume && scanId !== null && photos.length === 0) {
+            // Resume without local files (post-refresh): observe the existing
+            // scan. A completed document adopts immediately; a running
+            // extraction polls to completion. Anything else drops the dead
+            // reference so the next attempt asks for fresh photographs.
+            const current = await menuScanClient.get(scanId, signal);
+
+            if (current.document !== null) {
+              if (!signal.aborted) adoptView(current);
+
+              return;
+            }
+
+            if (current.scan.status === "processing") {
+              setReading(true);
+              setStatus(copy.analyzing);
+
+              const next = await menuScanClient.extractAndWait(
+                scanId,
+                signal,
+                menuLocation?.cityId,
+              );
+
+              if (!signal.aborted) adoptView(next);
+
+              return;
+            }
+
+            setScanId(null);
+            sessionStorage.removeItem(storageScan);
+            throw new MenuScanClientError(
+              "Menu analysis did not finish. Please try again.",
+              true,
+              null,
+            );
+          }
+
+          if (photos.length === 0) throw new Error(copy.empty);
+
+          let id = scanId;
+
+          if (id !== null) await menuScanClient.remove(id, signal);
+
           const created = await menuScanClient.create({ targetLanguage, venueId: branch }, signal);
           setScanId(created.id);
           sessionStorage.setItem(storageScan, created.id);
@@ -816,10 +924,12 @@ export function MenuScanPage({
 
           for (const [index, photo] of photos.entries()) {
             setStatus(`${copy.uploading} ${index + 1}/${photos.length}`);
-            // oxlint-disable-next-line no-await-in-loop -- Photos upload in page order so progress matches the visible list.
+            // oxlint-disable-next-line no-await-in-loop -- Photos upload in page order so the visible list matches the recorded order.
             await menuScanClient.attach(created.id, index + 1, photo.file, signal);
             setUploaded(index + 1);
           }
+
+          id = created.id;
 
           setReading(true);
           setStatus(copy.analyzing);
@@ -828,11 +938,7 @@ export function MenuScanPage({
           // provider call detached under MENU_SCAN_TIMEOUT_MS; this polls the
           // scan view until the document lands. A retry resumes polling
           // idempotently — server work is never lost or duplicated.
-          const next = await menuScanClient.extractAndWait(
-            created.id,
-            signal,
-            menuLocation?.cityId,
-          );
+          const next = await menuScanClient.extractAndWait(id, signal, menuLocation?.cityId);
 
           if (!signal.aborted) adoptView(next);
         } finally {
@@ -869,7 +975,7 @@ export function MenuScanPage({
   };
 
   const retryFailure = (): void => {
-    if (failure?.action === "analyze") analyze();
+    if (failure?.action === "analyze") analyze(true);
 
     if (failure?.action === "contribute") submitContribution();
 
@@ -904,7 +1010,17 @@ export function MenuScanPage({
   const canRetry =
     failure !== null && !busy && (failure.retryable || classifyScanError(failure) === "expired");
 
-  const capturePhase = capturePhaseFor(status !== null && document === null, uploading, reading);
+  // The preparing bar requires pending work: after a reload the photo
+  // File objects are gone, so only server-side assets (or an active
+  // upload/read) justify it. Otherwise a bare restoring status would wrongly
+  // claim photos are being prepared.
+  const hasPendingPhotos = photos.length > 0 || (view?.assets.length ?? 0) > 0;
+
+  const capturePhase = capturePhaseFor(
+    status !== null && document === null && hasPendingPhotos,
+    uploading,
+    reading,
+  );
 
   const previewPhotos: ReadonlyArray<ScanPreviewPhoto> = photos.map((photo) => ({
     id: photo.id,
@@ -913,6 +1029,10 @@ export function MenuScanPage({
   }));
 
   const scanAnother = (): void => {
+    // Starting over detaches the remembered session so a reload does not
+    // re-adopt the abandoned scan. Server-side data is untouched; only the
+    // explicit delete path removes it.
+    sessionStorage.removeItem(storageScan);
     setScanId(null);
     setView(null);
     setDocument(null);
@@ -948,7 +1068,10 @@ export function MenuScanPage({
   const submitHint = photos.length > 0 && !busy && scanId !== null ? copy.uploadRetry : null;
 
   return (
-    <article className="menu-scan-page" lang={menuBcp47TagFor(locale)}>
+    <article
+      className={document !== null ? "menu-scan-page menu-scan-page--results" : "menu-scan-page"}
+      lang={menuBcp47TagFor(locale)}
+    >
       {document === null && (
         <header className="scan-hero">
           <p className="scan-eyebrow">{copy.eyebrow}</p>
@@ -1037,7 +1160,7 @@ export function MenuScanPage({
             busy={busy}
             submitDisabled={busy || photos.length === 0}
             submitHint={submitHint}
-            onSubmit={analyze}
+            onSubmit={() => analyze()}
           />
           {capturePhase !== null && (
             <ScanProcessing
@@ -1061,6 +1184,13 @@ export function MenuScanPage({
               {status}
             </output>
           )}
+          {scanId !== null && !busy && (
+            <p className="scan-return">
+              <button type="button" onClick={scanAnother}>
+                {menuScanResultsCopy(locale).scanAnother}
+              </button>
+            </p>
+          )}
         </>
       )}
       {view?.scan.status === "processing" && <p>{copy.processing}</p>}
@@ -1080,51 +1210,66 @@ export function MenuScanPage({
               transportKind={failure.transportKind}
             />
           )}
-          <ScanResults
-            scanId={view.scan.id}
-            menuLocation={menuLocation}
-            onScanAnother={scanAnother}
-            onDeleteScan={() => deleteScan(view.scan.id)}
-          />
-          {document.items.length > 0 && (
-            <ScanPriceResearch locale={locale} items={document.items} />
-          )}
-          <section className="scan-contribution">
-            <h2 className="font-display text-3xl">{copy.contributeTitle}</h2>
-            {view.contribution !== null && (
-              <p>
-                {copy.contributed}: {view.contribution.status} · {copy.revision}{" "}
-                {view.contribution.revision}
-              </p>
-            )}
-            {view.contribution?.status === "rejected" && (
-              <p>
-                {locale === "vi"
-                  ? "Bạn có thể sửa thực đơn, lưu phiên bản mới rồi tự chọn đóng góp lại."
-                  : "You can correct the menu, save a new revision, then choose whether to contribute again."}
-              </p>
-            )}
-            {(view.contribution === null ||
-              (view.contribution.status === "rejected" &&
-                view.scan.current_revision !== null &&
-                view.scan.current_revision > view.contribution.revision)) && (
-              <>
-                <p>{copy.contributeHelp}</p>
-                <label className="scan-consent">
-                  <input
-                    type="checkbox"
-                    checked={consent}
-                    disabled={busy}
-                    onChange={(event) => setConsent(event.target.checked)}
-                  />
-                  {copy.consent}
-                </label>
-                <button type="button" disabled={busy || !consent} onClick={submitContribution}>
-                  {copy.contribute}
-                </button>
-              </>
-            )}
-          </section>
+          {/* Results grid: dishes dominant in the main column (70/30 on
+              desktop, one readable column on mobile). No sticky aside —
+              the order bar inside S2 is already sticky and the site
+              header must keep working. min-w-0 on both columns prevents
+              grid blowout at 320px. */}
+          <div className="scan-results-layout lg:grid lg:grid-cols-3 lg:items-start lg:gap-6">
+            <div className="min-w-0 lg:col-span-2">
+              <ScanResults
+                scanId={view.scan.id}
+                menuLocation={menuLocation}
+                onScanAnother={scanAnother}
+                onDeleteScan={() => deleteScan(view.scan.id)}
+              />
+            </div>
+            <aside className="scan-results-side min-w-0" aria-label={copy.resultsTitle}>
+              {document.items.length > 0 && (
+                <ScanPriceResearch
+                  locale={locale}
+                  items={document.items}
+                  menuLocation={menuLocation}
+                />
+              )}
+              <section className="scan-contribution">
+                <h2 className="font-display text-3xl">{copy.contributeTitle}</h2>
+                {view.contribution !== null && (
+                  <p>
+                    {copy.contributed}: {view.contribution.status} · {copy.revision}{" "}
+                    {view.contribution.revision}
+                  </p>
+                )}
+                {view.contribution?.status === "rejected" && (
+                  <p>
+                    {locale === "vi"
+                      ? "Bạn có thể sửa thực đơn, lưu phiên bản mới rồi tự chọn đóng góp lại."
+                      : "You can correct the menu, save a new revision, then choose whether to contribute again."}
+                  </p>
+                )}
+                {(view.contribution === null ||
+                  (view.contribution.status === "rejected" &&
+                    view.scan.current_revision !== null &&
+                    view.scan.current_revision > view.contribution.revision)) && (
+                  <>
+                    <p>{copy.contributeHelp}</p>
+                    <label className="scan-consent">
+                      <input
+                        type="checkbox"
+                        checked={consent}
+                        disabled={busy}
+                        onChange={(event) => setConsent(event.target.checked)}
+                      />
+                      {copy.consent}
+                    </label>
+                    <button type="button" disabled={busy || !consent} onClick={submitContribution}>
+                      {copy.contribute}
+                    </button>
+                  </>
+                )}
+              </section>
+            </aside>
+          </div>
         </section>
       )}
     </article>

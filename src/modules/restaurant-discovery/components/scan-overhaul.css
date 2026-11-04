@@ -16,10 +16,6 @@
   padding-block-start: 1rem;
 }
 
-.menu-scan-page:has(.menu-order-item) {
-  max-width: 62rem;
-}
-
 /* --------------------------------------------------------------- hero --- */
 
 .scan-hero {
@@ -295,10 +291,6 @@
   white-space: nowrap;
 }
 
-.scan-revision-line {
-  display: none;
-}
-
 .scan-results-head h1 {
   display: inline;
   padding: 0 0.15em;
@@ -316,27 +308,6 @@
 
 .scan-results-head p:first-of-type {
   margin-block-start: 0.6rem;
-}
-
-.scan-model-chip {
-  display: inline-flex;
-  width: fit-content;
-  padding: 0.2rem 0.7rem;
-  border-radius: 9999px;
-  background: var(--color-space-deep);
-  color: var(--color-mango);
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.scan-session-actions button {
-  min-height: 2.5rem;
-  border: var(--fj-line);
-  border-radius: 9999px;
-  background: white;
-  color: var(--fj-ink);
-  font-size: 0.85rem;
-  font-weight: 700;
 }
 
 .scan-results-diet,
@@ -374,14 +345,6 @@
   color: var(--color-muted);
 }
 
-.scan-results-photos ul {
-  display: flex;
-  gap: 0.5rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 /* --------------------------------------------------------- dish cards --- */
 
 .scan-results .menu-order > h2 {
@@ -394,14 +357,6 @@
   color: var(--color-muted);
 }
 
-.scan-results .menu-order-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
-  align-items: stretch;
-  gap: 1rem;
-  padding: 0.25rem 0.35rem 0.5rem 0;
-}
-
 .scan-results .menu-order-section {
   grid-column: 1 / -1;
   margin-block-start: 0.5rem;
@@ -409,173 +364,6 @@
   font-size: 1.5rem;
   font-weight: 400;
   letter-spacing: 0.02em;
-}
-
-/* Translated name leads because that is what the traveller can read; the
-   printed name sits under it for pointing at the menu. */
-.scan-results .menu-order-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-auto-flow: row dense;
-  gap: 0.15rem 0.75rem;
-  align-content: start;
-  padding: 0.9rem 1rem;
-  border: var(--fj-line);
-  border-radius: 1.1rem;
-  background: white;
-  box-shadow: 4px 4px 0 var(--fj-ink);
-}
-
-.scan-results .menu-order-translation {
-  grid-column: 1;
-  grid-row: 1;
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 1.55rem;
-  line-height: 1.05;
-  letter-spacing: 0.02em;
-  color: var(--fj-ink);
-}
-
-.scan-results .menu-order-item h3 {
-  grid-column: 1;
-  grid-row: 2;
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--color-muted);
-}
-
-/* Price tag in the top corner. */
-.scan-results .menu-order-item .observed-price {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  align-self: start;
-  padding: 0.15rem 0.6rem;
-  border: var(--fj-line);
-  border-radius: 0.45rem 0.8rem 0.8rem 0.45rem;
-  background: var(--fj-mango-soft);
-}
-
-.scan-results .menu-order-item .observed-price p {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.scan-results .menu-order-item > details,
-.scan-results .menu-order-item > label,
-.scan-results .menu-order-item > select,
-.scan-results .menu-order-item > .menu-order-check,
-.scan-results .menu-order-item > .menu-order-instructions {
-  grid-column: 1 / -1;
-}
-
-.scan-results .menu-order-item > .menu-order-instructions {
-  order: 8;
-}
-
-.scan-results .menu-order-item > details:not(.menu-order-instructions) {
-  margin-block-start: 0.35rem;
-  font-size: 0.85rem;
-}
-
-.scan-results .menu-order-item > details:not(.menu-order-instructions) summary {
-  color: var(--color-food-orange-strong);
-  font-weight: 700;
-  cursor: pointer;
-}
-
-/* One portion means there is nothing to choose. */
-.scan-results .menu-order-item:has(select option:only-child) > label,
-.scan-results .menu-order-item:has(select option:only-child) > select {
-  display: none;
-}
-
-/* The notice above the list already says every line is unverified. */
-.scan-results .menu-order-source {
-  display: none;
-}
-
-.scan-results .menu-order-check {
-  margin: 0.35rem 0 0;
-  font-size: 0.82rem;
-}
-
-.scan-results .menu-order-item > details:not(.menu-order-instructions) summary {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-height: 1.75rem;
-}
-
-/* Secondary links keep a 24px target; 44px each doubled the card height. */
-.scan-results .menu-order-photos,
-.scan-results .menu-order-photos a,
-.scan-results .menu-results-edit {
-  min-height: 1.5rem;
-}
-
-.scan-results .menu-order-photos a {
-  display: inline-flex;
-  align-items: center;
-  padding: 0;
-  border: 0;
-}
-
-/* Links stack in the left column, the stepper fills the right of those rows. */
-.scan-results .menu-order-photos {
-  order: 5;
-  grid-column: 1;
-  align-self: end;
-  margin: 0.35rem 0 0;
-  font-size: 0.8rem;
-}
-
-.scan-results .menu-order-quantity {
-  order: 7;
-  grid-column: 2;
-  grid-row: span 2;
-  align-self: end;
-  justify-self: end;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin: 0.35rem 0 0;
-  padding: 0;
-  border: 0;
-}
-
-.scan-results .menu-order-quantity button {
-  width: 2.5rem;
-  height: 2.5rem;
-  min-height: 0;
-  padding: 0;
-  border: var(--fj-line);
-  border-radius: 9999px;
-  background: white;
-  color: var(--fj-ink);
-  font-size: 1.15rem;
-  font-weight: 800;
-  box-shadow: 2px 2px 0 var(--fj-ink);
-}
-
-.scan-results .menu-order-quantity button:last-of-type {
-  background: var(--color-food-orange-strong);
-  color: white;
-}
-
-.scan-results .menu-order-quantity button:disabled {
-  border-color: color-mix(in srgb, var(--fj-ink) 22%, transparent);
-  color: var(--color-muted);
-  box-shadow: none;
-}
-
-.scan-results .menu-order-quantity output {
-  min-width: 1.25rem;
-  font-weight: 800;
-  text-align: center;
 }
 
 .scan-results .menu-results-edit {
