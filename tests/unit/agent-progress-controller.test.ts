@@ -146,7 +146,7 @@ describe("AgentStreamController", () => {
 
     const controller = new AgentStreamController();
     let done = false;
-    let code: string | null = null;
+    let code = "";
 
     const { done: finished } = controller.start(
       { meal: "dinner" },
@@ -200,7 +200,7 @@ describe("AgentStreamController", () => {
 
   test("server error event surfaces the code and ends the attempt", async () => {
     const controller = new AgentStreamController();
-    let code: string | null = null;
+    let code = "";
 
     const { done: finished } = controller.start(
       { meal: "dinner" },
@@ -222,7 +222,7 @@ describe("AgentStreamController", () => {
 
     const controller = new AgentStreamController();
     let committed = false;
-    let code: string | null = null;
+    let code = "";
 
     const { done: finished } = controller.start(
       { meal: "dinner" },

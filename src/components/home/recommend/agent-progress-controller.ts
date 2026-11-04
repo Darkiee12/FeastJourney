@@ -243,12 +243,8 @@ export class AgentStreamController<TWire = unknown> {
     };
 
     for (;;) {
-      let read: ReadableStreamReadResult<Uint8Array>;
-
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- Stream frames arrive sequentially; each read advances the shared decode buffer.
-        read = await reader.read();
-      } catch (cause) {
+      // oxlint-disable-next-line no-await-in-loop -- Stream frames arrive sequentially; each read advances the shared decode buffer.
+      const read = await reader.read().catch((cause: unknown): never => {
         const code = options.signal?.aborted === true ? "aborted" : "interrupted";
 
         if (this.isLatest(attempt)) {
@@ -256,7 +252,7 @@ export class AgentStreamController<TWire = unknown> {
         }
 
         throw cause instanceof Error ? cause : new Error(`Recommendation stream ${code}`);
-      }
+      });
 
       if (read.done) {
         break;

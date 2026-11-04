@@ -232,7 +232,7 @@ function CoordinatePicker({
     };
   }, [ready, failed]);
 
-  const useMyLocation = () => {
+  const useMyLocation = useCallback(() => {
     if (disabled) return;
 
     setLocating(true);
@@ -248,7 +248,7 @@ function CoordinatePicker({
       .finally(() => {
         setLocating(false);
       });
-  };
+  }, [disabled, moveCamera, onMapPick]);
 
   const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
     const text = event.clipboardData.getData("text");
