@@ -3,12 +3,22 @@ import { describe, expect, test } from "bun:test";
 import {
   AgentStreamController,
   canonicalStreamKey,
+  type StreamFetch,
 } from "@/components/home/recommend/agent-progress-controller";
 import {
   encodeErrorEvent,
   encodeProgressEvent,
-  encodeResultEvent,
 } from "@/modules/food-discovery/server/agent/stream-codec";
+
+/** Narrow wire contract for the deterministic success chunks below. */
+interface ModeWire {
+  readonly mode: string;
+}
+
+/** Narrow wire contract for the stale-guard markers below. */
+interface MarkerWire {
+  readonly marker: string;
+}
 
 const sseBody = (chunks: Array<string>): ReadableStream<Uint8Array> => {
   const encoder = new TextEncoder();
@@ -54,23 +64,40 @@ const successChunks = [
     detail: null,
     terminal: true,
   }),
-  encodeResultEvent("r1", { mode: "deterministic", dishes: [{ id: "1" }] }),
+  `event: result\ndata: {"requestId":"r1","wire":{"mode":"deterministic"}}\n\n`,
 ];
 
-const okFetch = (chunks: Array<string> = successChunks): typeof fetch =>
-  (() =>
+const okFetch =
+  (chunks: Array<string> = successChunks): StreamFetch =>
+  () =>
     Promise.resolve(
       new Response(sseBody(chunks), {
         status: 200,
         headers: { "content-type": "text/event-stream" },
       }),
-    )) as typeof fetch;
+    );
+
+/** Aborts on signal; used by the navigation-cancellation test. */
+const abortingFetch: StreamFetch = (_url, init) =>
+  new Promise<Response>((_resolve, reject) => {
+    const onAbort = (): void => {
+      reject(new DOMException("aborted", "AbortError"));
+    };
+
+    if (init?.signal?.aborted === true) {
+      reject(new DOMException("aborted", "AbortError"));
+
+      return;
+    }
+
+    init?.signal?.addEventListener("abort", onAbort, { once: true });
+  });
 
 describe("AgentStreamController", () => {
   test("streams progress, commits only the terminal result", async () => {
-    const controller = new AgentStreamController<Record<string, unknown>>();
+    const controller = new AgentStreamController<ModeWire>();
     const seen: Array<string> = [];
-    let done: Record<string, unknown> | null = null;
+    let done: ModeWire | null = null;
 
     const { done: finished } = controller.start(
       { meal: "dinner" },
@@ -90,7 +117,7 @@ describe("AgentStreamController", () => {
     // Duplicate seq-1 redelivery never reached onProgress.
     expect(seen).toEqual(["0:preparing", "1:searching-catalog", "2:completed"]);
     expect(done).not.toBeNull();
-    expect((result as { mode: string }).mode).toBe("deterministic");
+    expect(result.mode).toBe("deterministic");
     // Back-nav cache holds the committed result.
     expect(controller.cachedResult("key-1")).toEqual(result);
   });
@@ -115,8 +142,7 @@ describe("AgentStreamController", () => {
       },
     });
 
-    const fetchImpl = (() =>
-      Promise.resolve(new Response(broken, { status: 200 }))) as typeof fetch;
+    const fetchImpl: StreamFetch = () => Promise.resolve(new Response(broken, { status: 200 }));
 
     const controller = new AgentStreamController();
     let done = false;
@@ -136,7 +162,7 @@ describe("AgentStreamController", () => {
       },
     );
 
-     expect(finished).rejects.toThrow();
+    expect(finished).rejects.toThrow();
     expect(done).toBe(false);
     expect(code).toBe("interrupted");
     expect(controller.cachedResult("key-2")).toBeNull();
@@ -168,7 +194,7 @@ describe("AgentStreamController", () => {
       },
     );
 
-     expect(finished).rejects.toThrow("truncated");
+    expect(finished).rejects.toThrow("truncated");
     expect(committed).toBe(false);
   });
 
@@ -187,27 +213,12 @@ describe("AgentStreamController", () => {
       },
     );
 
-     expect(finished).rejects.toThrow("rate_limited");
+    expect(finished).rejects.toThrow("rate_limited");
     expect(code).toBe("rate_limited");
   });
 
   test("navigation cancellation aborts and late frames never commit", async () => {
     const aborter = new AbortController();
-
-    const fetchImpl = ((_url: string | URL | Request, init?: RequestInit): Promise<Response> =>
-      new Promise<Response>((_resolve, reject) => {
-        const onAbort = (): void => {
-          reject(new DOMException("aborted", "AbortError"));
-        };
-
-        if (init?.signal?.aborted === true) {
-          reject(new DOMException("aborted", "AbortError"));
-
-          return;
-        }
-
-        init?.signal?.addEventListener("abort", onAbort, { once: true });
-      })) as typeof fetch;
 
     const controller = new AgentStreamController();
     let committed = false;
@@ -218,7 +229,7 @@ describe("AgentStreamController", () => {
       "key-5",
       {
         requestId: "r5",
-        fetchImpl,
+        fetchImpl: abortingFetch,
         signal: aborter.signal,
       },
       {
@@ -232,7 +243,7 @@ describe("AgentStreamController", () => {
     );
 
     aborter.abort();
-     expect(finished).rejects.toThrow();
+    expect(finished).rejects.toThrow();
     expect(committed).toBe(false);
     expect(code).toBe("aborted");
     expect(controller.cachedResult("key-5")).toBeNull();
@@ -241,8 +252,14 @@ describe("AgentStreamController", () => {
   test("stale attempt resolving after a newer start never commits", async () => {
     const encoder = new TextEncoder();
     const deferreds: Array<() => void> = [];
+    let calls = 0;
 
-    const gatedFetch = ((_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    // Call-ordered markers (no body parsing): the first started attempt is
+    // "old", the second is "new". Gates resolve newest-first below.
+    const gatedFetch: StreamFetch = () => {
+      calls += 1;
+      const marker = calls === 1 ? "old" : "new";
+
       const gate = new Promise<void>((resolve) => {
         deferreds.push(resolve);
       });
@@ -250,8 +267,6 @@ describe("AgentStreamController", () => {
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
           await gate;
-          const body = JSON.parse((init?.body as string | null) ?? "{}") as { marker?: string };
-          const marker = body.marker === "new" ? "new" : "old";
           controller.enqueue(
             encoder.encode(
               encodeProgressEvent({
@@ -263,15 +278,19 @@ describe("AgentStreamController", () => {
               }),
             ),
           );
-          controller.enqueue(encoder.encode(encodeResultEvent(marker, { marker })));
+          controller.enqueue(
+            encoder.encode(
+              `event: result\ndata: ${JSON.stringify({ requestId: marker, wire: { marker } })}\n\n`,
+            ),
+          );
           controller.close();
         },
       });
 
       return Promise.resolve(new Response(stream, { status: 200 }));
-    }) as typeof fetch;
+    };
 
-    const controller = new AgentStreamController<Record<string, unknown>>();
+    const controller = new AgentStreamController<MarkerWire>();
     const committed: Array<string> = [];
 
     const first = controller.start(
@@ -280,7 +299,7 @@ describe("AgentStreamController", () => {
       { requestId: "old", fetchImpl: gatedFetch },
       {
         onDone: (result) => {
-          committed.push(result["marker"] as string);
+          committed.push(result.marker);
         },
       },
     );
@@ -291,7 +310,7 @@ describe("AgentStreamController", () => {
       { requestId: "new", fetchImpl: gatedFetch },
       {
         onDone: (result) => {
-          committed.push(result["marker"] as string);
+          committed.push(result.marker);
         },
       },
     );
@@ -299,20 +318,20 @@ describe("AgentStreamController", () => {
     // Newer attempt finishes first and commits; the older attempt resolves
     // later and resolves its promise without committing.
     deferreds[1]?.();
-     expect(second.done).resolves.toEqual({ marker: "new" });
+    expect(second.done).resolves.toEqual({ marker: "new" });
     deferreds[0]?.();
-     expect(first.done).resolves.toEqual({ marker: "old" });
+    expect(first.done).resolves.toEqual({ marker: "old" });
     expect(committed).toEqual(["new"]);
   });
 
   test("concurrent duplicate submissions share one fetch", async () => {
     let calls = 0;
 
-    const counting = ((): Promise<Response> => {
+    const counting: StreamFetch = () => {
       calls += 1;
 
       return Promise.resolve(new Response(sseBody(successChunks), { status: 200 }));
-    }) as typeof fetch;
+    };
 
     const controller = new AgentStreamController();
 
@@ -326,8 +345,8 @@ describe("AgentStreamController", () => {
       fetchImpl: counting,
     });
 
-     expect(first.done).resolves.toBeDefined();
-     expect(second.done).resolves.toBeDefined();
+    expect(first.done).resolves.toBeDefined();
+    expect(second.done).resolves.toBeDefined();
     expect(calls).toBe(1);
   });
 
@@ -374,7 +393,7 @@ describe("AgentStreamController", () => {
     expect(new Set([keyA, keyC, keyD, keyE]).size).toBe(4);
 
     // TTL: populate through a real stream, then read fresh vs far-future.
-    const controller = new AgentStreamController<Record<string, unknown>>();
+    const controller = new AgentStreamController<ModeWire>();
 
     const { done } = controller.start({ meal: "dinner" }, keyA, {
       requestId: "ttl",

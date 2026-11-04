@@ -61,7 +61,7 @@ export function useAgentProgress(
 
   useEffect(() => {
     if (requestId === null || openStream === undefined) {
-      return;
+      return undefined;
     }
 
     const controller = new AbortController();

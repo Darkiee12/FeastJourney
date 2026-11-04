@@ -218,29 +218,26 @@ export const consumeProgressStream = async (
   let buffer = "";
   let events = 0;
   let invalidLines = 0;
-  let terminalSeen = false;
+  let terminalSeen: boolean = false;
 
-  const handleLine = (line: string): void => {
+  const handleLine = (line: string): boolean => {
     const result = parseProgressLine(line);
 
     if (result.kind === "heartbeat") {
-      return;
+      return false;
     }
 
     if (result.kind === "invalid") {
       invalidLines += 1;
       callbacks.onInvalidLine?.(line);
 
-      return;
+      return false;
     }
 
     events += 1;
-
-    if (result.event.terminal) {
-      terminalSeen = true;
-    }
-
     callbacks.onEvent(result.event);
+
+    return result.event.terminal;
   };
 
   try {
@@ -253,11 +250,16 @@ export const consumeProgressStream = async (
       const read = await reader.read();
 
       if (read.done) {
-        buffer
+        const lines = buffer
           .split("\n")
-          .map((line) => line.replace(/\r$/, ""))
-          .filter((line) => line.trim() !== "")
-          .forEach(handleLine);
+          .map((raw) => raw.replace(/\r$/, ""))
+          .filter((raw) => raw.trim() !== "");
+
+        for (const line of lines) {
+          if (handleLine(line)) {
+            terminalSeen = true;
+          }
+        }
 
         return {
           events,
@@ -271,7 +273,12 @@ export const consumeProgressStream = async (
       const pending = buffer.split("\n");
       const remainder = pending.pop() ?? "";
 
-      pending.map((line) => line.replace(/\r$/, "")).forEach(handleLine);
+      for (const line of pending.map((raw) => raw.replace(/\r$/, ""))) {
+        if (handleLine(line)) {
+          terminalSeen = true;
+        }
+      }
+
       buffer = remainder;
     }
   } finally {
