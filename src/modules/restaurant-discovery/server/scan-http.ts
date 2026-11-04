@@ -19,6 +19,7 @@ import {
   extractMenu,
   getMenuScan,
   readMenuPhoto,
+  resolveScannerOrFail,
   reviseMenuScan,
   ScanInputError,
   submitMenuContribution,
@@ -63,6 +64,24 @@ const photoSchema = z.union([
   z.strictObject({ scanId: z.uuid(), assetId: z.uuid() }),
   z.strictObject({ contributionId: z.uuid(), assetId: z.uuid() }),
 ]);
+
+/**
+ * Multipart transport cap for one photo upload: the operator's
+ * MENU_SCAN_MAX_IMAGE_BYTES plus framing overhead. Falls back to the
+ * historical 8 MiB default when the scanner is disabled or misconfigured
+ * (extraction itself still fails loudly at its own boundary).
+ */
+const resolveAttachBodyCap = (): number => {
+  try {
+    const scanner = menuScanConfig();
+
+    if (scanner !== null) return scanner.maxImageBytes + 16384;
+  } catch {
+    // Misconfigured scanner: default cap for uploads only.
+  }
+
+  return 8 * 1024 * 1024 + 16384;
+};
 
 /**
  * Retry-After is advisory: it invites the client to retry, so it is sent
@@ -152,7 +171,11 @@ export async function handleMenuScanRequest(request: Request): Promise<Response>
     if (contentType.startsWith("multipart/form-data")) {
       const form = yield* Effect.tryPromise({
         try: async (signal) => {
-          const bytes = await boundedBody(request, 8 * 1024 * 1024 + 16384, signal);
+          // Transport body cap admits the operator's MENU_SCAN_MAX_IMAGE_BYTES
+          // plus multipart overhead — never a fixed 8 MiB that would defeat an
+          // explicit larger value. The decoded image is still validated
+          // against the configured byte bound in attachMenuPhoto.
+          const bytes = await boundedBody(request, resolveAttachBodyCap(), signal);
 
           return new Response(new Uint8Array(bytes), {
             headers: { "Content-Type": contentType },
@@ -164,8 +187,10 @@ export async function handleMenuScanRequest(request: Request): Promise<Response>
             : new ScanInputError({ reason: "The photo upload is invalid or too large." }),
       });
 
+      // Page range parses as a positive int here; the upper bound is enforced
+      // against the operator's MENU_SCAN_MAX_IMAGES in attachMenuPhoto.
       const parsed = scanIdSchema
-        .extend({ pageNumber: z.coerce.number().int().min(1).max(6) })
+        .extend({ pageNumber: z.coerce.number().int().min(1) })
         .safeParse({ scanId: form.get("scanId"), pageNumber: form.get("pageNumber") });
 
       const file = form.get("file");
@@ -202,15 +227,8 @@ export async function handleMenuScanRequest(request: Request): Promise<Response>
       case "create": {
         // Deployment misconfiguration is a provider outage (503), never a
         // user validation error: the request itself may be perfectly valid.
-        const scanner = yield* Effect.try({
-          try: menuScanConfig,
-          catch: () =>
-            new ExtractionUnavailable({
-              reason: "Menu analysis is unavailable. Please retry later.",
-              retryable: false,
-              category: "unavailable",
-            }),
-        });
+        // Invalid explicit configuration logs field + reason server-side.
+        const scanner = yield* resolveScannerOrFail();
 
         if (scanner === null)
           return yield* new ExtractionUnavailable({
@@ -279,6 +297,11 @@ export async function handleMenuScanRequest(request: Request): Promise<Response>
     }
   }).pipe(Effect.annotateLogs({ requestId, operation: "menu-scans/http" }));
 
+  // Request-transport budget only: every action (claim, reads, writes,
+  // extraction accept) is quick local work. Extraction itself runs detached
+  // under the operator's MENU_SCAN_TIMEOUT_MS, so this bound can never
+  // defeat it — it only cancels hung transports (guest-accessible
+  // cancellation protection, not an operator-value ceiling).
   const exit = await appRuntime.runPromiseExit(
     withRequestTimeout(operation, "menu-scans/http", 60000),
     { signal: request.signal },

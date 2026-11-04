@@ -137,13 +137,22 @@ before insertion. Truncation, refusal or invalid output fails recoverably;
 there is no freeform repair chain or model-generated executable UI. Full-page
 references remain; accurate bounding boxes are not claimed.
 
-The HTTP request has a 60-second application budget. The default 20-second
-adapter deadline covers response-body consumption, backoff and at most one
-retry. Cancellation reaches provider and storage requests. PostgreSQL guards at
-most four active extractions with a 90-second token-owned lease and five attempts
-per scan. Leases survive restarts, but extraction is request-bound: no untracked
-background promise or durable background job is launched. An expired lease can
-be retried explicitly; success reuses the stored revision.
+Operator configuration owns every extraction budget: `MENU_SCAN_TIMEOUT_MS`,
+`MENU_SCAN_RETRIES`, `MENU_SCAN_MAX_RESPONSE_BYTES`, `MENU_SCAN_MAX_IMAGES`,
+`MENU_SCAN_MAX_IMAGE_BYTES` and `MENU_SCAN_MAX_COMPLETION_TOKENS` flow through
+exactly as configured with no upper bounds — invalid explicit values fail
+loudly naming field + reason. The combined 24 MiB inline-payload bound is the
+provider's transport limit, not an operator ceiling. Extraction runs detached
+from the HTTP request under the operator's provider budget (async accept +
+status polling in the browser), so no 60s/95s fixed chain can defeat a
+configured value. Cancellation reaches provider and storage requests. The
+extraction lease lifetime derives from the configured provider budget plus a
+documented orchestration margin; PostgreSQL still guards at most four active
+extractions and five attempts per scan (abuse/resource protections for this
+guest-accessible endpoint, not operator ceilings). Leases survive restarts;
+an expired lease can be retried explicitly (idempotent: a retry while work
+is running observes the current view instead of duplicating it); success
+reuses the stored revision.
 
 [Meta's vision](https://dev.meta.ai/docs/image-understanding) and
 [structured-output](https://dev.meta.ai/docs/structured-output) guides document

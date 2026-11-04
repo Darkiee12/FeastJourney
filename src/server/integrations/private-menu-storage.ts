@@ -19,11 +19,17 @@ export const MAX_IMAGE_PIXELS = 20_000_000;
 const MAX_DIMENSION = 12000;
 
 /** Decoding, orientation and re-encoding strip metadata, EXIF and trailing payloads. */
-export const validateMenuImage = (bytes: Uint8Array, declaredType: string) =>
+export const validateMenuImage = (
+  bytes: Uint8Array,
+  declaredType: string,
+  maxBytes: number,
+) =>
   Effect.tryPromise({
     try: async () => {
-      if (bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES)
-        throw new InvalidImage({ reason: "Choose an image smaller than 8 MiB." });
+      if (bytes.length === 0 || bytes.length > maxBytes)
+        throw new InvalidImage({
+          reason: `Choose an image no larger than ${Math.ceil(maxBytes / 1048576)} MiB.`,
+        });
       const signature = Buffer.from(bytes.subarray(0, 12));
       let format: "jpeg" | "png" | "webp";
 
@@ -60,7 +66,7 @@ export const validateMenuImage = (bytes: Uint8Array, declaredType: string) =>
         .jpeg({ quality: 95 })
         .toBuffer({ resolveWithObject: true });
 
-      if (data.length > MAX_IMAGE_BYTES)
+      if (data.length > maxBytes)
         throw new InvalidImage({ reason: "The decoded image is too large. Crop or resize it." });
 
       return {
@@ -92,7 +98,10 @@ export class PrivateMenuStorage extends Context.Service<
   PrivateMenuStorage,
   {
     readonly put: (key: string, bytes: Uint8Array) => Effect.Effect<void, StorageUnavailable>;
-    readonly read: (key: string) => Effect.Effect<Uint8Array, StorageUnavailable>;
+    readonly read: (
+      key: string,
+      maxBytes: number,
+    ) => Effect.Effect<Uint8Array, StorageUnavailable>;
     readonly remove: (key: string) => Effect.Effect<void, StorageUnavailable>;
   }
 >()("feastjourney/integrations/PrivateMenuStorage") {}
@@ -151,7 +160,7 @@ export const PrivateMenuStorageLive = Layer.effect(
             { abortSignal: signal },
           );
         }),
-      read: (key) =>
+      read: (key, maxBytes) =>
         run(async (client, bucket, signal) => {
           const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }), {
             abortSignal: signal,
@@ -159,7 +168,7 @@ export const PrivateMenuStorageLive = Layer.effect(
 
           if (
             object.Body === undefined ||
-            (object.ContentLength !== undefined && object.ContentLength > MAX_IMAGE_BYTES)
+            (object.ContentLength !== undefined && object.ContentLength > maxBytes)
           )
             throw new StorageUnavailable();
           const reader = object.Body.transformToWebStream().getReader();
@@ -177,7 +186,7 @@ export const PrivateMenuStorageLive = Layer.effect(
               if (!(chunk instanceof Uint8Array)) throw new StorageUnavailable();
               length += chunk.byteLength;
 
-              if (length > MAX_IMAGE_BYTES) throw new StorageUnavailable();
+              if (length > maxBytes) throw new StorageUnavailable();
               chunks.push(chunk);
             }
           } finally {

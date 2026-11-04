@@ -14,7 +14,9 @@ describe("private menu photograph validation", () => {
       .png()
       .toBuffer();
 
-    const verified = await Effect.runPromise(validateMenuImage(original, "image/png"));
+    const verified = await Effect.runPromise(
+      validateMenuImage(original, "image/png", MAX_IMAGE_BYTES),
+    );
     const metadata = await sharp(verified.bytes).metadata();
     expect(verified).toMatchObject({ mediaType: "image/jpeg", width: 48, height: 64 });
     expect(verified.checksum).toMatch(/^[0-9a-f]{64}$/);
@@ -28,14 +30,22 @@ describe("private menu photograph validation", () => {
       .png()
       .toBuffer();
 
-    const failure = await Effect.runPromise(Effect.flip(validateMenuImage(png, "image/jpeg")));
+    const failure = await Effect.runPromise(
+      Effect.flip(validateMenuImage(png, "image/jpeg", MAX_IMAGE_BYTES)),
+    );
     expect(failure._tag).toBe("InvalidImage");
   });
 
   test("rejects executable formats and empty files", async () => {
+    const inputs = [
+      new Uint8Array(),
+      new TextEncoder().encode("<svg><script>bad()</script></svg>"),
+    ];
     const failures = await Promise.all(
-      [new Uint8Array(), new TextEncoder().encode("<svg><script>bad()</script></svg>")].map(
-        (bytes) => Effect.runPromise(Effect.flip(validateMenuImage(bytes, "image/png"))),
+      inputs.map((bytes) =>
+        Effect.runPromise(
+          Effect.flip(validateMenuImage(bytes, "image/png", MAX_IMAGE_BYTES)),
+        ),
       ),
     );
 
@@ -44,9 +54,10 @@ describe("private menu photograph validation", () => {
     }
   });
 
-  test("rejects excessive byte size before attempting to decode", async () => {
+  test("rejects byte sizes above the passed bound before attempting to decode", async () => {
+    const oversized = new Uint8Array(MAX_IMAGE_BYTES + 1);
     const failure = await Effect.runPromise(
-      Effect.flip(validateMenuImage(new Uint8Array(MAX_IMAGE_BYTES + 1), "image/jpeg")),
+      Effect.flip(validateMenuImage(oversized, "image/jpeg", MAX_IMAGE_BYTES)),
     );
 
     expect(failure._tag).toBe("InvalidImage");
@@ -59,7 +70,9 @@ describe("private menu photograph validation", () => {
       .png()
       .toBuffer();
 
-    const failure = await Effect.runPromise(Effect.flip(validateMenuImage(png, "image/png")));
+    const failure = await Effect.runPromise(
+      Effect.flip(validateMenuImage(png, "image/png", MAX_IMAGE_BYTES)),
+    );
     expect(failure._tag).toBe("InvalidImage");
   });
 });

@@ -34,12 +34,16 @@ export async function runClientOperation<A, E, R extends AppServices>(
 
   const result = await appRuntime
     .runPromise(
-      withRequestTimeout(guarded, "client/rpc", 15000).pipe(
-        Effect.tapError((error) =>
-          Effect.logWarning("Client operation failed", { tag: clientFailure(error)._tag }),
+      Effect.flatMap(appConfig, (config) =>
+        // Transport budget derives from the operator's REQUEST_TIMEOUT_MS —
+        // never a fixed literal — so an explicit value is honored exactly.
+        withRequestTimeout(guarded, "client/rpc", config.requestTimeoutMs).pipe(
+          Effect.tapError((error) =>
+            Effect.logWarning("Client operation failed", { tag: clientFailure(error)._tag }),
+          ),
+          Effect.mapError(clientFailure),
+          Effect.result,
         ),
-        Effect.mapError(clientFailure),
-        Effect.result,
       ),
     )
     .catch(() => {

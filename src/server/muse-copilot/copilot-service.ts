@@ -32,6 +32,7 @@ import {
   searchDishesTool,
   searchVenuesTool,
   ScanLookup,
+  TOOL_TIMEOUT_MS,
   VenueDetailLookup,
   VenueLookup,
   type CopilotDishDetail,
@@ -61,6 +62,30 @@ export const COPILOT_MAX_TOOL_CALLS = 12;
 export const COPILOT_MAX_RESEARCH_CALLS = 2;
 
 export const COPILOT_OVERALL_DEADLINE_MS = 90000;
+
+/**
+ * Assembly margin (ms) inside the derived chat backstop: covers reply
+ * composition and cache/service overhead outside tool and synthesis
+ * budgets. A fixed technical margin, not an operator ceiling.
+ */
+const COPILOT_CHAT_MARGIN_MS = 30000;
+
+/**
+ * Overall chat backstop, derived — never a fixed ceiling over operator
+ * configuration. Worst case is the operator's synthesis budget plus every
+ * tool call timing out sequentially, plus assembly margin: the backstop can
+ * never defeat an explicit MODEL_TIMEOUT_MS. The 90s floor preserves the
+ * historical default behavior when no large timeout is configured.
+ */
+export const resolveCopilotChatDeadlineMs = (
+  env: Record<string, string | undefined> = process.env,
+): number =>
+  Math.max(
+    COPILOT_OVERALL_DEADLINE_MS,
+    resolveCopilotSynthesisConfig(env).timeoutMs +
+      COPILOT_MAX_TOOL_CALLS * TOOL_TIMEOUT_MS +
+      COPILOT_CHAT_MARGIN_MS,
+  );
 
 export type CopilotChatEnv = Database | DishService | FxRates | CatalogService | WebResearch;
 
@@ -889,20 +914,38 @@ interface CopilotSynthesisConfig {
 const resolveCopilotSynthesisConfig = (
   env: Record<string, string | undefined>,
 ): CopilotSynthesisConfig => {
-  const timeoutRaw = env["MODEL_TIMEOUT_MS"];
-  const timeoutParsed = timeoutRaw === undefined ? Number.NaN : Number.parseInt(timeoutRaw, 10);
+  const modelId = env["MODEL_MODEL_ID"];
+
+  if (modelId !== undefined && !isSupportedModelId(modelId)) {
+    throw new Error(
+      "MODEL_MODEL_ID is not a supported Muse model id (expected muse-spark-<major>.<minor>[-contributor] or muse-wonder-<major>.<minor>).",
+    );
+  }
+
+  const raw = env["MODEL_TIMEOUT_MS"];
+
+  if (raw !== undefined) {
+    const parsed = Number.parseInt(raw, 10);
+
+    if (!Number.isSafeInteger(parsed) || parsed < 1) {
+      throw new Error(
+        `MODEL_TIMEOUT_MS must be a positive safe integer of milliseconds or unset (unset uses ${COPILOT_SYNTHESIS_DEFAULT_TIMEOUT_MS}).`,
+      );
+    }
+
+    return {
+      apiKey: env["MODEL_API_KEY"] ?? "",
+      baseUrl: env["MODEL_BASE_URL"] ?? DEFAULT_MODEL_BASE_URL,
+      modelId: modelId ?? DEFAULT_MODEL_ID,
+      timeoutMs: parsed,
+    };
+  }
 
   return {
     apiKey: env["MODEL_API_KEY"] ?? "",
     baseUrl: env["MODEL_BASE_URL"] ?? DEFAULT_MODEL_BASE_URL,
-    modelId:
-      env["MODEL_MODEL_ID"] !== undefined && isSupportedModelId(env["MODEL_MODEL_ID"])
-        ? env["MODEL_MODEL_ID"]
-        : DEFAULT_MODEL_ID,
-    timeoutMs:
-      Number.isNaN(timeoutParsed) || timeoutParsed < 5000 || timeoutParsed > 30000
-        ? COPILOT_SYNTHESIS_DEFAULT_TIMEOUT_MS
-        : Math.floor(timeoutParsed),
+    modelId: modelId ?? DEFAULT_MODEL_ID,
+    timeoutMs: COPILOT_SYNTHESIS_DEFAULT_TIMEOUT_MS,
   };
 };
 
@@ -1146,7 +1189,23 @@ const runSynthesis = (
 export const copilotChat = Effect.fn("copilot.chat")(function* (request: CopilotChatRequest) {
   const startedAt = Date.now();
   const context = request.context;
-  const synthesisConfig = resolveCopilotSynthesisConfig(process.env);
+
+  let synthesisConfig: CopilotSynthesisConfig | null;
+
+  try {
+    synthesisConfig = resolveCopilotSynthesisConfig(process.env);
+  } catch (error) {
+    // Invalid operator configuration fails loudly in server logs (field +
+    // reason, never values) while the chat keeps its deterministic reply.
+    yield* Effect.logError("Copilot synthesis configuration invalid").pipe(
+      Effect.annotateLogs({
+        reason: error instanceof Error ? error.message : "unknown",
+      }),
+    );
+
+    synthesisConfig = null;
+  }
+
   let toolCalls = 0;
   let rounds = 0;
   let researchCalls = 0;
@@ -1679,6 +1738,7 @@ export const copilotChat = Effect.fn("copilot.chat")(function* (request: Copilot
 
   if (
     memberOnly &&
+    synthesisConfig !== null &&
     synthesisConfig.apiKey.length > 0 &&
     synthesisCalls < COPILOT_SYNTHESIS_MAX_CALLS
   ) {

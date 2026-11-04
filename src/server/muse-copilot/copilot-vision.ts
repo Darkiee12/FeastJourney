@@ -46,24 +46,55 @@ export interface CopilotVisionConfig {
   readonly maxResponseBytes: number;
 }
 
+/**
+ * Operator-owned timeout: a valid explicitly configured value flows through
+ * exactly as set and the default applies only when unset. There is
+ * intentionally no upper bound — upstream provider limits are the
+ * provider's responsibility and surface as provider failures, never as
+ * silent rewrites. An explicitly set value that is not a positive safe
+ * integer fails loudly naming field + reason.
+ */
+const parseOperatorTimeoutMs = (
+  raw: string | undefined,
+  field: string,
+  fallback: number,
+): number => {
+  if (raw === undefined) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(
+      `${field} must be a positive safe integer of milliseconds or unset (unset uses ${fallback}).`,
+    );
+  }
+
+  return parsed;
+};
+
 export const resolveCopilotVisionConfig = (
   env: Record<string, string | undefined>,
 ): CopilotVisionConfig => {
-  const timeoutRaw = env["COPILOT_VISION_TIMEOUT_MS"];
-  const timeoutParsed = timeoutRaw === undefined ? Number.NaN : Number.parseInt(timeoutRaw, 10);
+  const modelId = env["MODEL_MODEL_ID"];
+
+  if (modelId !== undefined && !isSupportedModelId(modelId)) {
+    throw new Error(
+      "MODEL_MODEL_ID is not a supported Muse model id (expected muse-spark-<major>.<minor>[-contributor] or muse-wonder-<major>.<minor>).",
+    );
+  }
 
   return {
     enabled: env["COPILOT_VISION_ENABLED"] === COPILOT_VISION_ENABLED_VALUE,
     apiKey: env["MODEL_API_KEY"] ?? "",
     baseUrl: env["MODEL_BASE_URL"] ?? DEFAULT_MODEL_BASE_URL,
-    modelId:
-      env["MODEL_MODEL_ID"] !== undefined && isSupportedModelId(env["MODEL_MODEL_ID"])
-        ? env["MODEL_MODEL_ID"]
-        : "muse-spark-1.3",
-    timeoutMs:
-      Number.isNaN(timeoutParsed) || timeoutParsed < 5000 || timeoutParsed > 45000
-        ? COPILOT_VISION_DEFAULT_TIMEOUT_MS
-        : Math.floor(timeoutParsed),
+    modelId: modelId ?? "muse-spark-1.3",
+    timeoutMs: parseOperatorTimeoutMs(
+      env["COPILOT_VISION_TIMEOUT_MS"],
+      "COPILOT_VISION_TIMEOUT_MS",
+      COPILOT_VISION_DEFAULT_TIMEOUT_MS,
+    ),
     maxResponseBytes: COPILOT_VISION_MAX_RESPONSE_BYTES,
   };
 };
@@ -543,8 +574,9 @@ const runVisionCall = (
       // This deadline covers fetch, body consumption, backoff, and the one
       // retry. Interruption reaches fetch through tryPromise's AbortSignal;
       // the timed-out source is interrupted before the fallback runs.
-      // Budget: vision timeout <= photo server-function deadline (vision
-      // budget + scan-read overhead). Keep coordinated; do not raise limits.
+      // Timeout chain (all derived, no fixed ceilings): this vision budget
+      // is exactly COPILOT_VISION_TIMEOUT_MS, and the photo server function
+      // derives its deadline from it (vision budget + read overhead).
       (operation) =>
         Effect.timeoutOrElse(operation, {
           duration: Duration.millis(config.timeoutMs),
@@ -602,7 +634,26 @@ export const identifyFoodPhoto = Effect.fn("copilot.identifyPhoto")(function* (
   principal: ScanPrincipal | null,
 ) {
   const startedAt = yield* Clock.currentTimeMillis;
-  const config = resolveCopilotVisionConfig(process.env);
+
+  let config: CopilotVisionConfig;
+
+  try {
+    config = resolveCopilotVisionConfig(process.env);
+  } catch (error) {
+    // Invalid operator configuration fails loudly in server logs (field +
+    // reason, never values) while the photo stays available for retry.
+    yield* Effect.logError("Copilot vision configuration invalid").pipe(
+      Effect.annotateLogs({
+        reason: error instanceof Error ? error.message : "unknown",
+      }),
+    );
+
+    return {
+      candidates: [],
+      unmatchedNote: "Food photo analysis is misconfigured.",
+      status: "unavailable",
+    };
+  }
 
   if (!config.enabled) {
     yield* Effect.logInfo("Copilot vision skipped").pipe(

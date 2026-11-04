@@ -141,8 +141,8 @@ honest note and no provider call)
   |
   +--> deterministic / no key -> ReadyDeterministic
   |
-  +--> Muse structured ranking (single bounded call, 15 s timeout,
-         4000-token ceiling, re-ranks the first 10 deterministic
+  +--> Muse structured ranking (single bounded call, operator-owned
+         timeout and token budget, re-ranks the first 10 deterministic
          candidates — never the whole pool)
          valid -> ReadyMuse | auth/permanent/misconfigured -> typed
          failure (no fallback) | 429/transient/invalid -> deterministic
@@ -207,8 +207,12 @@ same post-exclusion pool; only the ordering step differs.
   misconfiguration are typed errors with no fallback; rate-limit (429),
   transient (5xx/timeout), and invalid-output failures fall back to
   deterministic order reported as `deterministic`.
-- No retries (single attempt), `AbortSignal.timeout` (default 15 s),
-  `max_tokens` (default 4000, `MODEL_MAX_TOKENS`, clamped 1000–16000),
+- No retries (single attempt), `AbortSignal.timeout` at exactly
+  `MODEL_TIMEOUT_MS` (default 15 s, no upper bound — an explicit operator
+  value is honored as set and provider limits surface as provider
+  failures), `max_tokens` at exactly `MODEL_MAX_TOKENS` (default 4000, no
+  upper bound), `MODEL_CANDIDATE_LIMIT`/`MODEL_OUTPUT_LIMIT` honored as set
+  (defaults 60/10; the service still returns exactly `outputLimit` dishes),
   no key/payload logging — only backend, model id, counts, duration,
   and fallback reason. The model re-ranks the first 10 deterministic
   candidates, never the whole pool: reasoning-token bloat on 30–60

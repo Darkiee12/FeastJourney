@@ -136,7 +136,7 @@ export const copilotChatFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const [
       effects,
-      { copilotChat, COPILOT_OVERALL_DEADLINE_MS },
+      { copilotChat, COPILOT_OVERALL_DEADLINE_MS, resolveCopilotChatDeadlineMs },
       { Actor },
       { resolveSession },
       { runApp },
@@ -236,6 +236,19 @@ export const copilotChatFn = createServerFn({ method: "POST" })
       return await ongoing.promise;
     }
 
+    // Overall backstop derives from the operator's synthesis budget plus
+    // tool budgets (never a fixed ceiling over them); the default floor
+    // keeps historical behavior when no large timeout is configured. An
+    // invalid explicit value falls back to the floor here — the chat run
+    // below still logs field + reason and serves its deterministic reply.
+    let chatDeadlineMs: number;
+
+    try {
+      chatDeadlineMs = resolveCopilotChatDeadlineMs();
+    } catch {
+      chatDeadlineMs = COPILOT_OVERALL_DEADLINE_MS;
+    }
+
     const run = runApp(
       effects.Effect.provide(
         copilotChat({
@@ -249,7 +262,7 @@ export const copilotChatFn = createServerFn({ method: "POST" })
         effects.Layer.provide(WebResearchLive, MetaResponsesLive),
       ),
       "fn/copilot/chat",
-      COPILOT_OVERALL_DEADLINE_MS,
+      chatDeadlineMs,
       requestId,
     ).then((output) => {
       const checked = copilotChatOutputSchema.safeParse(output);
@@ -295,7 +308,7 @@ export const copilotIdentifyPhotoFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const [
       effects,
-      { identifyFoodPhoto, resolveCopilotVisionConfig },
+      { COPILOT_VISION_DEFAULT_TIMEOUT_MS, identifyFoodPhoto, resolveCopilotVisionConfig },
       { Actor },
       { resolveSession },
       { runApp },
@@ -375,9 +388,16 @@ export const copilotIdentifyPhotoFn = createServerFn({ method: "POST" })
     // Coordinated deadline: the shared vision budget (fetch, bounded body,
     // backoff, at most one retry) plus scan-read/validation overhead. The
     // runApp race interrupts the vision fiber on expiry; interruption
-    // reaches the provider fetch through tryPromise's AbortSignal. Do not
-    // raise either side without the other.
-    const photoDeadlineMs = resolveCopilotVisionConfig(process.env).timeoutMs + 10_000;
+    // reaches the provider fetch through tryPromise's AbortSignal. An
+    // invalid explicit value falls back to the default budget here — the
+    // identify run below still logs field + reason and returns unavailable.
+    let photoDeadlineMs: number;
+
+    try {
+      photoDeadlineMs = resolveCopilotVisionConfig(process.env).timeoutMs + 10_000;
+    } catch {
+      photoDeadlineMs = COPILOT_VISION_DEFAULT_TIMEOUT_MS + 10_000;
+    }
 
     let output;
 
