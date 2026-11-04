@@ -184,8 +184,10 @@ export function MapSearchBar({
         onClick={onOpenLocation}
         aria-label={copy.regionChoose}
         title={copy.regionChoose}
+        data-labelled="true"
       >
         <MapPin aria-hidden="true" />
+        <span aria-hidden="true">{copy.regionChooseShort}</span>
       </button>
       <button
         type="button"
@@ -194,8 +196,10 @@ export function MapSearchBar({
         disabled={locationBusy}
         aria-label={copy.nearMe}
         title={copy.nearMe}
+        data-labelled="true"
       >
         <Navigation aria-hidden="true" />
+        <span aria-hidden="true">{copy.nearMe}</span>
       </button>
       <button
         type="button"
@@ -203,8 +207,10 @@ export function MapSearchBar({
         onClick={onOpenFilters}
         aria-label={activeFilterCount > 0 ? `${copy.filters} (${activeFilterCount})` : copy.filters}
         title={copy.filters}
+        data-labelled="true"
       >
         <SlidersHorizontal aria-hidden="true" />
+        <span aria-hidden="true">{copy.filters}</span>
         {activeFilterCount > 0 && (
           <span aria-hidden="true" className="mapapp-sb-badge">
             {activeFilterCount}

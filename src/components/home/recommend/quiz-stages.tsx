@@ -8,7 +8,7 @@ import {
   SearchIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { discoveryCityLabelFor } from "@/components/home/discovery-location";
 import {
@@ -208,6 +208,9 @@ function CitySearchInput({
 }) {
   const [text, setText] = useState("");
   const [debounced, setDebounced] = useState("");
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const listId = useId();
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -253,6 +256,17 @@ function CitySearchInput({
   }
 
   const results = cities.data ?? [];
+  const showList = open && trimmed.length >= 2 && results.length > 0;
+  const activeEntry = showList ? results[activeIndex] : undefined;
+
+  const pick = (entry: (typeof results)[number]) => {
+    onPick({
+      placeId: entry.id,
+      name: entry.name ?? entry.id,
+      context: entry.context,
+      country: entry.country,
+    });
+  };
 
   return (
     <div className={compact ? "mt-2" : "mt-3"}>
@@ -267,16 +281,112 @@ function CitySearchInput({
         <input
           id="rec-city"
           type="text"
+          role="combobox"
           autoComplete="off"
+          aria-autocomplete="list"
+          aria-expanded={showList}
+          aria-controls={listId}
+          aria-activedescendant={activeEntry === undefined ? undefined : `${listId}-${activeIndex}`}
           value={text}
           placeholder={
             lang === "vi" ? "Tìm thành phố… ví dụ Bangalore" : "Search a city… e.g. Bangalore"
           }
           onChange={(event) => {
             setText(event.target.value);
+            setOpen(true);
+            setActiveIndex(0);
+          }}
+          onFocus={() => {
+            setOpen(true);
+          }}
+          onBlur={() => {
+            setOpen(false);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" && results.length > 0) {
+              event.preventDefault();
+              setOpen(true);
+              setActiveIndex((index) => Math.min(index + 1, results.length - 1));
+
+              return;
+            }
+
+            if (event.key === "ArrowUp" && results.length > 0) {
+              event.preventDefault();
+              setActiveIndex((index) => Math.max(index - 1, 0));
+
+              return;
+            }
+
+            if (event.key === "Enter" && activeEntry !== undefined) {
+              event.preventDefault();
+              pick(activeEntry);
+
+              return;
+            }
+
+            if (event.key === "Escape" && showList) {
+              event.preventDefault();
+              setOpen(false);
+            }
           }}
           className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-cream py-3 pr-4 pl-11 text-base text-ink placeholder:text-muted focus:border-brand-blue"
         />
+        {/* Type-ahead list under the field: a native <select> cannot sit
+            beneath a text input as suggestions (mirrors
+            SearchableCurrencyPicker). Arrow/Enter/Escape stay on the input
+            via aria-activedescendant; pointer picks go through the inner
+            button. */}
+        {showList ? (
+          <ul
+            id={listId}
+            // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role, jsx-a11y/no-noninteractive-element-to-interactive-role
+            role="listbox"
+            aria-label={lang === "vi" ? "Thành phố khớp" : "Matching cities"}
+            className="absolute inset-x-0 top-full z-20 mt-2 max-h-72 overflow-y-auto overscroll-contain rounded-xl border-2 border-border-soft bg-white py-1 shadow-lg"
+          >
+            {results.map((entry, index) => {
+              const context = entry.context;
+
+              return (
+                <li
+                  key={entry.id}
+                  id={`${listId}-${index}`}
+                  // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role, jsx-a11y/no-noninteractive-element-to-interactive-role
+                  role="option"
+                  aria-selected={index === activeIndex}
+                >
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onPointerDown={onMarkPointer}
+                    onMouseDown={(event) => {
+                      // Keep focus in the input so blur does not close the
+                      // list before the click lands.
+                      event.preventDefault();
+                    }}
+                    onMouseEnter={() => {
+                      setActiveIndex(index);
+                    }}
+                    onClick={() => {
+                      pick(entry);
+                    }}
+                    data-active={index === activeIndex}
+                    className="flex min-h-11 w-full cursor-pointer items-center gap-3 px-4 py-2 text-left text-base text-ink data-[active=true]:bg-cream"
+                  >
+                    <MapPinIcon aria-hidden="true" className="size-4 flex-none text-muted" />
+                    <span className="min-w-0">
+                      <span className="block truncate font-semibold">{entry.name ?? entry.id}</span>
+                      {context === null || context === "" ? null : (
+                        <span className="block truncate text-sm text-muted">{context}</span>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
       </div>
       {trimmed.length < 2 ? (
         <output className="mt-2 block text-sm text-muted">
@@ -303,43 +413,6 @@ function CitySearchInput({
             ? "Không có thành phố nào khớp — hãy chọn quốc gia bên dưới."
             : "No matching city — choose a country below instead."}
         </output>
-      ) : null}
-      {results.length > 0 ? (
-        <div className="mt-2">
-          <label htmlFor="rec-city-results" className="mb-2 block text-sm font-bold text-ink">
-            {lang === "vi" ? "Thành phố khớp" : "Matching cities"}
-          </label>
-          <select
-            id="rec-city-results"
-            value=""
-            onPointerDown={onMarkPointer}
-            onChange={(event) => {
-              const entry = results.find((candidate) => candidate.id === event.target.value);
-
-              if (entry !== undefined) {
-                onPick({
-                  placeId: entry.id,
-                  name: entry.name ?? entry.id,
-                  context: entry.context,
-                  country: entry.country,
-                });
-              }
-            }}
-            className="min-h-11 w-full rounded-xl border-2 border-border-soft bg-white px-4 py-3 text-base text-ink focus:border-brand-blue"
-          >
-            <option value="">{lang === "vi" ? "Chọn một thành phố…" : "Choose a city…"}</option>
-            {results.map((entry) => {
-              const name = entry.name ?? entry.id;
-              const context = entry.context;
-
-              return (
-                <option key={entry.id} value={entry.id}>
-                  {context === null || context === "" ? name : `${name} — ${context}`}
-                </option>
-              );
-            })}
-          </select>
-        </div>
       ) : null}
     </div>
   );

@@ -53,8 +53,14 @@ type ScoredDish = {
   y: number;
 };
 
-/** Minimum anchor separation between concurrent popups in CSS pixels. */
-const POPUP_MIN_SEPARATION_PX = 128;
+/**
+ * Clearance box between popup anchors in CSS pixels. Cards are wide pills
+ * that sit above their anchor, so overlap is a box test (one card width
+ * plus a gap horizontally, one card height plus a gap vertically), not a
+ * radius: a radial check lets side-by-side cards overlap.
+ */
+const POPUP_CLEAR_WIDTH_PX = 300;
+const POPUP_CLEAR_HEIGHT_PX = 120;
 
 function readAnchor(
   anchor: THREE.Object3D,
@@ -72,8 +78,8 @@ function readAnchor(
   const x = (temps.projected.x * 0.5 + 0.5) * size.width;
   const y = (-temps.projected.y * 0.5 + 0.5) * size.height;
 
-  // Eligible cards live on the visible globe below the hero copy: at least
-  // halfway down the hero, and inside the lower globe band with room for the
+  // Eligible cards live on the visible globe below the hero copy: clear of
+  // the Ask Muse pill, and inside the lower globe band with room for the
   // card to fit without covering the headline or primary CTAs.
   // On narrow phones the hero copy stacks full-width above the globe, so the
   // zone additionally clears the copy block plus one card height — the card
@@ -85,12 +91,14 @@ function readAnchor(
 
   let copyClear = 0;
 
-  if (narrow && typeof document !== "undefined") {
+  if (typeof document !== "undefined") {
     const copyBottom =
       document.querySelector("[data-hero-copy]")?.getBoundingClientRect().bottom ??
       size.height * 0.5;
 
-    copyClear = copyBottom + 96;
+    // Desktop only needs a gap: the rect is viewport-relative, so it already
+    // carries the header's height on top of the canvas coordinates.
+    copyClear = copyBottom + (narrow ? 96 : 32);
   }
 
   const zoneTop = Math.max(
@@ -263,24 +271,16 @@ export function GlobeAnimator({
     const perCountry = new Map<string, number>();
     const maxPopups = size.width < NARROW_VIEWPORT_PX ? 1 : MAX_CONCURRENT_POPUPS;
 
-    const clearOfPicked = (candidate: ScoredDish, minSeparation: number): boolean => {
-      if (minSeparation <= 0) {
-        return true;
-      }
+    // Outgoing cards never share the screen with incoming ones (the swap-in
+    // animation waits for the exit), so only the new set is checked.
+    const isClear = (candidate: ScoredDish): boolean =>
+      !picked.some(
+        (taken) =>
+          Math.abs(taken.x - candidate.x) < POPUP_CLEAR_WIDTH_PX &&
+          Math.abs(taken.y - candidate.y) < POPUP_CLEAR_HEIGHT_PX,
+      );
 
-      for (const taken of picked) {
-        const dx = taken.x - candidate.x;
-        const dy = taken.y - candidate.y;
-
-        if (dx * dx + dy * dy < minSeparation * minSeparation) {
-          return false;
-        }
-      }
-
-      return true;
-    };
-
-    const take = (maxPerCountry: number, minSeparation: number) => {
+    const take = (maxPerCountry: number) => {
       for (const candidate of eligible) {
         if (picked.length >= maxPopups) {
           break;
@@ -296,7 +296,7 @@ export function GlobeAnimator({
           continue;
         }
 
-        if (!clearOfPicked(candidate, minSeparation)) {
+        if (!isClear(candidate)) {
           continue;
         }
 
@@ -306,8 +306,8 @@ export function GlobeAnimator({
       }
     };
 
-    take(1, POPUP_MIN_SEPARATION_PX);
-    take(2, POPUP_MIN_SEPARATION_PX);
+    take(1);
+    take(2);
 
     return picked.map((item) => item.dish.id);
   };

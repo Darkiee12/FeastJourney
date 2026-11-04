@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { Star } from "lucide-react";
 
 import { MenuHighlights } from "@/modules/restaurant-discovery/components/menu-highlights";
+import { venueTint } from "@/modules/restaurant-discovery/components/restaurant-card";
 import type { RestaurantCopy } from "@/modules/restaurant-discovery/components/restaurant-copy";
 import type { PhotoRef } from "@/modules/restaurant-discovery/components/restaurant-photos";
 import {
@@ -110,7 +111,11 @@ export function VenueOverview({
       : null;
 
   return (
-    <article className="venue-overview gap-3" aria-label={venue.name}>
+    <article
+      className="venue-overview gap-3"
+      aria-label={venue.name}
+      data-tint={venueTint(venue.name)}
+    >
       <header className="venue-head">
         {fromDish !== null && fromDish !== "" && (
           <p className="venue-dish-link">

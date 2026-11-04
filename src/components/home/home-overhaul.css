@@ -1,0 +1,434 @@
+/* Homepage overhaul (experimental) — the "food passport" language from
+ * restaurant-overhaul.css carried over: ink outlines, hard offset shadows,
+ * mango highlighter on titles, orange reserved for the main action, one
+ * passport stamp per dish photo.
+ *
+ * Selectors key off the Tailwind classes already on these elements so the
+ * components stay untouched and a teammate's push cannot conflict with it.
+ * Unlayered, so it beats the utilities. Remove the import in styles.css to
+ * roll back.
+ */
+
+:root {
+  --fj-ink: var(--color-ink);
+  --fj-line: 2px solid var(--fj-ink);
+  --fj-hard: 3px 3px 0 var(--fj-ink);
+  --fj-highlight: color-mix(in srgb, var(--color-mango) 70%, transparent);
+  --fj-night: #03102e;
+  --fj-mango-soft: #fef3c7;
+}
+
+/* -------------------------------------------------------- top bar --- */
+
+/* A mango edge under the navy ties the bar to the highlighter on the page. */
+.site-header {
+  border-bottom: 0;
+  box-shadow:
+    0 3px 0 var(--color-mango),
+    0 6px 0 var(--fj-night);
+}
+
+/* Wordmark gets the hero headline's orange comic drop. */
+.site-header a[aria-label] > span {
+  text-shadow: 0.07em 0.07em 0 var(--color-food-orange-strong);
+}
+
+/* Soft mango pill on hover; the links already carry rounded-full. */
+.site-header nav a[class~="text-white/85"] {
+  color: white;
+  font-weight: 700;
+  transition: background-color 120ms ease-out;
+}
+
+.site-header nav a[class~="text-white/85"]:hover {
+  background: color-mix(in srgb, var(--color-mango) 26%, transparent);
+  color: white;
+}
+
+/* The scanner is the headline feature: the one filled action in the bar. */
+.site-header nav a[href^="/scan"] {
+  min-height: 2.5rem;
+  margin-inline-start: 0.35rem;
+  border: 2px solid var(--fj-night);
+  background: var(--color-mango);
+  color: var(--fj-ink);
+  box-shadow: 2px 2px 0 var(--fj-night);
+  transition:
+    translate 100ms ease-out,
+    box-shadow 100ms ease-out;
+}
+
+.site-header nav a[href^="/scan"]:hover {
+  background: var(--color-mango);
+  color: var(--fj-ink);
+  translate: -1px -1px;
+  box-shadow: 3px 3px 0 var(--fj-night);
+}
+
+/* The full link row needs ~890px; below that it ran off the screen and hid
+   the account and language controls, so the compact Menu takes over. */
+@media (min-width: 480px) and (max-width: 899px) {
+  .site-header nav > a {
+    display: none;
+  }
+
+  .site-header nav > button[aria-haspopup="menu"] {
+    display: inline-flex;
+  }
+}
+
+/* ------------------------------------------------------------ hero --- */
+/* Desktop marks its hero copy; the phone hero is the stage's z-[2] child. */
+
+:is([data-hero-copy], [data-mobile-home] > div[class~="z-[2]"]) h1 {
+  text-shadow: 0.06em 0.06em 0 var(--color-food-orange-strong);
+}
+
+:is([data-hero-copy], [data-mobile-home] > div[class~="z-[2]"]) p {
+  text-shadow: 0 1px 10px rgb(3 16 46 / 0.85);
+}
+
+:is([data-hero-copy], [data-mobile-home] > div[class~="z-[2]"]) :is(a, button) {
+  border: 2px solid var(--fj-night);
+  box-shadow: 3px 3px 0 var(--fj-night);
+  text-shadow: none;
+  transition:
+    translate 100ms ease-out,
+    box-shadow 100ms ease-out;
+}
+
+:is([data-hero-copy], [data-mobile-home] > div[class~="z-[2]"]) :is(a, button):hover {
+  translate: -1px -1px;
+  box-shadow: 4px 4px 0 var(--fj-night);
+}
+
+:is([data-hero-copy], [data-mobile-home] > div[class~="z-[2]"]) :is(a, button):active {
+  translate: 2px 2px;
+  box-shadow: none;
+}
+
+:is([data-hero-copy], [data-mobile-home] > div[class~="z-[2]"])
+  :is(a, button):is([class~="border-mango"], [class~="border-white/40"]) {
+  background: white;
+  color: var(--fj-ink);
+}
+
+/* Ask Muse is the Meta-powered feature: it gets the one mango pop. */
+:is([data-hero-copy], [data-mobile-home] > div[class~="z-[2]"]) a[href*="/muse"] {
+  background: var(--color-mango);
+  color: var(--fj-ink);
+  backdrop-filter: none;
+}
+
+#surprise-dish-button {
+  border: var(--fj-line);
+  background: white;
+  color: var(--fj-ink);
+  box-shadow: 3px 3px 0 var(--fj-night);
+  backdrop-filter: none;
+}
+
+/* Globe dish cards and their preview read as comic captions. */
+.hero [class~="pointer-events-auto"]:is([class~="rounded-2xl"]) {
+  border: var(--fj-line);
+  box-shadow: 4px 4px 0 var(--fj-night);
+}
+
+/* ---------------------------------------------------- page sections --- */
+
+.home:not(.hero) {
+  background:
+    radial-gradient(rgb(23 32 51 / 0.09) 1px, transparent 1.4px) 0 0 / 16px 16px,
+    var(--color-cream);
+}
+
+.home:not(.hero) #discover {
+  background: transparent;
+}
+
+/* Full-bleed soft mango band behind a centred section. */
+.home:not(.hero) #recommend {
+  padding-top: 4rem;
+  background: var(--fj-mango-soft);
+  box-shadow: 0 0 0 100vmax var(--fj-mango-soft);
+  clip-path: inset(0 -100vmax);
+}
+
+/* Inline headings let the highlighter follow each wrapped line. */
+#discover-heading,
+#recommend-heading {
+  display: inline;
+  padding: 0 0.15em;
+  background: linear-gradient(
+    transparent 54%,
+    var(--fj-highlight) 54%,
+    var(--fj-highlight) 90%,
+    transparent 90%
+  );
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+#discover-heading + p,
+#recommend-heading + p {
+  margin-top: 1rem;
+}
+
+/* The heading sits on mango here, so the swipe switches to orange. */
+.home:not(.hero) #recommend-heading {
+  background-image: linear-gradient(
+    transparent 54%,
+    color-mix(in srgb, var(--color-food-orange) 38%, transparent) 54%,
+    color-mix(in srgb, var(--color-food-orange) 38%, transparent) 90%,
+    transparent 90%
+  );
+}
+
+.home:not(.hero) #recommend p[class~="text-muted"] {
+  color: color-mix(in srgb, var(--fj-ink) 72%, transparent);
+}
+
+/* ---------------------------------------------------------- buttons --- */
+
+:is(#discover, #recommend, [data-quiz-sheet])
+  :is(a, button)[class~="rounded-full"]:is(
+    [class~="bg-white"],
+    [class~="bg-ink"],
+    [class~="bg-food-orange-strong"]
+  ) {
+  border: var(--fj-line);
+  box-shadow: 2px 2px 0 var(--fj-ink);
+  transition:
+    translate 100ms ease-out,
+    box-shadow 100ms ease-out;
+}
+
+:is(#discover, #recommend, [data-quiz-sheet])
+  :is(a, button)[class~="rounded-full"]:is(
+    [class~="bg-white"],
+    [class~="bg-ink"],
+    [class~="bg-food-orange-strong"]
+  ):hover:not(:disabled) {
+  translate: -1px -1px;
+  box-shadow: var(--fj-hard);
+  opacity: 1;
+}
+
+:is(#discover, #recommend, [data-quiz-sheet])
+  :is(a, button)[class~="rounded-full"]:is(
+    [class~="bg-white"],
+    [class~="bg-ink"],
+    [class~="bg-food-orange-strong"]
+  ):active:not(:disabled) {
+  translate: 2px 2px;
+  box-shadow: none;
+}
+
+:is(#discover, #recommend, [data-quiz-sheet])
+  :is(a, button)[class~="rounded-full"][class~="bg-white"]:hover:not(:disabled) {
+  background: white;
+  color: var(--fj-ink);
+}
+
+/* ------------------------------------------------- dish feature card --- */
+
+/* Slides fill the clipped viewport, so each one keeps its shadow inside a
+   margin of its own instead of losing it to overflow: hidden. */
+.discover-carousel-track > article[class~="rounded-3xl"] {
+  width: calc(100% - 6px);
+  margin: 0 6px 6px 0;
+  border: var(--fj-line);
+  border-radius: 1.25rem;
+  box-shadow: 5px 5px 0 var(--fj-ink);
+}
+
+.discover-carousel-track > article[class~="rounded-3xl"] > div[title],
+.discover-carousel-track > article[class~="rounded-3xl"] > div[class~="relative"] {
+  border-right: var(--fj-line);
+}
+
+.discover-carousel-track > article[class~="rounded-2xl"] {
+  width: calc(100% - 5px);
+  margin: 0 5px 5px 0;
+  border: var(--fj-line);
+  box-shadow: 4px 4px 0 var(--fj-ink);
+}
+
+/* Without a reason row the template's second row is empty and left a white
+   strip under the photo. */
+@media (min-width: 768px) {
+  .discover-carousel-track
+    > article[class~="rounded-3xl"]:not(:has(> div[class~="md:col-span-2"])) {
+    grid-template-rows: minmax(0, 1fr);
+  }
+}
+
+/* Passport entry stamp on the photo: where this dish is from. */
+.dish-stamp {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  max-width: calc(100% - 2rem);
+  padding: 0.35rem 0.75rem;
+  border: 2.5px solid var(--color-food-orange-strong);
+  border-radius: 0.5rem;
+  background: var(--color-cream);
+  box-shadow:
+    inset 0 0 0 2px var(--color-cream),
+    inset 0 0 0 3.5px var(--color-food-orange-strong);
+  color: var(--color-food-orange-strong);
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  line-height: 1.1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  rotate: -5deg;
+}
+
+.discover-carousel-track p[class~="text-[11px]"] {
+  justify-self: start;
+  width: fit-content;
+  padding: 0 0.25em;
+  color: var(--fj-ink);
+  background: linear-gradient(
+    transparent 45%,
+    var(--fj-highlight) 45%,
+    var(--fj-highlight) 92%,
+    transparent 92%
+  );
+}
+
+/* --------------------------------------------------- quiz card + form --- */
+
+#recommend section > div[class~="rounded-3xl"] {
+  border: var(--fj-line);
+  border-radius: 1.25rem;
+  box-shadow: 5px 5px 0 var(--fj-ink);
+}
+
+:is(#recommend, [data-quiz-sheet]) label[class~="rounded-2xl"] {
+  border: var(--fj-line);
+  border-radius: 0.9rem;
+  transition:
+    background-color 100ms ease-out,
+    box-shadow 100ms ease-out;
+}
+
+:is(#recommend, [data-quiz-sheet]) label[class~="rounded-2xl"]:hover {
+  border-color: var(--fj-ink);
+  background: var(--fj-mango-soft);
+}
+
+/* Picked answers go mango instead of solid black. */
+:is(#recommend, [data-quiz-sheet]) label[class~="rounded-2xl"][class~="bg-ink"] {
+  background: var(--color-mango);
+  color: var(--fj-ink);
+  box-shadow: var(--fj-hard);
+}
+
+:is(#recommend, [data-quiz-sheet]) :is(input[type="text"], input[type="search"], select, textarea) {
+  border: var(--fj-line);
+  background-color: white;
+}
+
+:is(#recommend, [data-quiz-sheet]) [role="listbox"] {
+  padding-block: 0;
+  border: var(--fj-line);
+  box-shadow: var(--fj-hard);
+}
+
+:is(#recommend, [data-quiz-sheet]) [role="listbox"] button[data-active="true"] {
+  background: var(--fj-mango-soft);
+}
+
+/* Ink buttons have no visible ink shadow, so theirs is orange. */
+:is(#recommend, [data-quiz-sheet]) button[class~="rounded-full"][class~="bg-ink"] {
+  box-shadow: 2px 2px 0 var(--color-food-orange);
+}
+
+:is(#recommend, [data-quiz-sheet])
+  button[class~="rounded-full"][class~="bg-ink"]:hover:not(:disabled) {
+  box-shadow: 3px 3px 0 var(--color-food-orange);
+}
+
+/* Step titles line up with the hint text below them. */
+#recommend legend {
+  padding-inline: 0;
+}
+
+/* Step progress as a chunky outlined meter. */
+#recommend section > div[class~="rounded-3xl"] span[class~="h-2"] {
+  height: 0.7rem;
+  border: 2px solid var(--fj-ink);
+}
+
+/* --------------------------------------------------- results + panels --- */
+
+#recommend article[class~="rounded-2xl"],
+#recommend li > button[class~="rounded-2xl"],
+#discover :is(div, section)[class*="border-dashed"] {
+  border: var(--fj-line);
+  box-shadow: var(--fj-hard);
+}
+
+#recommend article[class~="rounded-2xl"]:hover {
+  border-color: var(--fj-ink);
+}
+
+/* The rail's selected thumbnail keeps a clear state under the ink outline. */
+#recommend li > button[class~="rounded-2xl"][class~="border-food-orange-strong"] {
+  background: var(--fj-mango-soft);
+  box-shadow: 4px 4px 0 var(--color-food-orange);
+}
+
+#recommend ul[class~="overflow-x-auto"] {
+  padding-right: 0.5rem;
+  padding-bottom: 0.6rem;
+}
+
+/* No photo yet: the same calm cream tile the Discover card uses, instead of
+   a loud gradient slab. */
+:is(#recommend, [data-quiz-sheet]) span[class~="bg-gradient-to-br"],
+:is(#recommend, [data-quiz-sheet]) div[class~="bg-gradient-to-br"] {
+  background: var(--color-cream);
+  color: var(--color-food-orange-strong);
+}
+
+:is(#recommend, [data-quiz-sheet]) span[class~="bg-gradient-to-br"] [class~="text-white"],
+:is(#recommend, [data-quiz-sheet]) span[class~="text-white"][class~="bg-gradient-to-br"] {
+  color: var(--color-food-orange-strong);
+}
+
+/* Side panels on the results screen join the outlined system. */
+#recommend :is(aside, div, section)[class~="rounded-2xl"][class~="border-2"] {
+  border: var(--fj-line);
+}
+
+/* Location and similar portalled menus match the page. */
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"] {
+  border: var(--fj-line);
+  box-shadow: var(--fj-hard);
+}
+
+@media (min-width: 768px) {
+  .dish-stamp {
+    font-size: 1.4rem;
+  }
+}
+
+@media (max-width: 767px) {
+  .discover-carousel-track > article[class~="rounded-3xl"] > div[title],
+  .discover-carousel-track > article[class~="rounded-3xl"] > div[class~="relative"] {
+    border-right: 0;
+    border-bottom: var(--fj-line);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is([data-hero-copy], [data-mobile-home] > div[class~="z-[2]"]) :is(a, button),
+  :is(#discover, #recommend, [data-quiz-sheet]) :is(a, button),
+  :is(#recommend, [data-quiz-sheet]) label {
+    transition: none;
+  }
+}

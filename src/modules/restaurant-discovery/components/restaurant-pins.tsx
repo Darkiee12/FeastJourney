@@ -66,6 +66,12 @@ export function RestaurantPinButton({
       onClick={onSelect}
     >
       <RestaurantPinGlyph />
+      {/* Visual name flag for the selected/hovered pin; positioned outside
+          the button box so the marker's bottom anchor never shifts. The
+          accessible name stays on aria-label. */}
+      <span className="restaurant-pin-flag" aria-hidden="true">
+        {name}
+      </span>
     </button>
   );
 }

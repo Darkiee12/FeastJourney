@@ -186,7 +186,9 @@ function AppLayout() {
                 fetchPriority="high"
                 className="block h-7 w-auto flex-none object-contain min-[480px]:h-8 md:h-10"
               />
-              <span className="truncate">FeastJourney</span>
+              {/* Bangers is slanted: pad the clip box so truncate does not
+                  shave the final glyph's overhang. */}
+              <span className="truncate pr-[0.15em]">FeastJourney</span>
             </Link>
 
             <nav

@@ -15,10 +15,10 @@ function DesktopHome({ copy, lang }: { copy: Messages; lang: Locale }) {
   return (
     <div className="home">
       <HomeHero copy={copy} lang={lang} />
+      <DiscoverySection copy={copy} lang={lang} />
       <ClientOnly fallback={<span aria-hidden="true" className="block h-0 overflow-hidden" />}>
         <RecommendSection />
       </ClientOnly>
-      <DiscoverySection copy={copy} lang={lang} />
     </div>
   );
 }

@@ -57,11 +57,16 @@ export function PanelToolbar({
             {backText}
           </button>
         )}
-        <h2 className="mapapp-toolbar-title">
-          {countLabel !== null && countLabel !== undefined && countLabel !== ""
-            ? `${title} · ${countLabel}`
-            : title}
-        </h2>
+        {/* The drawer/sheet header already shows the title, so only the
+            count is visible here; the full heading stays for screen readers. */}
+        {countLabel !== null && countLabel !== undefined && countLabel !== "" ? (
+          <h2 className="mapapp-toolbar-title" data-count-only="true">
+            <span className="sr-only">{title} · </span>
+            {countLabel}
+          </h2>
+        ) : (
+          <h2 className="mapapp-toolbar-title">{title}</h2>
+        )}
         {contextLine !== null && contextLine !== undefined && contextLine !== "" && (
           <p className="mapapp-toolbar-context">{contextLine}</p>
         )}
@@ -83,9 +88,9 @@ export function PanelToolbar({
         </button>
       )}
       {view === "overview" && <h2 className="mapapp-toolbar-title">{title}</h2>}
-      {view === "reviews" && sectionLabel !== null && sectionLabel !== undefined && (
-        <h2 className="mapapp-toolbar-title">{sectionLabel}</h2>
-      )}
+      {(view === "reviews" || view === "menu") &&
+        sectionLabel !== null &&
+        sectionLabel !== undefined && <h2 className="mapapp-toolbar-title">{sectionLabel}</h2>}
     </nav>
   );
 }

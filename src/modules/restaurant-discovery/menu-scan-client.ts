@@ -485,7 +485,7 @@ async function requestScan<A>(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     },
-    body.action === "extract" ? 65000 : 30000,
+    body.action === "extract" ? 95000 : 30000,
     signal,
   );
 

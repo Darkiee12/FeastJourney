@@ -618,13 +618,11 @@ export function DishCarousel({
                     loadingLabel={copy.discoverLocalLoading}
                     className="absolute inset-0 h-full w-full"
                   />
+                  {dish.regionNames.length > 0 ? (
+                    <p className="dish-stamp">{dish.regionNames.slice(0, 2).join(" · ")}</p>
+                  ) : null}
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-2 p-6 sm:p-8 md:min-h-0 md:overflow-hidden">
-                  {dish.regionNames.length > 0 ? (
-                    <p className="text-xs font-bold tracking-[0.18em] text-food-orange-strong uppercase">
-                      {dish.regionNames.slice(0, 2).join(" · ")}
-                    </p>
-                  ) : null}
                   <h3 className="font-display text-4xl leading-none tracking-wide text-balance sm:text-5xl">
                     {title}
                   </h3>
