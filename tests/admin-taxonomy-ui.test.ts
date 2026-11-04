@@ -126,7 +126,7 @@ describe("ingredient bulk-line grammar", () => {
 describe("bulk row status resolution", () => {
   test("cuisine rows absent from skipped/invalid count as created", () => {
     const result: BulkCuisineResult = {
-      created: 1,
+      created: [{ id: "1", slug: "hue", name: "Hue" }],
       skipped: [{ entry: { slug: "pho", name: "Pho" }, reason: "duplicate slug" }],
       invalid: [{ entry: { name: "Bad" }, reason: "empty after trim" }],
     };
@@ -144,7 +144,7 @@ describe("bulk row status resolution", () => {
 
   test("ingredient rows resolve the same way with language-tag labels", () => {
     const result: BulkIngredientResult = {
-      created: 1,
+      created: [{ id: "1", name: "Rau muống" }],
       skipped: [{ entry: { name: "Basil" }, reason: "already exists" }],
       invalid: [],
     };

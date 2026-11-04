@@ -1,23 +1,31 @@
 /**
  * Admin taxonomy client contract (frontend workstream).
  *
- * TODO(contract): the six server functions below are owned by the backend
- * workstream on `feat/admin-taxonomy` (`@/modules/food-discovery/admin.functions.ts`).
- * That branch has not landed yet, so this file declares the exact
- * coordinator-approved shapes and exposes them through `TaxonomyClient`.
- * When the backend lands, delete `unimplementedTaxonomyClient` and pass the
- * real `*Fn` imports at the route boundary — the panel components already
- * speak only this interface, so no panel changes are needed.
+ * The six server functions live in `@/modules/food-discovery/admin.functions.ts`
+ * (backend workstream, same branch). This file declares the panel-facing
+ * `TaxonomyClient` interface plus the live `serverTaxonomyClient` wiring, the
+ * shared bulk-line parsers, and the row-status resolvers. Panels speak only
+ * this interface so tests can inject fakes.
  *
- * Coordinator-approved contract (consume exactly, do not redefine):
+ * Coordinator-approved shapes (consume exactly, do not redefine):
  * - `listCuisinesFn({data: {query?, limit, offset}}) -> {cuisines: [{id, slug, name}]}`
  * - `createCuisineFn({data: {slug?, name}}) -> {cuisine}`
  * - `bulkCreateCuisinesFn({data: {entries: [{slug?, name}]}}) -> {created, skipped, invalid}`
  * - `listIngredientsFn({data: {query?, limit, offset}}) -> {ingredients: [{id, name}]}`
  * - `createIngredientFn({data: {name, languageTag?}}) -> {ingredient}`
  * - `bulkCreateIngredientsFn({data: {entries: [{name, languageTag?}]}}) -> {created, skipped, invalid}`
- * where `skipped`/`invalid` are `[{entry, reason}]` rows.
+ * where `created` is the array of created summaries and `skipped`/`invalid`
+ * are `[{entry, reason}]` rows.
  */
+
+import {
+  bulkCreateCuisinesFn,
+  bulkCreateIngredientsFn,
+  createCuisineFn,
+  createIngredientFn,
+  listCuisinesFn,
+  listIngredientsFn,
+} from "@/modules/food-discovery/admin.functions";
 
 export interface CuisineEntry {
   readonly id: string;
@@ -56,13 +64,13 @@ export interface BulkRow<Entry> {
 }
 
 export interface BulkCuisineResult {
-  readonly created: number;
+  readonly created: ReadonlyArray<CuisineEntry>;
   readonly skipped: ReadonlyArray<BulkRow<BulkCuisineEntry>>;
   readonly invalid: ReadonlyArray<BulkRow<BulkCuisineEntry>>;
 }
 
 export interface BulkIngredientResult {
-  readonly created: number;
+  readonly created: ReadonlyArray<IngredientEntry>;
   readonly skipped: ReadonlyArray<BulkRow<BulkIngredientEntry>>;
   readonly invalid: ReadonlyArray<BulkRow<BulkIngredientEntry>>;
 }
@@ -98,20 +106,18 @@ export interface TaxonomyClient {
   }) => Promise<BulkIngredientResult>;
 }
 
-const missingBackend = (fnName: string): never => {
-  throw new Error(
-    `TODO(contract): ${fnName} is not implemented yet — waiting on feat/admin-taxonomy.`,
-  );
-};
-
-/** Placeholder wiring used until the backend workstream lands. Never ships silently: every call throws. */
-export const unimplementedTaxonomyClient: TaxonomyClient = {
-  listCuisines: () => Promise.reject(missingBackend("listCuisinesFn")),
-  createCuisine: () => Promise.reject(missingBackend("createCuisineFn")),
-  bulkCreateCuisines: () => Promise.reject(missingBackend("bulkCreateCuisinesFn")),
-  listIngredients: () => Promise.reject(missingBackend("listIngredientsFn")),
-  createIngredient: () => Promise.reject(missingBackend("createIngredientFn")),
-  bulkCreateIngredients: () => Promise.reject(missingBackend("bulkCreateIngredientsFn")),
+/** Live wiring: each method mirrors one backend server function one-to-one. */
+export const serverTaxonomyClient: TaxonomyClient = {
+  listCuisines: (input) =>
+    listCuisinesFn({ data: { query: input.query, limit: input.limit, offset: input.offset } }),
+  createCuisine: (input) => createCuisineFn({ data: { slug: input.slug, name: input.name } }),
+  bulkCreateCuisines: (input) => bulkCreateCuisinesFn({ data: { entries: [...input.entries] } }),
+  listIngredients: (input) =>
+    listIngredientsFn({ data: { query: input.query, limit: input.limit, offset: input.offset } }),
+  createIngredient: (input) =>
+    createIngredientFn({ data: { name: input.name, languageTag: input.languageTag } }),
+  bulkCreateIngredients: (input) =>
+    bulkCreateIngredientsFn({ data: { entries: [...input.entries] } }),
 };
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -121,12 +127,17 @@ export const isValidSlug = (slug: string): boolean => SLUG_PATTERN.test(slug);
 
 /**
  * Derive a URL slug from a display name the same way the server does when
- * `slug` is omitted: NFKD-normalize, drop diacritics, lowercase, map every
+ * `slug` is omitted: NFKD-normalize, drop diacritics (including đ/Đ strokes),
+ * lowercase, map every
  * non-alphanumeric run to one hyphen, trim edge hyphens. Returns "" when
  * nothing usable remains (caller then omits `slug` and lets the server decide).
  */
 export const deriveSlug = (name: string): string => {
-  const ascii = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  const ascii = name
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "d")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "");
 
   return ascii
     .toLowerCase()

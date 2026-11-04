@@ -52,7 +52,8 @@ export interface AdminNavEntry {
     | "/admin/restaurants"
     | "/admin/reviews"
     | "/admin/users"
-    | "/admin/roles";
+    | "/admin/roles"
+    | "/admin/taxonomy";
 }
 
 /**
@@ -97,6 +98,10 @@ export const adminNavEntries = (
     {
       entry: { label: copy.adminRoles, to: "/admin/roles", exact: false },
       visible: capabilities.roles,
+    },
+    {
+      entry: { label: copy.adminTaxonomy, to: "/admin/taxonomy", exact: false },
+      visible: capabilities.imports,
     },
   ];
 

@@ -372,7 +372,7 @@ function IngredientBulkAdd({
       {lastResult === null ? null : (
         <AdminCard>
           <BulkResultList
-            createdCount={lastResult.result.created}
+            createdCount={lastResult.result.created.length}
             emptyMessage={vi ? "Không có dòng nào." : "No rows submitted."}
             rows={rows}
           />

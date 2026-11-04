@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 
 import { CuisinePanel } from "@/components/admin/taxonomy/cuisine-panel";
 import { IngredientPanel } from "@/components/admin/taxonomy/ingredient-panel";
-import { unimplementedTaxonomyClient } from "@/components/admin/taxonomy/taxonomy-contracts";
+import { serverTaxonomyClient } from "@/components/admin/taxonomy/taxonomy-contracts";
 import { AdminPageHeading, AdminRouteError } from "@/components/admin/ui";
 import { authorizeFn } from "@/modules/user/admin.functions";
 import { getSessionFn } from "@/modules/user/session.functions";
@@ -41,19 +41,8 @@ type TaxonomyTab = "cuisines" | "ingredients";
 
 /**
  * Feast Lab taxonomy workspace: cuisines + ingredients tabs sharing one
- * panel contract. List/search/add/bulk-add run through `TaxonomyClient`.
- *
- * TODO(contract): `feat/admin-taxonomy` owns the six server functions
- * (`listCuisinesFn`, `createCuisineFn`, `bulkCreateCuisinesFn`,
- * `listIngredientsFn`, `createIngredientFn`, `bulkCreateIngredientsFn` in
- * `@/modules/food-discovery/admin.functions.ts`). Until it lands, both tabs
- * render against `unimplementedTaxonomyClient` and surface the honest
- * error state; swapping to the real wiring is a one-line client change at
- * the coordinator merge.
- *
- * Note: no `/admin/taxonomy` entry exists in the shared `adminNavEntries`
- * union (`components/admin/ui`, outside this workstream's ownership), so the
- * page is reachable by direct URL until the coordinator extends the nav.
+ * panel contract. List/search/add/bulk-add run through the live server-backed
+ * `serverTaxonomyClient`.
  */
 function AdminTaxonomy(): ReactNode {
   const { lang } = rootRoute.useSearch();
@@ -101,9 +90,9 @@ function AdminTaxonomy(): ReactNode {
         aria-labelledby={tab === "cuisines" ? "taxonomy-tab-cuisines" : "taxonomy-tab-ingredients"}
       >
         {tab === "cuisines" ? (
-          <CuisinePanel client={unimplementedTaxonomyClient} lang={locale} />
+          <CuisinePanel client={serverTaxonomyClient} lang={locale} />
         ) : (
-          <IngredientPanel client={unimplementedTaxonomyClient} lang={locale} />
+          <IngredientPanel client={serverTaxonomyClient} lang={locale} />
         )}
       </div>
     </div>
