@@ -678,6 +678,50 @@ export function MenuScanPage({
 
         if (abort.signal.aborted) return;
         adoptView(next);
+
+        // Refresh recovery: a remembered scan still processing server-side
+        // resumes observation automatically — no local photographs needed.
+        // Terminal states settle through the same adopt path as a fresh run.
+        if (next.document === null && next.scan.status === "processing") {
+          // The live flag is re-read on every check through this closure:
+          // a direct read here would be narrowed away by the early return above.
+          const isLive = (): boolean => !abort.signal.aborted;
+
+          setReading(true);
+          setStatus(copy.analyzing);
+
+          try {
+            const storedLocation = readStoredMenuLocation();
+
+            const followed = await menuScanClient.extractAndWait(
+              next.scan.id,
+              abort.signal,
+              storedLocation?.cityId,
+            );
+
+            if (isLive()) adoptView(followed);
+          } catch (followError) {
+            if (isLive())
+              setFailure({
+                message: followError instanceof Error ? followError.message : copy.failure,
+                retryable:
+                  followError instanceof MenuScanClientError ? followError.retryable : false,
+                retryAfterSeconds:
+                  followError instanceof MenuScanClientError ? followError.retryAfterSeconds : null,
+                action: null,
+                code:
+                  followError instanceof MenuScanClientError
+                    ? followError.failure?.code
+                    : undefined,
+                transportKind:
+                  followError instanceof MenuScanClientError
+                    ? followError.transportKind
+                    : undefined,
+              });
+          } finally {
+            if (isLive()) setReading(false);
+          }
+        }
       } catch (error) {
         if (!abort.signal.aborted)
           setFailure({
@@ -702,7 +746,7 @@ export function MenuScanPage({
       abort.abort();
       controller.current?.abort();
     };
-  }, [owner, adoptView, copy.failure]);
+  }, [owner, adoptView, copy.analyzing, copy.failure]);
 
   const runTask = async (
     label: string,
