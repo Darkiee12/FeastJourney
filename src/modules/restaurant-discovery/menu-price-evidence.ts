@@ -128,11 +128,15 @@ export const needsPriceReview = (price: {
   });
 
 /**
- * Coarsened location evidence for currency inference (§3/§4 precedence:
- * printed address > linked venue > user-selected > trusted country).
- * Only coarse city/country strings travel to Muse; raw GPS coordinates,
- * street addresses, and request headers never leave the server. Menu
- * language is not location evidence and is absent by design.
+ * Coarsened location evidence for currency inference (§3/§4).
+ * Deterministic precedence, strongest first:
+ * printed symbol > linked venue (verified menu location) >
+ * visitor-selected menu city/country (server-resolved through the place
+ * catalog) > trusted visitor country (weak) > unknown.
+ * Menu location always outweighs visitor location. Locale, translation,
+ * and display currency are never location evidence and are absent by
+ * design. Conflicting signals are stated as conflict so the model stays
+ * uncertain instead of silently resolving one side away.
  */
 export interface CurrencyContext {
   readonly venueName: string | null;
@@ -154,6 +158,10 @@ const ISO_COUNTRY = /^[A-Z]{2}$/;
  * Curated preset city ids (mirrors CITY_PRESETS in map-bounds without
  * importing viewport geometry into the currency domain). Values are coarse
  * display names carried as weak visitor-indicated evidence only.
+ * Presets carry no country here — the extraction operation resolves the
+ * country for these names through the place catalog (see
+ * resolvePlaceMenuEvidence in server/operations/menu-scans), never through
+ * a preset-to-country map in this module.
  */
 const KNOWN_MENU_CITIES: ReadonlyMap<string, string> = new Map([
   ["hcmc", "Ho Chi Minh City"],
@@ -263,8 +271,10 @@ export const normalizeCurrencyContext = (input: {
 
 /**
  * Single coarsened evidence sentence for the model prompt, or null when no
- * evidence exists. Precedence is encoded by order; conflicting signals are
- * stated as conflict so the model stays uncertain instead of picking one.
+ * evidence exists. Precedence is encoded by order: linked venue first, then
+ * the visitor-indicated menu location, then the weak visitor country. A
+ * menu country that disagrees with the visitor country is stated as an
+ * explicit conflict so the model stays uncertain instead of picking one.
  */
 export const formatCurrencyContextEvidence = (context: CurrencyContext): string | null => {
   const parts: Array<string> = [];
@@ -279,7 +289,33 @@ export const formatCurrencyContextEvidence = (context: CurrencyContext): string 
   if (context.trustedCountry !== null)
     parts.push(`coarse visitor country ${context.trustedCountry}`);
 
+  if (
+    context.menuCountry !== null &&
+    context.trustedCountry !== null &&
+    context.menuCountry !== context.trustedCountry
+  )
+    parts.push(
+      `conflicting signals: menu location names ${context.menuCountry} but visitor country is ${context.trustedCountry}; stay uncertain, do not resolve the conflict`,
+    );
+
   if (parts.length === 0) return null;
 
   return `Coarse location evidence (weak; printed currency always wins): ${parts.join("; ")}. Menu language is not location evidence.`;
+};
+
+/**
+ * Deterministic menu-country read for the results lane: the
+ * server-resolved menu country (place-catalog evidence) outweighs the weak
+ * trusted visitor country; absent both, the country is unknown. Printed
+ * symbols outrank this read at inference time (see the model prompt), and
+ * locale, translation, and display currency never feed it — no such inputs
+ * exist on this boundary. Conflicts are preserved in the evidence sentence
+ * above, never silently resolved here beyond this order.
+ */
+export const resolveMenuCountry = (context: CurrencyContext): string | null => {
+  if (context.menuCountry !== null) return context.menuCountry;
+
+  if (context.trustedCountry !== null) return context.trustedCountry;
+
+  return null;
 };

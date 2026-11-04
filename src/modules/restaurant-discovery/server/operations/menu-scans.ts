@@ -416,7 +416,7 @@ const COUNTRY_ISO = /^[A-Z]{2}$/;
  * street addresses, or coordinates leave this boundary; the locale only
  * picks the display label language, never location.
  */
-const resolvePlaceMenuEvidence = Effect.fn("menu.resolvePlaceEvidence")(function* (
+const resolvePlaceIdMenuEvidence = Effect.fn("menu.resolvePlaceIdEvidence")(function* (
   menuCityId: string | null | undefined,
   locale: string,
 ) {
@@ -462,6 +462,67 @@ const resolvePlaceMenuEvidence = Effect.fn("menu.resolvePlaceEvidence")(function
   const evidence: PlaceMenuEvidence = { menuCity: detail.displayName ?? null, menuCountry };
 
   return evidence;
+});
+
+/**
+ * Resolve a curated preset or `geo:` display name to coarse currency
+ * evidence through the place catalog search (`searchCities`, which resolves
+ * aliases like "Bangalore" through place_names). Presets carry no country
+ * of their own — the top city-scale hit supplies the country ISO, so no
+ * preset-to-country map lives anywhere. Unmatched names keep their city
+ * text with no country; lookup failures (bad locale, catalog outage)
+ * degrade to the same city-only evidence so a weak hint never fails an
+ * extraction. The hit is a nearest-name match, weaker than a `place:`
+ * registry identity; genuine ambiguity stays visible because the evidence
+ * sentence names the city and country together.
+ */
+const resolveNamedMenuEvidence = Effect.fn("menu.resolveNamedEvidence")(function* (
+  displayName: string,
+  locale: string,
+) {
+  const cityOnly: PlaceMenuEvidence = { menuCity: displayName, menuCountry: null };
+
+  const catalogOption = yield* Effect.serviceOption(CatalogService);
+
+  if (Option.isNone(catalogOption)) return cityOnly;
+
+  const cities = yield* catalogOption.value
+    .searchCities(displayName, locale, 1)
+    .pipe(Effect.orElseSucceed(() => [] as const));
+
+  const first = cities[0];
+
+  if (first === undefined) return cityOnly;
+
+  const evidence: PlaceMenuEvidence = {
+    menuCity: first.name ?? displayName,
+    menuCountry: first.country !== null && COUNTRY_ISO.test(first.country) ? first.country : null,
+  };
+
+  return evidence;
+});
+
+/**
+ * Resolve a client-supplied menu city id to coarse currency evidence.
+ * `place:<decimalId>` identities resolve through the place registry;
+ * curated preset ids ("hcmc" | "hanoi" | "bangalore") and `geo:` names
+ * resolve through the catalog city search to a display name plus country
+ * ISO. Anything else is dropped: the client is never trusted to assert
+ * geography with an arbitrary string.
+ */
+const resolvePlaceMenuEvidence = Effect.fn("menu.resolvePlaceEvidence")(function* (
+  menuCityId: string | null | undefined,
+  locale: string,
+) {
+  const placeId = parsePlaceMenuCityId(menuCityId);
+
+  if (placeId !== null) return yield* resolvePlaceIdMenuEvidence(menuCityId, locale);
+
+  const displayName = resolveMenuCityId(menuCityId);
+
+  if (displayName === null) return noPlaceMenuEvidence;
+
+  return yield* resolveNamedMenuEvidence(displayName, locale);
 });
 
 /**
@@ -589,12 +650,13 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
             // Currency context merges existing scan fields only: the linked
             // venue (venue_id/venue_name already on the scan row) outranks the
             // coarse visitor country. The visitor-selected menu city id resolves
-            // server-side: curated presets and `geo:` names via the sync map
-            // (unknown ids are dropped, never trusted as geography), while
-            // `place:` registry ids resolve through the place catalog to a
-            // coarse city display name plus country ISO (unknown/missing records
-            // degrade to null). Preset and `geo:` ids keep today's behavior with
-            // menuCountry unset on this path. No new persistence, no raw GPS or
+            // server-side: `place:` registry ids resolve through the place
+            // catalog to a coarse city display name plus country ISO
+            // (unknown/missing records degrade to null), while curated
+            // presets and `geo:` names resolve through the catalog city
+            // search to a display name plus country ISO (unmatched names
+            // keep their city text with no country, never invented
+            // geography). No new persistence, no raw GPS or
             // street addresses, and language is never treated as location.
             const targetLanguage = menuScanDocumentSchema.shape.targetLanguage.parse(
               state.scan.target_language,
@@ -607,7 +669,7 @@ export const extractMenu = Effect.fn("menu.extractScan")(function* (
 
             const currencyContext: CurrencyContext = normalizeCurrencyContext({
               venueName: state.scan.venue_name,
-              menuCity: placeEvidence.menuCity ?? resolveMenuCityId(location?.menuCityId ?? null),
+              menuCity: placeEvidence.menuCity,
               menuCountry: placeEvidence.menuCountry,
               trustedCountry: location?.trustedCountry ?? null,
             });

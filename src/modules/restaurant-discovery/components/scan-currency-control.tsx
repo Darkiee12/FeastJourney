@@ -91,15 +91,20 @@ export function useScanCurrency(sources?: ReadonlyArray<string | null>): ScanCur
 const controlStateId = (id: string): string => `${id}-currency-control`;
 
 /**
- * One menu-wide currency control for the scan results header. Checkbox +
- * the reused `SearchableCurrencyPicker` (never a native select): the picker
- * appears when the box is checked without a saved preference, or when the
- * traveler edits the currency.
+ * One compact menu-wide currency toolbar for the scan results header:
+ * a visible caption plus the single reused `SearchableCurrencyPicker`
+ * (never a native select, never a second picker) and a suspend/resume
+ * toggle. Hiding conversions only suspends display — the saved preference
+ * (member account or guest localStorage) is never cleared by this
+ * control, and a scanner-only toggle never erases an account choice
+ * (both guaranteed by the reused hook).
  *
  * Props are all optional — the control reads preference/FX through the
  * existing hooks and works mounted bare inside the scan-results header.
  * `sources` (distinct source currencies on the menu) only drives the
  * already-in-target note; conversion rendering reads rates per price.
+ * Unknown prices stay unknown: this control renders no converted amount,
+ * and per-price conversion only renders where a rate exists.
  *
  * Exactly one polite live region announces conversion status per update —
  * rows and dishes never add their own conversion announcements.
@@ -117,59 +122,33 @@ export function ScanCurrencyControl({
   const copy = scanCurrencyCopy(resolved);
   const fallback = useScanCurrency(sources);
   const currency = state ?? fallback;
-  const checkboxId = useId();
-  const [pickerOpen, setPickerOpen] = useState(false);
-
-  // Checking the box with no saved preference reveals the picker first;
-  // the box reads checked while the traveler is choosing.
-  const checked = currency.enabled || pickerOpen;
-
-  const toggle = (next: boolean): void => {
-    if (next && currency.target === "") {
-      setPickerOpen(true);
-
-      return;
-    }
-
-    setPickerOpen(false);
-    currency.setEnabled(next);
-  };
+  const labelId = useId();
 
   return (
-    <div className="scan-currency" id={controlStateId(checkboxId)}>
-      <label htmlFor={checkboxId} className="scan-currency-check">
-        <input
-          id={checkboxId}
-          type="checkbox"
-          checked={checked}
-          onChange={(event) => toggle(event.target.checked)}
-        />
-        {copy.showInMyCurrency}
-      </label>
-      {currency.enabled && currency.target !== "" && !pickerOpen ? (
+    <div className="scan-currency scan-currency-toolbar" id={controlStateId(labelId)}>
+      <span className="scan-currency-label" id={labelId}>
+        {copy.pickCurrency}:
+      </span>
+      <SearchableCurrencyPicker
+        value={currency.target}
+        codes={currency.codes}
+        locale={resolved}
+        label={copy.pickCurrency}
+        placeholder={copy.pickCurrency}
+        unavailableNote={currency.catalogUnavailable ? copy.ratesUnavailable : undefined}
+        onChange={(code) => currency.choose(code)}
+      />
+      {currency.target === "" ? null : (
         <button
           type="button"
           className="scan-currency-change"
-          onClick={() => setPickerOpen(true)}
-          aria-label={`${copy.changeCurrency}: ${currency.target}`}
+          aria-pressed={currency.enabled}
+          aria-describedby={labelId}
+          onClick={() => currency.setEnabled(!currency.enabled)}
         >
-          {currency.target}
+          {copy.showInMyCurrency}
         </button>
-      ) : null}
-      {pickerOpen ? (
-        <SearchableCurrencyPicker
-          value={currency.target}
-          codes={currency.codes}
-          locale={resolved}
-          label={copy.pickCurrency}
-          placeholder={copy.pickCurrency}
-          unavailableNote={currency.catalogUnavailable ? copy.ratesUnavailable : undefined}
-          onChange={(code) => {
-            currency.choose(code);
-            setPickerOpen(false);
-          }}
-        />
-      ) : null}
+      )}
       <p aria-live="polite" className="scan-currency-status">
         {currency.enabled && currency.allSameCurrency
           ? copy.alreadyDisplayedIn.replace("{currency}", currency.target)

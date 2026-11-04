@@ -2,7 +2,6 @@ import {
   ArrowLeft,
   ArrowUpRight,
   BookOpen,
-  Image as ImageIcon,
   Info,
   Minus,
   Plus,
@@ -67,7 +66,11 @@ export interface MenuDetailLabels {
  * URLs keep authorized access (cookies ride the request); no forced new
  * tab. Native dialog owns Escape + focus return; zoom is explicit
  * step buttons (100–300%) with a plain text level, honoring reduced
- * motion (no transitions). One viewer instance per mount.
+ * motion (no transitions). One viewer instance per mount. Triggers render
+ * real 72px photographic thumbnails (never a bare "Open photo N" box);
+ * the images are decorative (empty alt) with the page label kept as the
+ * accessible name, and menu scans are only ever labeled menu photos —
+ * never dish photos.
  */
 export function MenuPhotoViewer({
   photos,
@@ -119,7 +122,20 @@ export function MenuPhotoViewer({
           onClick={() => inspect(photo.assetId)}
           aria-label={copy.photoOpen.replace("{n}", String(photo.page))}
         >
-          <ImageIcon aria-hidden="true" />
+          <img
+            src={photoUrl(photo.assetId)}
+            alt=""
+            loading="lazy"
+            width={72}
+            height={72}
+            style={{
+              width: "4.5rem",
+              height: "4.5rem",
+              flex: "none",
+              objectFit: "cover",
+              borderRadius: "0.375rem",
+            }}
+          />
           {copy.photoOpen.replace("{n}", String(photo.page))}
         </button>
       ))}
