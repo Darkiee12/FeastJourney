@@ -13,6 +13,8 @@
 @import "./modules/restaurant-discovery/components/restaurant-photo-manager.css";
 @import "./modules/restaurant-discovery/components/restaurant-overhaul.css";
 @import "./components/home/home-overhaul.css";
+@import "./modules/restaurant-discovery/components/scan-overhaul.css";
+@import "./modules/muse-copilot/muse-overhaul.css";
 
 @theme {
   --color-brand-blue: #2563eb;

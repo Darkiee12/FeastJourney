@@ -335,6 +335,8 @@ function MenuItemCard({
       originalLanguageInstruction: selection?.originalLanguageInstruction ?? "",
     });
 
+  const ownNotes = item.uncertainties.filter((note) => !isLanguageNote(note));
+
   return (
     <article className="menu-order-item">
       <MenuItemHeader item={item} menu={menu} copy={copy} sourceLanguage={sourceLanguage} />
@@ -348,9 +350,9 @@ function MenuItemCard({
         onVariant={onVariant}
       />
       <MenuItemIngredients item={item} menu={menu} copy={copy} sourceLanguage={sourceLanguage} />
-      {item.uncertainties.length > 0 && (
+      {ownNotes.length > 0 && (
         <p className="menu-order-check">
-          {copy.uncertainty}: {item.uncertainties.join("; ")}
+          {copy.uncertainty}: {ownNotes.join("; ")}
         </p>
       )}
       <MenuItemQuantity
@@ -380,6 +382,10 @@ function MenuItemCard({
     </article>
   );
 }
+
+/** The extractor repeats its unsupported-language caveat on every dish, in
+ *  schema terms. It is one fact about the whole menu, so it renders once. */
+const isLanguageNote = (note: string): boolean => /source[- ]?language/i.test(note);
 
 export function InteractiveMenuView({
   menu,
@@ -441,12 +447,16 @@ export function InteractiveMenuView({
 
   if (menu.provenance === "draft") notice = copy.draftNotice;
 
+  const resultsCopy = menuScanResultsCopy(locale);
+  const languageNoted = menu.items.some((item) => item.uncertainties.some(isLanguageNote));
+
   return (
     <section className="menu-order" aria-labelledby={titleId} lang={menuBcp47TagFor(locale)}>
       <h2 id={titleId} className="font-display text-3xl">
         {copy.menu}
       </h2>
       <p className="menu-order-notice">{notice}</p>
+      {languageNoted && <p className="menu-order-language-note">{resultsCopy.languageNote}</p>}
       {menu.items.length === 0 && <output>{copy.empty}</output>}
       <div className="menu-order-list">
         {menu.items.map((item, index) => {

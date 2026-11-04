@@ -16,7 +16,7 @@ const scannerConfigSchema = z.strictObject({
       url.hash === ""
     );
   }),
-  timeoutMs: z.coerce.number().int().min(1000).max(45000),
+  timeoutMs: z.coerce.number().int().min(1000).max(90000),
   retries: z.coerce.number().int().min(0).max(1),
   maxResponseBytes: z.coerce.number().int().min(1024).max(2097152),
   maxImages: z.coerce.number().int().min(1).max(6),

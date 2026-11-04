@@ -288,7 +288,7 @@ export function MuseShell({ copy, initialContext, onTaskChange, task }: MuseShel
   return (
     <section
       aria-label={copy.shellTitle}
-      className="overflow-hidden rounded-3xl bg-space-deep shadow-[0_24px_64px_rgba(3,10,30,0.45)]"
+      className="muse-shell overflow-hidden rounded-3xl bg-space-deep shadow-[0_24px_64px_rgba(3,10,30,0.45)]"
     >
       <div
         key={task ?? "home"}

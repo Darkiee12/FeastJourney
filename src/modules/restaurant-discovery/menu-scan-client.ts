@@ -154,7 +154,7 @@ async function requestScan<A>(
   signal?: AbortSignal,
 ): Promise<A> {
   const body = actionsSchema.parse(input);
-  const signals = [AbortSignal.timeout(body.action === "extract" ? 65000 : 30000)];
+  const signals = [AbortSignal.timeout(body.action === "extract" ? 95000 : 30000)];
 
   if (signal !== undefined) signals.push(signal);
 

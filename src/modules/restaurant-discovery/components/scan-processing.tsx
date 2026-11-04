@@ -39,7 +39,19 @@ export function ScanProcessing({
   const determinate = phase === "uploading" && total > 0;
 
   return (
-    <div className="scan-processing" aria-busy="true">
+    <div className="scan-processing" data-phase={phase} aria-busy="true">
+      {/* Decorative only: a menu page under a moving scan beam. It implies no
+          progress; the provider reports none. */}
+      <div className="scan-reading" aria-hidden="true">
+        <span className="scan-reading-title" />
+        <span className="scan-reading-line" />
+        <span className="scan-reading-line" />
+        <span className="scan-reading-line" />
+        <span className="scan-reading-title" />
+        <span className="scan-reading-line" />
+        <span className="scan-reading-line" />
+        <span className="scan-reading-beam" />
+      </div>
       <output aria-live="polite" className="scan-processing-line">
         <LoaderCircle aria-hidden="true" className="scan-spin" />{" "}
         {phaseLabel(phase, uploaded, total, locale)}

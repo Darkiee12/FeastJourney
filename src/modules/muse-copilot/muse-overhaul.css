@@ -1,0 +1,176 @@
+/* Muse overhaul (experimental) — the "food passport" language from
+ * home-overhaul.css. The flows are written for a light surface (ink titles,
+ * muted helper text), so the shell becomes a white passport page; on the old
+ * navy panel their headings were close to unreadable. The landing keeps a
+ * navy hero band so Muse still feels like the special feature.
+ *
+ * Unlayered, so it beats the utilities on the shell. Remove the import in
+ * styles.css to roll back.
+ */
+
+.muse-shell {
+  border: var(--fj-line);
+  border-radius: 1.5rem;
+  background: white;
+  box-shadow: 6px 6px 0 var(--fj-ink);
+}
+
+.muse-hero {
+  padding: clamp(2rem, 6vh, 3rem) 1.25rem;
+  border-bottom: var(--fj-line);
+  background: var(--color-space-deep);
+  box-shadow: inset 0 -5px 0 var(--color-mango);
+  text-align: center;
+}
+
+.muse-hero h1 {
+  text-shadow: 0.06em 0.06em 0 var(--color-food-orange-strong);
+}
+
+.muse-hero-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-block-end: 0.75rem;
+  padding: 0.25rem 0.8rem;
+  border: 2px solid var(--fj-night);
+  border-radius: 9999px;
+  background: var(--color-mango);
+  color: var(--fj-ink);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------------- task cards --- */
+
+.muse-shell ul[class~="grid"] {
+  gap: 1rem;
+}
+
+/* Five tasks in two columns: the last one spans instead of leaving a hole. */
+.muse-shell ul[class~="grid"] > li:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.muse-shell ul[class~="grid"] button[class~="rounded-2xl"],
+.muse-shell ul[class~="grid"] div[class~="rounded-2xl"] {
+  border: var(--fj-line);
+  border-radius: 1.1rem;
+  box-shadow: 4px 4px 0 var(--fj-ink);
+  transition:
+    translate 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+.muse-shell ul[class~="grid"] button[class~="rounded-2xl"]:hover {
+  border-color: var(--fj-ink);
+  translate: -2px -2px;
+  box-shadow: 6px 6px 0 var(--fj-ink);
+}
+
+.muse-shell ul[class~="grid"] button[class~="rounded-2xl"]:active {
+  translate: 2px 2px;
+  box-shadow: none;
+}
+
+.muse-shell ul[class~="grid"] span[class~="bg-space-deep"] {
+  border: var(--fj-line);
+  background: var(--color-mango);
+  color: var(--fj-ink);
+}
+
+/* -------------------------------------------------- flows on white --- */
+
+/* Shell chrome was tuned for navy; on white it takes the ink system. */
+.muse-shell :is(button, a)[class~="border-white/25"],
+.muse-shell :is(button, a)[class~="border-transparent"] {
+  background: white;
+  color: var(--fj-ink);
+}
+
+.muse-shell :is(button, a)[class~="border-white/25"] {
+  border: var(--fj-line);
+  background: var(--fj-mango-soft);
+  box-shadow: 2px 2px 0 var(--fj-ink);
+}
+
+.muse-shell :is(p, span):is([class~="text-white"], [class*="text-white/"]) {
+  color: var(--fj-ink);
+}
+
+.muse-hero :is(p, span)[class*="text-white"] {
+  color: rgb(255 255 255 / 0.88);
+}
+
+.muse-shell div[class~="bg-white/5"] {
+  border: var(--fj-line);
+  background: var(--color-cream);
+}
+
+/* Flows narrowed themselves inside the shell's column, so their content sat
+   indented from the Back row above. */
+.muse-shell div[class~="max-w-2xl"] {
+  max-width: none;
+  padding-inline: 0;
+}
+
+/* Flow titles match the rest of the site. */
+.muse-shell h2[class*="font-display"],
+.muse-shell :is(h1, h2, h3)[class~="font-display"] {
+  width: fit-content;
+  padding: 0 0.15em;
+  color: var(--fj-ink);
+  background: linear-gradient(
+    transparent 54%,
+    var(--fj-highlight) 54%,
+    var(--fj-highlight) 90%,
+    transparent 90%
+  );
+}
+
+.muse-hero h1[class~="font-display"] {
+  width: auto;
+  padding: 0;
+  color: white;
+  background: none;
+}
+
+.muse-shell :is(input[type="text"], input[type="search"], input:not([type]), select, textarea) {
+  border: var(--fj-line);
+  border-radius: 0.8rem;
+  background-color: white;
+  box-shadow: none;
+}
+
+.muse-shell :is(a, button, label)[class~="bg-food-orange-strong"],
+.muse-shell :is(a, button, label)[class*="rounded"][class~="bg-white"]:not(ul button) {
+  border: var(--fj-line);
+  box-shadow: 2px 2px 0 var(--fj-ink);
+}
+
+.muse-shell :is(a, button, label)[class~="bg-food-orange-strong"]:hover:not(:disabled) {
+  translate: -1px -1px;
+  box-shadow: var(--fj-hard);
+}
+
+.muse-shell :is(a, button, label)[class~="bg-food-orange-strong"]:disabled {
+  border-color: color-mix(in srgb, var(--fj-ink) 22%, transparent);
+  background: var(--color-cream);
+  color: var(--color-muted);
+  box-shadow: none;
+  opacity: 1;
+}
+
+/* Reassurance lines were shouting in tracked caps. */
+.muse-shell p[class~="uppercase"] {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .muse-shell ul[class~="grid"] :is(button, div) {
+    transition: none;
+  }
+}

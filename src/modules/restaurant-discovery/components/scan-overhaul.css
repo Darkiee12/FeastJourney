@@ -1,0 +1,699 @@
+/* Menu scanner overhaul (experimental) — the "food passport" language from
+ * home-overhaul.css. Tokens come from :root there. Results turn into compact
+ * dish cards: translated name first, printed name under it, price as a tag.
+ *
+ * Unlayered and imported last, so it wins over menu-scan-page.css and
+ * menu-order.css. Remove the import in styles.css to roll back.
+ */
+
+.app-shell:has(.menu-scan-page),
+.app-shell:has(.muse-shell) {
+  background:
+    radial-gradient(rgb(23 32 51 / 0.09) 1px, transparent 1.4px) 0 0 / 16px 16px,
+    var(--color-cream);
+}
+
+.menu-scan-page {
+  padding-block-start: 1rem;
+}
+
+.menu-scan-page:has(.menu-order-item) {
+  max-width: 62rem;
+}
+
+/* --------------------------------------------------------------- hero --- */
+
+.scan-hero {
+  display: grid;
+  justify-items: start;
+  gap: 0.5rem;
+  margin-block-end: 1.25rem;
+}
+
+.scan-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.7rem;
+  border-radius: 9999px;
+  background: var(--color-space-deep);
+  color: var(--color-mango);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+}
+
+.scan-hero h1 {
+  display: inline;
+  padding: 0 0.15em;
+  font-size: clamp(2.5rem, 7vw, 3.5rem);
+  line-height: 1.05;
+  color: var(--fj-ink);
+  background: linear-gradient(
+    transparent 54%,
+    var(--fj-highlight) 54%,
+    var(--fj-highlight) 90%,
+    transparent 90%
+  );
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.scan-subtitle {
+  font-size: 1.05rem;
+}
+
+.scan-branch-unknown,
+.scan-branch-chip {
+  font-size: 0.85rem;
+}
+
+/* ----------------------------------------------------------- capture --- */
+
+.scan-capture {
+  gap: 1rem;
+  padding: 1.25rem;
+  border: var(--fj-line);
+  border-radius: 1.25rem;
+  background: white;
+  box-shadow: 5px 5px 0 var(--fj-ink);
+}
+
+/* `.menu-scan-page label` sets display: block, which stacked icon over text. */
+.menu-scan-page label.scan-capture-primary,
+.menu-scan-page label.scan-capture-secondary {
+  display: inline-flex;
+}
+
+.menu-scan-page label.scan-consent {
+  display: flex;
+}
+
+.scan-capture-primary svg,
+.scan-capture-secondary svg {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.scan-capture-primary,
+.scan-capture-secondary {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  min-height: 3.25rem;
+  padding: 0.6rem 1rem;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  box-shadow: 2px 2px 0 var(--fj-ink);
+  font-weight: 800;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    translate 100ms ease-out,
+    box-shadow 100ms ease-out;
+}
+
+.scan-capture-primary {
+  background: var(--color-food-orange-strong);
+  color: white;
+}
+
+.scan-capture-secondary {
+  background: white;
+  color: var(--fj-ink);
+}
+
+.scan-capture-primary:hover,
+.scan-capture-secondary:hover {
+  translate: -1px -1px;
+  box-shadow: var(--fj-hard);
+}
+
+.scan-capture-primary:active,
+.scan-capture-secondary:active {
+  translate: 2px 2px;
+  box-shadow: none;
+}
+
+.menu-scan-page button[role="combobox"],
+.menu-scan-page select,
+.menu-scan-page input[type="text"],
+.menu-scan-page input:not([type]) {
+  border: var(--fj-line);
+  border-radius: 0.75rem;
+  background-color: white;
+}
+
+.scan-photo-cell,
+.scan-add-pages {
+  border: var(--fj-line);
+  border-radius: 0.9rem;
+}
+
+.scan-add-pages {
+  border-style: dashed;
+  background: var(--fj-mango-soft);
+  color: var(--fj-ink);
+}
+
+.scan-photo-cell-actions button {
+  width: 2.5rem;
+  height: 2.5rem;
+  min-height: 0;
+  padding: 0;
+  border: var(--fj-line);
+  border-radius: 9999px;
+}
+
+/* Primary action across the scanner and the waiter card. */
+.menu-scan-page .menu-order-primary {
+  min-height: 3.25rem;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  background: var(--color-food-orange-strong);
+  color: white;
+  box-shadow: var(--fj-hard);
+  font-weight: 800;
+}
+
+.menu-scan-page .menu-order-primary:hover:not(:disabled) {
+  translate: -1px -1px;
+  box-shadow: 4px 4px 0 var(--fj-ink);
+}
+
+.menu-scan-page .menu-order-primary:active:not(:disabled) {
+  translate: 2px 2px;
+  box-shadow: none;
+}
+
+.menu-scan-page .menu-order-primary:disabled {
+  border-color: color-mix(in srgb, var(--fj-ink) 22%, transparent);
+  background: var(--color-cream);
+  color: var(--color-muted);
+  box-shadow: none;
+  opacity: 1;
+}
+
+/* ------------------------------------------------- reading the menu --- */
+
+.scan-processing {
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem 1.25rem;
+  border: var(--fj-line);
+  border-radius: 1.25rem;
+  background: var(--fj-mango-soft);
+  box-shadow: 5px 5px 0 var(--fj-ink);
+  text-align: center;
+}
+
+.scan-processing-line {
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.scan-processing-note {
+  margin: 0;
+  color: color-mix(in srgb, var(--fj-ink) 72%, transparent);
+}
+
+.scan-reading {
+  position: relative;
+  display: grid;
+  gap: 0.5rem;
+  width: 8.5rem;
+  padding: 1rem 0.9rem;
+  border: var(--fj-line);
+  border-radius: 0.6rem;
+  background: white;
+  box-shadow: var(--fj-hard);
+  overflow: hidden;
+  rotate: -3deg;
+}
+
+.scan-reading-title,
+.scan-reading-line {
+  display: block;
+  height: 0.4rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--fj-ink) 16%, transparent);
+}
+
+.scan-reading-title {
+  width: 55%;
+  height: 0.6rem;
+  background: var(--color-food-orange-strong);
+}
+
+.scan-reading-line:nth-of-type(3n) {
+  width: 72%;
+}
+
+.scan-reading-beam {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 1.5rem;
+  border-bottom: 3px solid var(--color-food-orange);
+  background: linear-gradient(transparent, color-mix(in srgb, var(--color-mango) 60%, transparent));
+  animation: scan-beam 2.4s ease-in-out infinite alternate;
+}
+
+@keyframes scan-beam {
+  from {
+    translate: 0 -1.5rem;
+  }
+
+  to {
+    translate: 0 9rem;
+  }
+}
+
+/* Upload steps are short and report real counts; only reading gets the card. */
+.scan-processing:not([data-phase="reading"]) .scan-reading {
+  display: none;
+}
+
+.scan-error {
+  border: var(--fj-line);
+  border-left-width: 0.5rem;
+  border-left-color: var(--color-food-orange-strong);
+  border-radius: 1rem;
+  box-shadow: var(--fj-hard);
+}
+
+/* ------------------------------------------------------ results head --- */
+
+/* The results section has three headers and a revision line; the friendly
+   "Your menu is ready" carries the page and the rest stay in Scan details. */
+.scan-results-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.scan-revision-line {
+  display: none;
+}
+
+.scan-results-head h1 {
+  display: inline;
+  padding: 0 0.15em;
+  font-size: clamp(2.25rem, 6vw, 3rem);
+  line-height: 1.1;
+  background: linear-gradient(
+    transparent 54%,
+    var(--fj-highlight) 54%,
+    var(--fj-highlight) 90%,
+    transparent 90%
+  );
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.scan-results-head p:first-of-type {
+  margin-block-start: 0.6rem;
+}
+
+.scan-model-chip {
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.2rem 0.7rem;
+  border-radius: 9999px;
+  background: var(--color-space-deep);
+  color: var(--color-mango);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.scan-session-actions button {
+  min-height: 2.5rem;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  background: white;
+  color: var(--fj-ink);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.scan-results-diet,
+.scan-results-price-note,
+.menu-order-language-note {
+  max-width: none;
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.85rem;
+  border: var(--fj-line);
+  border-left-width: 0.45rem;
+  border-left-color: var(--color-mango);
+  border-radius: 0.5rem 0.75rem 0.75rem 0.5rem;
+  background: white;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.scan-results-photos {
+  border: var(--fj-line);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  margin-block: 0.75rem;
+}
+
+.scan-results-photos h2 {
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.scan-results-photos p {
+  flex-basis: 100%;
+  order: 3;
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+
+.scan-results-photos ul {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* --------------------------------------------------------- dish cards --- */
+
+.scan-results .menu-order > h2 {
+  margin-block-start: 1.25rem;
+  font-size: 2rem;
+}
+
+.scan-results .menu-order-notice {
+  font-size: 0.88rem;
+  color: var(--color-muted);
+}
+
+.scan-results .menu-order-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+  align-items: stretch;
+  gap: 1rem;
+  padding: 0.25rem 0.35rem 0.5rem 0;
+}
+
+.scan-results .menu-order-section {
+  grid-column: 1 / -1;
+  margin-block-start: 0.5rem;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+/* Translated name leads because that is what the traveller can read; the
+   printed name sits under it for pointing at the menu. */
+.scan-results .menu-order-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-auto-flow: row dense;
+  gap: 0.15rem 0.75rem;
+  align-content: start;
+  padding: 0.9rem 1rem;
+  border: var(--fj-line);
+  border-radius: 1.1rem;
+  background: white;
+  box-shadow: 4px 4px 0 var(--fj-ink);
+}
+
+.scan-results .menu-order-translation {
+  grid-column: 1;
+  grid-row: 1;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.55rem;
+  line-height: 1.05;
+  letter-spacing: 0.02em;
+  color: var(--fj-ink);
+}
+
+.scan-results .menu-order-item h3 {
+  grid-column: 1;
+  grid-row: 2;
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-muted);
+}
+
+/* Price tag in the top corner. */
+.scan-results .menu-order-item .observed-price {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: start;
+  padding: 0.15rem 0.6rem;
+  border: var(--fj-line);
+  border-radius: 0.45rem 0.8rem 0.8rem 0.45rem;
+  background: var(--fj-mango-soft);
+}
+
+.scan-results .menu-order-item .observed-price p {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.scan-results .menu-order-item > details,
+.scan-results .menu-order-item > label,
+.scan-results .menu-order-item > select,
+.scan-results .menu-order-item > .menu-order-check,
+.scan-results .menu-order-item > .menu-order-instructions {
+  grid-column: 1 / -1;
+}
+
+.scan-results .menu-order-item > .menu-order-instructions {
+  order: 8;
+}
+
+.scan-results .menu-order-item > details:not(.menu-order-instructions) {
+  margin-block-start: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.scan-results .menu-order-item > details:not(.menu-order-instructions) summary {
+  color: var(--color-food-orange-strong);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* One portion means there is nothing to choose. */
+.scan-results .menu-order-item:has(select option:only-child) > label,
+.scan-results .menu-order-item:has(select option:only-child) > select {
+  display: none;
+}
+
+/* The notice above the list already says every line is unverified. */
+.scan-results .menu-order-source {
+  display: none;
+}
+
+.scan-results .menu-order-check {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+}
+
+.scan-results .menu-order-item > details:not(.menu-order-instructions) summary {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 1.75rem;
+}
+
+/* Secondary links keep a 24px target; 44px each doubled the card height. */
+.scan-results .menu-order-photos,
+.scan-results .menu-order-photos a,
+.scan-results .menu-results-edit {
+  min-height: 1.5rem;
+}
+
+.scan-results .menu-order-photos a {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+}
+
+/* Links stack in the left column, the stepper fills the right of those rows. */
+.scan-results .menu-order-photos {
+  order: 5;
+  grid-column: 1;
+  align-self: end;
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+}
+
+.scan-results .menu-order-quantity {
+  order: 7;
+  grid-column: 2;
+  grid-row: span 2;
+  align-self: end;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.scan-results .menu-order-quantity button {
+  width: 2.5rem;
+  height: 2.5rem;
+  min-height: 0;
+  padding: 0;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  background: white;
+  color: var(--fj-ink);
+  font-size: 1.15rem;
+  font-weight: 800;
+  box-shadow: 2px 2px 0 var(--fj-ink);
+}
+
+.scan-results .menu-order-quantity button:last-of-type {
+  background: var(--color-food-orange-strong);
+  color: white;
+}
+
+.scan-results .menu-order-quantity button:disabled {
+  border-color: color-mix(in srgb, var(--fj-ink) 22%, transparent);
+  color: var(--color-muted);
+  box-shadow: none;
+}
+
+.scan-results .menu-order-quantity output {
+  min-width: 1.25rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.scan-results .menu-results-edit {
+  order: 6;
+  grid-column: 1;
+  justify-self: start;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  box-shadow: none;
+}
+
+/* Order bar stays in reach while browsing a long menu. */
+.scan-results .menu-order-bar {
+  position: sticky;
+  bottom: 0.75rem;
+  z-index: 5;
+  align-items: center;
+  margin-block-start: 1rem;
+  padding: 0.6rem 0.75rem 0.6rem 1.1rem;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  background: white;
+  box-shadow: 4px 4px 0 var(--fj-ink);
+}
+
+.scan-results .menu-order-bar .menu-order-primary {
+  min-height: 2.75rem;
+  box-shadow: 2px 2px 0 var(--fj-ink);
+}
+
+.menu-waiter-dialog {
+  border: var(--fj-line);
+  border-radius: 1.25rem;
+  box-shadow: 6px 6px 0 var(--fj-ink);
+}
+
+/* ------------------------------------------- secondary result panels --- */
+
+.scan-results-corrections,
+.scan-results-meta,
+.scan-price-research,
+.scan-contribution {
+  margin-block-start: 1rem;
+  padding: 1rem 1.1rem;
+  border: var(--fj-line);
+  border-radius: 1rem;
+  background: white;
+}
+
+.scan-results-corrections summary,
+.scan-results-meta summary {
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.scan-price-research h2 {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+.menu-waiter-dialog button {
+  min-height: 2.75rem;
+  padding-inline: 1rem;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  background: white;
+  color: var(--fj-ink);
+  box-shadow: 2px 2px 0 var(--fj-ink);
+  font-weight: 700;
+}
+
+.menu-waiter-dialog button.menu-order-back {
+  background: var(--fj-mango-soft);
+}
+
+@media (max-width: 640px) {
+  /* One slim row: the stacked bar covered a third of a phone screen. */
+  .scan-results .menu-order-bar {
+    display: flex;
+    flex-flow: row nowrap;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.4rem 0.45rem 0.4rem 0.9rem;
+    font-size: 0.85rem;
+  }
+
+  .scan-results .menu-order-bar .menu-order-primary {
+    flex: none;
+    width: auto;
+    min-height: 2.75rem;
+    padding-inline: 1rem;
+    font-size: 0.9rem;
+  }
+
+  .scan-capture-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-reading-beam {
+    animation: none;
+    translate: 0 4rem;
+  }
+
+  .scan-capture-primary,
+  .scan-capture-secondary {
+    transition: none;
+  }
+}

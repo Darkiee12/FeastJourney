@@ -18,8 +18,7 @@ import { copilotChatFn } from "@/server/muse-copilot/copilot.functions";
 const copy = {
   en: {
     title: "Ask Muse",
-    intro:
-      "Short questions about the dish or place in context. Answers stay plain text plus structured cards — no markdown, no raw web markup.",
+    intro: "Ask a short question about a dish or place, like how spicy it is or what is in it.",
     scopedDish: "About this dish",
     scopedVenue: "About this place",
     unscoped:
@@ -36,8 +35,7 @@ const copy = {
   },
   vi: {
     title: "Hỏi Muse",
-    intro:
-      "Câu hỏi ngắn về món ăn hoặc quán đang xem. Câu trả lời là chữ thuần kèm thẻ có cấu trúc — không markdown, không mã web thô.",
+    intro: "Hỏi ngắn về một món ăn hoặc quán, như độ cay hay thành phần của món.",
     scopedDish: "Về món này",
     scopedVenue: "Về quán này",
     unscoped:
