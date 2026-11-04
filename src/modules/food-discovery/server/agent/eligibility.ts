@@ -57,7 +57,7 @@ export interface AgentEligibilityInput {
   readonly regionLabel?: string | null | undefined;
 }
 
-const VALID_SCOPES: ReadonlyArray<AgentScope> = ["city", "country", "nearby", "worldwide"];
+const VALID_SCOPES: ReadonlySet<AgentScope> = new Set(["city", "country", "nearby", "worldwide"]);
 
 /**
  * Fail-closed constructor from service-resolved values. Returns null when
@@ -67,7 +67,7 @@ const VALID_SCOPES: ReadonlyArray<AgentScope> = ["city", "country", "nearby", "w
  * preserving first-occurrence order.
  */
 export const buildAgentEligibility = (input: AgentEligibilityInput): AgentEligibility | null => {
-  if (!VALID_SCOPES.includes(input.scope)) {
+  if (!VALID_SCOPES.has(input.scope)) {
     return null;
   }
 

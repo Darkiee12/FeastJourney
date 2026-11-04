@@ -4,7 +4,6 @@ import type { ResolvedAgentBounds } from "@/modules/food-discovery/server/agent/
 import { resolveAgentBounds } from "@/modules/food-discovery/server/agent/bounds";
 import {
   DetailsToolOutcome,
-  SearchToolOutcome,
   fetchDishDetails,
   searchEligiblePool,
   summarizeCandidate,
@@ -26,9 +25,9 @@ import {
 import type { ProgressEvent, ProgressStage } from "@/modules/food-discovery/server/agent/protocol";
 import { validateAgentFinalSelection } from "@/modules/food-discovery/server/agent/validation";
 import type { RecommendationCandidateRow } from "@/modules/food-discovery/server/operations/recommendation-service";
-import { DishRelationsRepository } from "@/modules/food-discovery/server/repository/dish-relations-repository";
-import { IngredientRepository } from "@/modules/food-discovery/server/repository/ingredient-repository";
-import { PlaceRepository } from "@/modules/food-discovery/server/repository/place-repository";
+import { type DishRelationsRepository } from "@/modules/food-discovery/server/repository/dish-relations-repository";
+import { type IngredientRepository } from "@/modules/food-discovery/server/repository/ingredient-repository";
+import { type PlaceRepository } from "@/modules/food-discovery/server/repository/place-repository";
 import type { MetaAuthError, MetaPermanentError } from "@/server/integrations/meta-client";
 
 /**
@@ -123,6 +122,7 @@ export const runAgentLoop = (
 
   return Effect.gen(function* () {
     let seq = 0;
+
     const emit = (stage: ProgressStage, detail: string | null, terminal: boolean) => {
       const sink = input.emitProgress;
 
@@ -138,7 +138,7 @@ export const runAgentLoop = (
     const fallback = (
       cause: AgentFallbackCause,
       warning: string,
-    ): Effect.Effect<AgentRunOutcome, never, never> =>
+    ): Effect.Effect<AgentRunOutcome, never> =>
       emit("degraded", warning, true).pipe(
         Effect.andThen(
           Effect.succeed(
@@ -169,6 +169,7 @@ export const runAgentLoop = (
 
     const overview = pool.slice(0, bounds.initialOverviewLimit).map(summarizeCandidate);
     const servedIds = new Set<string>(overview.map((dish) => dish.id));
+
     const servedRows = (): Array<RecommendationCandidateRow> =>
       pool.filter((row) => servedIds.has(row.id));
 

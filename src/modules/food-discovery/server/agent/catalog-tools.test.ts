@@ -4,7 +4,6 @@ import { describe, expect, test } from "bun:test";
 import {
   GET_DISH_DETAILS_JSON_SCHEMA,
   SEARCH_DISHES_JSON_SCHEMA,
-  SearchToolOutcome,
   encodeAgentCursor,
   getDishDetailsArgsSchema,
   searchDishesArgsSchema,

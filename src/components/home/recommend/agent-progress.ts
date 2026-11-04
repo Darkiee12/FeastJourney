@@ -26,7 +26,7 @@ import type { ProgressEvent, ProgressStage } from "@/modules/food-discovery/serv
  */
 
 /** Every stage the protocol defines; used only to validate inbound events. */
-const KNOWN_STAGE_VALUES: ReadonlyArray<string> = [
+const KNOWN_STAGE_VALUES: ReadonlySet<string> = new Set([
   "preparing",
   "searching-catalog",
   "muse-curating",
@@ -35,10 +35,9 @@ const KNOWN_STAGE_VALUES: ReadonlyArray<string> = [
   "completed",
   "degraded",
   "failed",
-];
+]);
 
-const isKnownStage = (value: string): value is ProgressStage =>
-  KNOWN_STAGE_VALUES.includes(value);
+const isKnownStage = (value: string): value is ProgressStage => KNOWN_STAGE_VALUES.has(value);
 
 /**
  * Wire shape of one progress event. Zod owns the boundary (same convention
@@ -290,9 +289,7 @@ export interface AgentPresenceInput {
   readonly live: boolean;
 }
 
-export const presenceForSnapshot = (
-  snapshot: AgentProgressSnapshot | null,
-): AgentPresenceInput => {
+export const presenceForSnapshot = (snapshot: AgentProgressSnapshot | null): AgentPresenceInput => {
   if (snapshot === null || !snapshot.started || snapshot.stage === null) {
     return { stage: null, live: false };
   }

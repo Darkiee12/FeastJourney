@@ -38,6 +38,7 @@ describe("parseFinalSelection", () => {
     const raw = JSON.stringify([
       { dishId: "101", reason: "A grounded dinner fit for the requested occasion." },
     ]);
+
     const parsed: unknown = JSON.parse(raw);
 
     expect(parseFinalSelection(raw)?.selections).toHaveLength(1);
@@ -54,7 +55,7 @@ describe("parseFinalSelection", () => {
 
 describe("agent prompt construction", () => {
   test("tool definitions expose exactly the protocol tools", () => {
-    const names = AGENT_TOOL_DEFINITIONS.map((tool) => tool.name).sort();
+    const names = AGENT_TOOL_DEFINITIONS.map((tool) => tool.name).toSorted();
 
     expect(names).toEqual(["getDishDetails", "searchDishes"] satisfies Array<AgentToolName>);
   });

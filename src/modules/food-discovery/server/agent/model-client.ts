@@ -1,4 +1,4 @@
-import { Context, Data, Effect } from "effect";
+import { Context, Data, type Effect } from "effect";
 
 import {
   GET_DISH_DETAILS_JSON_SCHEMA,
@@ -170,6 +170,7 @@ export const buildAgentUserBlock = (input: AgentUserBlockInput): string => {
 
 /** Raw tool-call argument shapes (validated again at execution time). */
 export type SearchToolArgs = SearchDishesInput;
+
 export type DetailsToolArgs = GetDishDetailsInput;
 
 export interface ParsedFinalSelection {

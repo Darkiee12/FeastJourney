@@ -1,5 +1,9 @@
-import { SseParser, ProgressSink, type ParsedServerEvent } from "@/modules/food-discovery/server/agent/stream-codec";
 import type { ProgressEvent } from "@/modules/food-discovery/server/agent/protocol";
+import {
+  SseParser,
+  ProgressSink,
+  type ParsedServerEvent,
+} from "@/modules/food-discovery/server/agent/stream-codec";
 
 /**
  * Framework-agnostic client controller for the recommendation progress
@@ -50,6 +54,7 @@ export const canonicalStreamKey = (input: {
   readonly agentEnabled: boolean;
 }): string => {
   const normalized = normalizeValue(input.payload);
+
   return JSON.stringify({
     actorId: input.actorId,
     agentEnabled: input.agentEnabled,
@@ -62,16 +67,21 @@ const normalizeValue = (value: unknown): unknown => {
   if (Array.isArray(value)) {
     return value.map(normalizeValue);
   }
+
   if (typeof value === "object" && value !== null) {
-    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+    const entries = Object.entries(value as Record<string, unknown>).toSorted(([a], [b]) =>
       a < b ? -1 : a > b ? 1 : 0,
     );
+
     const out: Record<string, unknown> = {};
+
     for (const [key, entry] of entries) {
       out[key] = normalizeValue(entry);
     }
+
     return out;
   }
+
   return value;
 };
 
@@ -96,13 +106,17 @@ export class AgentStreamController<TWire = unknown> {
   /** Fresh cached result for back-nav; null when absent or stale. */
   cachedResult(cacheKey: string, now: number = Date.now()): TWire | null {
     const entry = this.cache.get(cacheKey);
+
     if (entry === undefined) {
       return null;
     }
+
     if (now - entry.storedAt > this.cacheTtlMs) {
       this.cache.delete(cacheKey);
+
       return null;
     }
+
     return entry.result;
   }
 
@@ -121,6 +135,7 @@ export class AgentStreamController<TWire = unknown> {
     this.attemptSerial += 1;
 
     const existing = this.inFlight.get(cacheKey);
+
     if (existing !== undefined) {
       return {
         attempt,
@@ -129,6 +144,7 @@ export class AgentStreamController<TWire = unknown> {
             this.committedAttempt = attempt;
             callbacks.onDone?.(result, null);
           }
+
           return result;
         }),
       };
@@ -139,7 +155,9 @@ export class AgentStreamController<TWire = unknown> {
         this.inFlight.delete(cacheKey);
       }
     });
+
     this.inFlight.set(cacheKey, done);
+
     return { attempt, done };
   }
 
@@ -152,6 +170,7 @@ export class AgentStreamController<TWire = unknown> {
   ): Promise<TWire> {
     const fetchImpl = options.fetchImpl ?? fetch;
     let response: Response;
+
     try {
       response = await fetchImpl(this.endpoint, {
         method: "POST",
@@ -163,7 +182,9 @@ export class AgentStreamController<TWire = unknown> {
         signal: options.signal,
       });
     } catch (error) {
-      callbacks.onError?.(error instanceof DOMException && error.name === "AbortError" ? "aborted" : "network");
+      callbacks.onError?.(
+        error instanceof DOMException && error.name === "AbortError" ? "aborted" : "network",
+      );
       throw error;
     }
 
@@ -186,18 +207,23 @@ export class AgentStreamController<TWire = unknown> {
         callbacks.onError?.(code);
         throw error instanceof Error ? error : new Error(`Recommendation stream ${code}`);
       });
+
       if (read.done) {
         break;
       }
+
       for (const frame of parser.push(decoder.decode(read.value, { stream: true }))) {
         this.applyFrame(frame, sink, attempt, callbacks, state);
+
         if (state.errorCode !== null) {
           break;
         }
       }
+
       if (state.errorCode !== null) {
         break;
       }
+
       if (sink.isTerminated() && state.result !== null) {
         break;
       }
@@ -212,6 +238,7 @@ export class AgentStreamController<TWire = unknown> {
     if (state.result !== null && sink.isTerminated()) {
       this.cache.set(cacheKey, { result: state.result, storedAt: Date.now() });
       this.evictCache();
+
       return state.result;
     }
 
@@ -239,19 +266,25 @@ export class AgentStreamController<TWire = unknown> {
     if (frame.kind === "error") {
       state.errorCode = frame.error.code;
       callbacks.onError?.(frame.error.code);
+
       return;
     }
+
     if (frame.kind === "result") {
       state.result = frame.wire as TWire;
+
       if (attempt > this.committedAttempt) {
         this.committedAttempt = attempt;
         callbacks.onDone?.(state.result, state.progress);
       }
+
       return;
     }
+
     if (sink.push(frame.event) !== "accept") {
       return;
     }
+
     state.progress = frame.event;
     callbacks.onProgress?.(frame.event);
   }
@@ -259,9 +292,11 @@ export class AgentStreamController<TWire = unknown> {
   private evictCache(): void {
     while (this.cache.size > this.cacheMaxEntries) {
       const oldest = this.cache.keys().next();
+
       if (oldest.done === true) {
         return;
       }
+
       this.cache.delete(oldest.value);
     }
   }

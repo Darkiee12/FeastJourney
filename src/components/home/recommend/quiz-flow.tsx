@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { DishCarousel } from "@/components/dish/dish-carousel";
 import { useMobileHomeOptional } from "@/components/home/mobile/mobile-home-context";
+import { presenceForSnapshot } from "@/components/home/recommend/agent-progress";
 import { useIsMaxMd } from "@/components/home/recommend/quiz-drawer";
 import {
   buildRecommendPayload,
@@ -74,9 +75,8 @@ import {
   ResultsExplanationSkeleton,
   ResultsLoadingSkeleton,
 } from "@/components/home/recommend/results-loading";
-import { presenceForSnapshot } from "@/components/home/recommend/agent-progress";
-import { useAgentProgress } from "@/components/home/recommend/use-agent-progress";
 import { SidebarPrefsCard, YourPicksCard } from "@/components/home/recommend/results-sidebar";
+import { useAgentProgress } from "@/components/home/recommend/use-agent-progress";
 import { usePreciseLocation } from "@/components/home/recommend/use-precise-location";
 import { listCountriesFn, recommendDishesFn } from "@/modules/food-discovery/food.functions";
 import { getQuizRegionFn } from "@/modules/food-discovery/quiz.functions";
@@ -281,6 +281,25 @@ export function RecommendSection() {
   const userId = session.status === "signed-in" ? session.user.id : null;
   const queryClient = useQueryClient();
   const userIdOrGuest = userId ?? "guest";
+
+  // Presentation reset key: one entry per canonical request (actor +
+  // coarse geo scope + prefs + locale + seed), so a new request — including
+  // an account switch or scope change with otherwise identical answers —
+  // always reopens on the first slide instead of inheriting a stale index.
+  // New Muse reasons can never surface under a previous request's position.
+  const outcomeKey =
+    submitted === null
+      ? "none"
+      : [
+          userIdOrGuest,
+          geographicScopeKeyFor(toTransportPayload(submitted)),
+          submitted.locale,
+          submitted.meal,
+          submitted.mood,
+          submitted.cuisine ?? "",
+          ...normalizeCacheTerms(submitted.excludedIngredients),
+          submitted.surpriseSeed,
+        ].join(":");
 
   /**
    * POST-but-read-oriented ranking cache: the recommendation POST has no
@@ -913,25 +932,6 @@ export function RecommendSection() {
   );
 
   const resultFavorites = useFavoriteStatus(resultIds, resultUserId);
-
-  // Presentation reset key: one entry per canonical request (actor +
-  // coarse geo scope + prefs + locale + seed), so a new request — including
-  // an account switch or scope change with otherwise identical answers —
-  // always reopens on the first slide instead of inheriting a stale index.
-  // New Muse reasons can never surface under a previous request's position.
-  const outcomeKey =
-    submitted === null
-      ? "none"
-      : [
-          userIdOrGuest,
-          geographicScopeKeyFor(toTransportPayload(submitted)),
-          submitted.locale,
-          submitted.meal,
-          submitted.mood,
-          submitted.cuisine ?? "",
-          ...normalizeCacheTerms(submitted.excludedIngredients),
-          submitted.surpriseSeed,
-        ].join(":");
 
   const carouselItems = useMemo(
     () =>

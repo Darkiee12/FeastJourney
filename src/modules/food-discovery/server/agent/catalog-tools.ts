@@ -142,6 +142,7 @@ export const searchEligiblePool = (
 
   const effectiveCuisine =
     eligibility.cuisine ?? (requestedCuisine.length > 0 ? requestedCuisine : null);
+
   const effectiveCategory = args.category?.trim() ?? null;
   const needle = args.query?.trim().toLowerCase() ?? null;
   const limit = Math.min(args.limit ?? pageLimit, pageLimit);
@@ -337,6 +338,7 @@ export const fetchDishDetails = (
       const display = pickDisplayName(names.map(asLocalizedName), locale);
 
       const descriptions = descriptionsByDish.get(key) ?? [];
+
       const pickedDescription =
         descriptions.find((entry) => entry.language_tag === locale) ??
         descriptions.find((entry) => entry.language_tag === "en") ??
@@ -349,6 +351,7 @@ export const fetchDishDetails = (
         const labels = (ingredientNamesByIngredient.get(entry.ingredient_id.toString()) ?? []).map(
           asLocalizedName,
         );
+
         const picked = pickDisplayName(labels, locale);
 
         if (picked !== undefined && !ingredientNames.includes(picked.name)) {

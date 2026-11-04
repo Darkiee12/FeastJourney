@@ -8,6 +8,7 @@
  */
 
 export type { AgentLoopError } from "@/modules/food-discovery/server/agent/errors";
+
 export {
   AgentAborted,
   AgentBudgetExhausted,

@@ -16,7 +16,7 @@ import {
   type AgentTurnInput,
   type AgentTurnOutput as TurnOutput,
 } from "@/modules/food-discovery/server/agent/model-client";
-import { AgentRunOutcome, runAgentLoop } from "@/modules/food-discovery/server/agent/orchestrator";
+import { runAgentLoop } from "@/modules/food-discovery/server/agent/orchestrator";
 import type { ProgressEvent } from "@/modules/food-discovery/server/agent/protocol";
 import { RepositoriesLive } from "@/modules/food-discovery/server/index";
 import type { RecommendationCandidateRow } from "@/modules/food-discovery/server/operations/recommendation-service";
@@ -262,7 +262,7 @@ describe("runAgentLoop", () => {
 
     const seqs = events.map((event) => event.seq);
 
-    expect(seqs).toEqual([...seqs].sort((left, right) => left - right));
+    expect(seqs).toEqual([...seqs].toSorted((left, right) => left - right));
   });
 
   test("exhausted rounds fall back without inventing a selection", async () => {

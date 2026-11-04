@@ -30,18 +30,23 @@ export const agentStageLineFor = (stage: ProgressStage, copy: Messages): string 
     case "preparing": {
       return copy.recAgentPreparing;
     }
+
     case "searching-catalog": {
       return copy.recAgentSearching;
     }
+
     case "muse-curating": {
       return copy.recAgentCurating;
     }
+
     case "inspecting-dishes": {
       return copy.recAgentInspecting;
     }
+
     case "finalizing": {
       return copy.recAgentFinalizing;
     }
+
     case "completed":
     case "degraded":
     case "failed":
@@ -122,7 +127,13 @@ export function MusePresence({ copy, stage, live, compact = false }: MusePresenc
         />
         <span className="absolute -top-0.5 -right-0.5 size-2 animate-pulse rounded-full bg-food-orange-strong [animation-delay:600ms] motion-reduce:animate-none" />
       </span>
-      <p className={compact ? "mt-2 text-xs font-extrabold text-ink" : "mt-2.5 text-sm font-extrabold text-ink"}>
+      <p
+        className={
+          compact
+            ? "mt-2 text-xs font-extrabold text-ink"
+            : "mt-2.5 text-sm font-extrabold text-ink"
+        }
+      >
         {copy.recAgentTitle}
       </p>
       <p

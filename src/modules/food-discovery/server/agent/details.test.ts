@@ -2,10 +2,9 @@ import "@/modules/food-discovery/server/agent/test-env";
 import { afterAll, describe, expect, test } from "bun:test";
 
 import { SQL } from "bun";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Layer, ManagedRuntime } from "effect";
 
 import {
-  DetailsToolOutcome,
   fetchDishDetails,
 } from "@/modules/food-discovery/server/agent/catalog-tools";
 import {

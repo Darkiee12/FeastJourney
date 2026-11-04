@@ -14,7 +14,9 @@ import type { ProgressEvent } from "@/modules/food-discovery/server/agent/protoc
 
 const REQUEST_ID = "req-1";
 
-const makeEvent = (overrides: Partial<ProgressEvent> & { readonly seq: number }): ProgressEvent => ({
+const makeEvent = (
+  overrides: Partial<ProgressEvent> & { readonly seq: number },
+): ProgressEvent => ({
   requestId: REQUEST_ID,
   stage: "preparing",
   detail: null,
@@ -67,9 +69,9 @@ describe("isProgressEvent validates the network boundary", () => {
     expect(isProgressEvent(null)).toBe(false);
     expect(isProgressEvent("nope")).toBe(false);
     expect(isProgressEvent([])).toBe(false);
-    expect(
-      isProgressEvent({ requestId: "r", seq: 0, stage: "preparing", terminal: false }),
-    ).toBe(false);
+    expect(isProgressEvent({ requestId: "r", seq: 0, stage: "preparing", terminal: false })).toBe(
+      false,
+    );
   });
 
   test("rejects empty request IDs, non-integer or negative seq, unknown stages", () => {
@@ -119,7 +121,10 @@ describe("applyProgressEvent keeps the snapshot monotonic", () => {
 
     expect(stale).toBe(state);
 
-    const terminal = applyProgressEvent(state, makeEvent({ seq: 1, stage: "completed", terminal: true }));
+    const terminal = applyProgressEvent(
+      state,
+      makeEvent({ seq: 1, stage: "completed", terminal: true }),
+    );
 
     expect(terminal.terminal).toBe(true);
 

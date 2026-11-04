@@ -146,7 +146,12 @@ export function ResultsLoadingSkeleton({
   const cards = Array.from({ length: count }, (_, index) => index);
 
   const showPresence = presenceVisibleFor(presence);
-  const statusText = agentPresenceStatusText(copy, presence?.stage ?? null, presence?.live ?? false);
+
+  const statusText = agentPresenceStatusText(
+    copy,
+    presence?.stage ?? null,
+    presence?.live ?? false,
+  );
 
   if (compact) {
     return (
