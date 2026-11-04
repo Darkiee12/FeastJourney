@@ -616,9 +616,7 @@ export function RestaurantEditor({
     const trimmedBusiness = businessName.trim();
 
     if (parsedLatitude === null || parsedLongitude === null) {
-      setFormError(
-        latitudeError ?? longitudeError ?? "Enter a valid latitude and longitude.",
-      );
+      setFormError(latitudeError ?? longitudeError ?? "Enter a valid latitude and longitude.");
 
       return;
     }
