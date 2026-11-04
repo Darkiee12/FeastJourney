@@ -33,20 +33,16 @@
   text-shadow: 0.07em 0.07em 0 var(--color-food-orange-strong);
 }
 
-/* Highlighter swipe on hover, and on the page you are on. */
+/* Soft mango pill on hover; the links already carry rounded-full. */
 .site-header nav a[class~="text-white/85"] {
   color: white;
   font-weight: 700;
+  transition: background-color 120ms ease-out;
 }
 
-.site-header nav a[class~="text-white/85"]:hover,
-.site-header nav a[href^="/restaurants"][data-status="active"] {
-  background: linear-gradient(
-    transparent 66%,
-    color-mix(in srgb, var(--color-mango) 75%, transparent) 66%,
-    color-mix(in srgb, var(--color-mango) 75%, transparent) 84%,
-    transparent 84%
-  );
+.site-header nav a[class~="text-white/85"]:hover {
+  background: color-mix(in srgb, var(--color-mango) 26%, transparent);
+  color: white;
 }
 
 /* The scanner is the headline feature: the one filled action in the bar. */
