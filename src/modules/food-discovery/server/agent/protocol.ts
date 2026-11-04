@@ -76,23 +76,57 @@ export interface ProgressEvent {
   readonly terminal: boolean;
 }
 
-/** Hard bounds for every agentic run. All configurable via env with these defaults. */
+/**
+ * Hard bounds for every agentic run. There are NO hardcoded defaults:
+ * every value MUST be stated explicitly in the environment, otherwise this
+ * module throws at load time naming the missing variable. Present values
+ * must be positive safe integers — invalid input fails loudly, never
+ * silently clamped. The operator owns these tradeoffs entirely.
+ */
+const requirePositiveInt = (varName: string): number => {
+  const raw = process.env[varName];
+
+  if (raw === undefined || raw === "") {
+    throw new Error(
+      `${varName} is required: agentic recommendation bounds must be stated explicitly in the environment (no built-in defaults).`,
+    );
+  }
+
+  const parsed = Number(raw);
+
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(
+      `${varName} must be a positive integer, got ${JSON.stringify(raw)}.`,
+    );
+  }
+
+  return parsed;
+};
+
 export const AGENT_BOUNDS = {
   /** Maximum model rounds (initial + tool-follow-ups) per request. */
-  maxRounds: 3,
+  maxRounds: requirePositiveInt("RECOMMEND_AGENT_MAX_ROUNDS"),
   /** Maximum tool calls in total across all rounds. */
-  maxToolCalls: 8,
+  maxToolCalls: requirePositiveInt("RECOMMEND_AGENT_MAX_TOOL_CALLS"),
   /** Maximum dish IDs per getDishDetails call. */
-  detailsPerCall: 10,
+  detailsPerCall: requirePositiveInt("RECOMMEND_AGENT_DETAILS_PER_CALL"),
   /** Maximum unique candidate IDs the agent may hold. */
-  candidatePoolCap: 60,
+  candidatePoolCap: requirePositiveInt("RECOMMEND_AGENT_CANDIDATE_POOL_CAP"),
   /** Final selection cap (keeps the existing top-10 contract). */
-  finalLimit: 10,
-  /** Per-provider-call timeout in milliseconds. */
-  providerTimeoutMs: 20000,
-  /** Total orchestration deadline in milliseconds. */
-  orchestrationDeadlineMs: 90000,
+  finalLimit: requirePositiveInt("RECOMMEND_AGENT_FINAL_LIMIT"),
+  /**
+   * Per-provider-call timeout in milliseconds.
+   * Owned by workstream B via MODEL_AGENT_TIMEOUT_MS — same rule, no default.
+   */
+  providerTimeoutMs: requirePositiveInt("MODEL_AGENT_TIMEOUT_MS"),
+  /**
+   * Total orchestration deadline in milliseconds.
+   * Owned by workstream B via RECOMMEND_AGENT_DEADLINE_MS — same rule.
+   */
+  orchestrationDeadlineMs: requirePositiveInt("RECOMMEND_AGENT_DEADLINE_MS"),
 } as const;
+
+export type AgentBounds = typeof AGENT_BOUNDS;
 
 /** Env flag gating agentic mode. Off (or unset) keeps the existing single-shot path byte-identical. */
 export const RECOMMEND_AGENT_FLAG = "RECOMMEND_AGENT_ENABLED";
