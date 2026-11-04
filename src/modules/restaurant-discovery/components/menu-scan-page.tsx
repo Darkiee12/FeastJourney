@@ -254,9 +254,11 @@ const rememberTargetLanguage = (language: string): void => {
 function ScanPriceResearch({
   locale,
   items,
+  menuLocation,
 }: {
   readonly locale: string;
   readonly items: MenuScanDocument["items"];
+  readonly menuLocation?: ScanMenuLocation | null | undefined;
 }) {
   const language = locale === "vi" ? "vi" : "en";
   const strings = researchCopyFor(language);
@@ -272,7 +274,12 @@ function ScanPriceResearch({
       .find((currency): currency is string => currency !== null && isCurrency(currency)) ?? "";
 
   const [currency, setCurrency] = useState(selectedCurrency);
-  const [city, setCity] = useState("");
+  // Prefill comes from the traveler-selected menu location only: the
+  // label is the real stored city display name. There is no
+  // resolveMenuCountry resolver in menu-price-evidence and no country
+  // travels with the scan location, so the country field stays empty
+  // rather than inventing one. Currency still defaults from the dish.
+  const [city, setCity] = useState(menuLocation?.label ?? "");
   const [country, setCountry] = useState("");
   const [state, setState] = useState<ResearchStatusState>("idle");
   const [contextLine, setContextLine] = useState("");
@@ -414,7 +421,11 @@ function ScanPriceResearch({
         }))}
         size="regular"
       />
-      <div className="scan-research-place">
+      {/* Single column: the research group lives in the narrow results
+          aside on desktop, where the stylesheet's three-column place grid
+          would crush the inputs. Inline style wins over that unlayered
+          rule; stacked inputs stay readable at every width. */}
+      <div className="scan-research-place" style={{ gridTemplateColumns: "1fr" }}>
         <div>
           <label htmlFor="scan-research-city">{copy.researchCity}</label>
           <input
@@ -487,12 +498,15 @@ function ScanPriceResearch({
 }
 
 // S2 CONTRACT (scan-results): results body is the peer `ScanResults`
-// component (`scan-results.tsx`), mounted with the scan id. `onEditDish` is
-// intentionally omitted so dish edits open S2's internal corrections.
-// Corrections saving therefore lives inside S2; this page keeps the
-// surrounding chrome the peer does not render: revision/expiry line, model
-// chip, price-research sibling (single-trigger rule), contribution, and
-// session actions.
+// component (`scan-results.tsx`), mounted with the scan id in the dominant
+// main column. `onEditDish` is intentionally omitted so dish edits open
+// S2's internal corrections. Corrections saving therefore lives inside S2;
+// this page keeps the surrounding chrome the peer does not render:
+// transient status/failure above the grid, then a 70/30 desktop grid
+// (single readable column on mobile) with S2's dishes dominant, the S1
+// price-research sibling (single-trigger rule) and the contribution group
+// stacked in the aside. Consent wording, confirmations, and all scan
+// transport/polling/retry logic below are untouched.
 
 function prefersReducedMotion(): boolean {
   try {
@@ -1001,7 +1015,13 @@ export function MenuScanPage({
   const submitHint = photos.length > 0 && !busy && scanId !== null ? copy.uploadRetry : null;
 
   return (
-    <article className="menu-scan-page" lang={menuBcp47TagFor(locale)}>
+    <article
+      className="menu-scan-page"
+      lang={menuBcp47TagFor(locale)}
+      // Results break out of the narrow 680px capture column toward the
+      // page shell (70rem ≈ page-shell width); capture keeps its column.
+      style={document !== null ? { maxWidth: "70rem" } : undefined}
+    >
       {document === null && (
         <header className="scan-hero">
           <p className="scan-eyebrow">{copy.eyebrow}</p>
@@ -1133,51 +1153,66 @@ export function MenuScanPage({
               transportKind={failure.transportKind}
             />
           )}
-          <ScanResults
-            scanId={view.scan.id}
-            menuLocation={menuLocation}
-            onScanAnother={scanAnother}
-            onDeleteScan={() => deleteScan(view.scan.id)}
-          />
-          {document.items.length > 0 && (
-            <ScanPriceResearch locale={locale} items={document.items} />
-          )}
-          <section className="scan-contribution">
-            <h2 className="font-display text-3xl">{copy.contributeTitle}</h2>
-            {view.contribution !== null && (
-              <p>
-                {copy.contributed}: {view.contribution.status} · {copy.revision}{" "}
-                {view.contribution.revision}
-              </p>
-            )}
-            {view.contribution?.status === "rejected" && (
-              <p>
-                {locale === "vi"
-                  ? "Bạn có thể sửa thực đơn, lưu phiên bản mới rồi tự chọn đóng góp lại."
-                  : "You can correct the menu, save a new revision, then choose whether to contribute again."}
-              </p>
-            )}
-            {(view.contribution === null ||
-              (view.contribution.status === "rejected" &&
-                view.scan.current_revision !== null &&
-                view.scan.current_revision > view.contribution.revision)) && (
-              <>
-                <p>{copy.contributeHelp}</p>
-                <label className="scan-consent">
-                  <input
-                    type="checkbox"
-                    checked={consent}
-                    disabled={busy}
-                    onChange={(event) => setConsent(event.target.checked)}
-                  />
-                  {copy.consent}
-                </label>
-                <button type="button" disabled={busy || !consent} onClick={submitContribution}>
-                  {copy.contribute}
-                </button>
-              </>
-            )}
-          </section>
+          {/* Results grid: dishes dominant in the main column (70/30 on
+              desktop, one readable column on mobile). No sticky aside —
+              the order bar inside S2 is already sticky and the site
+              header must keep working. min-w-0 on both columns prevents
+              grid blowout at 320px. */}
+          <div className="scan-results-layout lg:grid lg:grid-cols-3 lg:items-start lg:gap-6">
+            <div className="min-w-0 lg:col-span-2">
+              <ScanResults
+                scanId={view.scan.id}
+                menuLocation={menuLocation}
+                onScanAnother={scanAnother}
+                onDeleteScan={() => deleteScan(view.scan.id)}
+              />
+            </div>
+            <aside className="scan-results-side min-w-0" aria-label={copy.resultsTitle}>
+              {document.items.length > 0 && (
+                <ScanPriceResearch
+                  locale={locale}
+                  items={document.items}
+                  menuLocation={menuLocation}
+                />
+              )}
+              <section className="scan-contribution">
+                <h2 className="font-display text-3xl">{copy.contributeTitle}</h2>
+                {view.contribution !== null && (
+                  <p>
+                    {copy.contributed}: {view.contribution.status} · {copy.revision}{" "}
+                    {view.contribution.revision}
+                  </p>
+                )}
+                {view.contribution?.status === "rejected" && (
+                  <p>
+                    {locale === "vi"
+                      ? "Bạn có thể sửa thực đơn, lưu phiên bản mới rồi tự chọn đóng góp lại."
+                      : "You can correct the menu, save a new revision, then choose whether to contribute again."}
+                  </p>
+                )}
+                {(view.contribution === null ||
+                  (view.contribution.status === "rejected" &&
+                    view.scan.current_revision !== null &&
+                    view.scan.current_revision > view.contribution.revision)) && (
+                  <>
+                    <p>{copy.contributeHelp}</p>
+                    <label className="scan-consent">
+                      <input
+                        type="checkbox"
+                        checked={consent}
+                        disabled={busy}
+                        onChange={(event) => setConsent(event.target.checked)}
+                      />
+                      {copy.consent}
+                    </label>
+                    <button type="button" disabled={busy || !consent} onClick={submitContribution}>
+                      {copy.contribute}
+                    </button>
+                  </>
+                )}
+              </section>
+            </aside>
+          </div>
         </section>
       )}
     </article>
