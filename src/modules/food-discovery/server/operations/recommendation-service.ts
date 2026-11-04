@@ -682,7 +682,11 @@ const BANNED_REASON_CLAIMS: ReadonlyArray<{ readonly tag: string; readonly patte
   },
   {
     tag: "hours",
-    pattern: /\b(open|opening|hours|open-?late|late-?night|closes?|24\s?\/\s?7)\b/i,
+    // Narrow: bare "open"/"close"/"hours" false-positive constantly in
+    // food writing ("open flame", "a close match", "simmered for hours").
+    // Only fire on actual opening-hours claims with time context.
+    pattern:
+      /\b(opening(\s+hours)?|hours\s+of\s+operation|open[ -]?late|late-?night|24\s?\/\s?7|opens?\s+(at|daily|till|until)|closes?\s+(at|daily|till|until|early|late))\b/i,
   },
   {
     tag: "price",
@@ -928,6 +932,11 @@ const degradeToDeterministic = (
           backend: "muse",
           modelId: config.modelId,
           failure: error._tag,
+          // Safe: every InvalidOutput/RateLimited/RequestError reason is a
+          // fixed template (counts and tags only) — never prompts, reasons,
+          // keys, or user content. Needed to distinguish truncation from
+          // denylist false positives without guessing.
+          reason: error.reason,
           fallbackReason: warning,
         }),
         Effect.andThen(

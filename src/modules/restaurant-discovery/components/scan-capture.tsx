@@ -1,12 +1,16 @@
-import { Camera, Images, MapPin } from "lucide-react";
+import { Camera, ChevronRight, Images, MapPin } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 
 import { SharedSelectField } from "@/components/ui/select";
-import { nearestCityFn } from "@/modules/food-discovery/food.functions";
 import {
   menuLanguageNames,
   scanLocationCopy,
+  scanLocationPickerCopy,
 } from "@/modules/restaurant-discovery/components/menu-copy";
+import {
+  ScanLocationPicker,
+  type ScanLocationPickerProps,
+} from "@/modules/restaurant-discovery/components/scan-location-picker";
 import {
   ScanPhotoPreview,
   type ScanPreviewPhoto,
@@ -18,7 +22,14 @@ import {
 import { CITY_PRESETS } from "@/modules/restaurant-discovery/map-bounds";
 import { menuLanguages } from "@/modules/restaurant-discovery/menu-scan.schema";
 
-/** Optional coarse menu location: a curated city id + display label. */
+/**
+ * Optional coarse menu location: a curated city id + display label.
+ *
+ * cityId grammar: curated preset ids ("hcmc" | "hanoi" | "bangalore"),
+ * geolocated labels ("geo:<name>", taken as-is from nearestCityFn), or
+ * canonical catalog identities ("place:<decimalId>" from city search).
+ * Only cityId + label persist (feastjourney:menu-location:v1).
+ */
 export interface ScanMenuLocation {
   readonly cityId: string;
   readonly label: string;
@@ -70,11 +81,10 @@ const cityLabelFor = (cityId: string, locale: string): string => {
 };
 
 /**
- * Optional coarse location for one scan. City chips reuse the curated
- * CITY_PRESETS ids (no new location database); "Use my location" is an
- * explicit action that resolves one city label through the existing
- * nearest-city service with rounded coordinates. Raw coordinates are
- * never stored and never sent to Muse — only the city label is kept.
+ * Compact location trigger: one row opening the location sheet. Recent
+ * history is real session state only — selections made through this row,
+ * seeded with the stored location — capped at five, never invented.
+ * Dismissing the sheet preserves the choice; selecting auto-closes.
  */
 function ScanLocationSetting({
   locale,
@@ -87,101 +97,60 @@ function ScanLocationSetting({
   readonly disabled: boolean;
   readonly onLocationChange: (location: ScanMenuLocation | null) => void;
 }): ReactNode {
-  const copy = scanLocationCopy(locale);
-  const [locating, setLocating] = useState(false);
-  const [denied, setDenied] = useState(false);
+  const copy = scanLocationPickerCopy(locale);
 
-  const useMyLocation = (): void => {
-    if (!("geolocation" in navigator)) {
-      setDenied(true);
+  const [open, setOpen] = useState(false);
 
-      return;
+  const [recent, setRecent] = useState<ReadonlyArray<ScanMenuLocation>>(() =>
+    menuLocation === null ? [] : [menuLocation],
+  );
+
+  const presets: ReadonlyArray<ScanMenuLocation> = CITY_PRESETS.map((city) => ({
+    cityId: city.id,
+    label: cityLabelFor(city.id, locale),
+  }));
+
+  const choose: ScanLocationPickerProps["onSelect"] = (location) => {
+    if (location !== null) {
+      setRecent((previous) =>
+        [location, ...previous.filter((entry) => entry.cityId !== location.cityId)].slice(0, 5),
+      );
     }
 
-    setLocating(true);
-    setDenied(false);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        // Coarsen to ~1km before the lookup; the fix itself never persists.
-        const latitude = Math.round(position.coords.latitude * 100) / 100;
-        const longitude = Math.round(position.coords.longitude * 100) / 100;
-        nearestCityFn({ data: { latitude, longitude, locale } }).then(
-          (city) => {
-            setLocating(false);
-
-            if (city === null || city.name === undefined || city.name === "") {
-              setDenied(true);
-
-              return;
-            }
-
-            onLocationChange({ cityId: `geo:${city.name}`, label: city.name });
-          },
-          () => {
-            setLocating(false);
-            setDenied(true);
-          },
-        );
-      },
-      () => {
-        setLocating(false);
-        setDenied(true);
-      },
-      { timeout: 10000, maximumAge: 300000 },
-    );
+    onLocationChange(location);
+    setOpen(false);
   };
 
   return (
-    <details className="scan-location">
-      <summary>{copy.label}</summary>
-      <p>{copy.hint}</p>
-      <fieldset className="scan-location-chips">
-        <legend className="sr-only">{copy.label}</legend>
-        {CITY_PRESETS.map((city) => {
-          const active = menuLocation?.cityId === city.id;
-
-          return (
-            <button
-              key={city.id}
-              type="button"
-              aria-pressed={active}
-              disabled={disabled}
-              className="scan-location-chip"
-              onClick={() =>
-                onLocationChange(
-                  active ? null : { cityId: city.id, label: cityLabelFor(city.id, locale) },
-                )
-              }
-            >
-              <MapPin aria-hidden="true" />
-              {cityLabelFor(city.id, locale)}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          disabled={disabled || locating}
-          className="scan-location-mine"
-          onClick={useMyLocation}
-        >
-          <MapPin aria-hidden="true" />
-          {locating ? copy.locating : copy.useMyLocation}
-        </button>
-      </fieldset>
-      {menuLocation !== null && (
-        <p className="scan-location-current">
-          {menuLocation.label}{" "}
-          <button type="button" disabled={disabled} onClick={() => onLocationChange(null)}>
-            {copy.clear}
-          </button>
-        </p>
-      )}
-      {denied && (
-        <p role="alert" className="scan-location-denied">
-          {copy.denied}
-        </p>
-      )}
-    </details>
+    <>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen(true)}
+        className="flex min-h-11 w-full items-center gap-2 rounded-lg border border-border-soft bg-white px-3 py-2 text-left disabled:opacity-60"
+      >
+        <MapPin aria-hidden="true" className="size-4 flex-none text-muted" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold text-ink">{copy.trigger}</span>
+          {menuLocation === null ? null : (
+            <span className="block truncate text-sm text-muted">{menuLocation.label}</span>
+          )}
+        </span>
+        <ChevronRight aria-hidden="true" className="size-4 flex-none text-muted" />
+      </button>
+      <ScanLocationPicker
+        locale={locale}
+        open={open}
+        disabled={disabled}
+        current={menuLocation}
+        recent={recent}
+        presets={presets}
+        onOpenChange={setOpen}
+        onSelect={choose}
+      />
+    </>
   );
 }
 

@@ -533,6 +533,14 @@ export const menuScanClient = {
     ),
   get: (scanId: string, signal?: AbortSignal) =>
     requestScan({ action: "get", scanId }, scanViewSchema, signal),
+  /**
+   * Analyze the uploaded photographs. The visitor-selected menu city id is
+   * already validated client-side against menuCityIdSchema (curated preset,
+   * `geo:<name>`, or `place:<decimalId>` registry identity) and threads
+   * through unchanged; the server re-validates at its boundary and resolves
+   * `place:` ids against the place catalog (unknown ids degrade to null,
+   * never geography).
+   */
   extract: (scanId: string, signal?: AbortSignal, menuCityId?: string) =>
     dedupedExtract(scanId, signal, menuCityId),
   revise: (input: z.infer<typeof reviseScanSchema>, signal?: AbortSignal) =>

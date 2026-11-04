@@ -23,6 +23,7 @@ import {
   type ScanPhase,
 } from "@/modules/restaurant-discovery/components/scan-processing";
 import { ScanResults } from "@/modules/restaurant-discovery/components/scan-results";
+import { CITY_PRESETS } from "@/modules/restaurant-discovery/map-bounds";
 import { menuBcp47TagFor } from "@/modules/restaurant-discovery/menu-presentation";
 import {
   MenuScanClientError,
@@ -172,7 +173,28 @@ const storageTargetLanguage = "feastjourney:menu-target-language:v1";
 
 const storageMenuLocation = "feastjourney:menu-location:v1";
 
-const storedLocationSchema = z.object({ cityId: z.string().min(1), label: z.string().min(1) });
+/**
+ * Stored cityId grammar: curated preset ids, legacy "geo:<name>" labels,
+ * and canonical catalog identities ("place:<decimalId>"). Anything else
+ * (stale experiments, free text) fails validation and the read drops it.
+ */
+const presetLocationIds: ReadonlySet<string> = new Set(CITY_PRESETS.map((city) => city.id));
+
+const placeLocationPattern = /^place:([1-9][0-9]{0,18})$/;
+
+const cityIdSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .refine((cityId) => {
+    if (presetLocationIds.has(cityId)) return true;
+
+    if (cityId.startsWith("geo:")) return cityId.length > "geo:".length;
+
+    return placeLocationPattern.test(cityId);
+  });
+
+const storedLocationSchema = z.object({ cityId: cityIdSchema, label: z.string().min(1).max(200) });
 
 const readStoredMenuLocation = (): ScanMenuLocation | null => {
   try {
@@ -193,7 +215,11 @@ const readStoredMenuLocation = (): ScanMenuLocation | null => {
 const rememberMenuLocation = (location: ScanMenuLocation | null): void => {
   try {
     if (location === null) sessionStorage.removeItem(storageMenuLocation);
-    else sessionStorage.setItem(storageMenuLocation, JSON.stringify(location));
+    else
+      sessionStorage.setItem(
+        storageMenuLocation,
+        JSON.stringify({ cityId: location.cityId, label: location.label }),
+      );
   } catch {
     return;
   }

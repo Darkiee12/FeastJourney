@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   associationNoteSchema,
   currencyProvenanceSchema,
+  isMenuCityId,
   priceAssociationSchema,
 } from "@/modules/restaurant-discovery/menu-price-evidence";
 import {
@@ -116,7 +117,15 @@ export const menuScanDocumentSchema = menuExtractionSchema.extend({
 
 export type MenuScanDocument = z.infer<typeof menuScanDocumentSchema>;
 
-export const menuCityIdSchema = z.string().trim().min(1).max(80);
+/**
+ * Visitor-indicated menu location id. Grammar (see isMenuCityId): curated
+ * preset ids ("hcmc" | "hanoi" | "bangalore"), "geo:<name>" nearest-city
+ * names, and "place:<decimalId>" canonical registry identities. Anything
+ * else is rejected at this boundary. Max length stays 80.
+ */
+export const menuCityIdSchema = z.string().trim().min(1).max(80).refine(isMenuCityId, {
+  message: "Choose a supported menu location.",
+});
 
 export const createScanSchema = z.strictObject({
   targetLanguage: menuLanguageSchema,

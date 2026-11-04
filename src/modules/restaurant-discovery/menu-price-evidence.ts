@@ -162,10 +162,59 @@ const KNOWN_MENU_CITIES: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
+ * menuCityId boundary grammar (visitor-indicated menu location, weak
+ * evidence only):
+ * - curated preset ids: "hcmc" | "hanoi" | "bangalore"
+ * - "geo:<name>": nearest-city display name from the catalog city chooser
+ *   (the embedded name passes through; empty names degrade to null)
+ * - "place:<decimalId>": canonical place registry identity (resolved
+ *   server-side to a coarse city display name plus country ISO;
+ *   unknown/missing records degrade to null, never geography)
+ * Anything else is rejected at the schema boundary; the server never
+ * trusts client display labels as geography. Max length stays 80.
+ */
+export const MENU_CITY_PRESET_IDS: ReadonlyArray<string> = [...KNOWN_MENU_CITIES.keys()];
+
+export const MENU_CITY_GEO_PREFIX = "geo:";
+
+export const MENU_CITY_PLACE_PREFIX = "place:";
+
+const PLACE_MENU_ID_PATTERN = /^place:[0-9]+$/;
+
+export const isMenuCityId = (value: string): boolean => {
+  if (KNOWN_MENU_CITIES.has(value)) return true;
+
+  if (value.startsWith(MENU_CITY_GEO_PREFIX)) return true;
+
+  return PLACE_MENU_ID_PATTERN.test(value);
+};
+
+/**
+ * Pure parse of a `place:<decimalId>` menu city id to its decimal registry
+ * identity, or null when the value is not a well-formed place reference.
+ * No I/O: the extraction operation resolves the returned id against the
+ * place catalog; unknown/missing records degrade to null there.
+ */
+export const parsePlaceMenuCityId = (cityId: string | null | undefined): string | null => {
+  if (cityId === null || cityId === undefined) return null;
+
+  const trimmed = cityId.trim();
+
+  if (!trimmed.startsWith(MENU_CITY_PLACE_PREFIX)) return null;
+
+  const raw = trimmed.slice(MENU_CITY_PLACE_PREFIX.length);
+
+  return /^[0-9]+$/.test(raw) ? raw : null;
+};
+
+/**
  * Resolve a client-supplied menu city id to coarse evidence text. Curated
  * preset ids map to fixed names; `geo:` ids (nearest-city resolution) pass
- * through the embedded name only; anything else is dropped — the client is
- * never trusted to assert geography with an arbitrary string.
+ * through the embedded name only. `place:` registry ids need catalog I/O
+ * to become evidence, so this sync display-name resolver drops them —
+ * async resolution lives in the extraction operation. Anything else is
+ * dropped: the client is never trusted to assert geography with an
+ * arbitrary string.
  */
 export const resolveMenuCityId = (cityId: string | null | undefined): string | null => {
   if (cityId === null || cityId === undefined) return null;
@@ -174,11 +223,14 @@ export const resolveMenuCityId = (cityId: string | null | undefined): string | n
 
   if (trimmed.length === 0) return null;
 
+  if (trimmed.startsWith(MENU_CITY_PLACE_PREFIX)) return null;
+
   const known = KNOWN_MENU_CITIES.get(trimmed);
 
   if (known !== undefined) return known;
 
-  if (trimmed.startsWith("geo:")) return cleanPlace(trimmed.slice(4));
+  if (trimmed.startsWith(MENU_CITY_GEO_PREFIX))
+    return cleanPlace(trimmed.slice(MENU_CITY_GEO_PREFIX.length));
 
   return null;
 };

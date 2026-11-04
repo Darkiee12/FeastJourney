@@ -2144,3 +2144,145 @@ const scanLocationTranslations: ReadonlyMap<string, typeof scanLocationEnglish> 
 
 export const scanLocationCopy = (locale: string): typeof scanLocationEnglish =>
   scanLocationTranslations.get(locale) ?? scanLocationEnglish;
+
+const scanPickerEnglish = {
+  trigger: "Where are you eating? (Optional)",
+  sheetTitle: "Choose menu location",
+  searchPlaceholder: "Search city or country…",
+  searching: "Searching cities…",
+  useLocation: "Use my current location",
+  locating: "Finding your location…",
+  unavailable: "Location unavailable — pick a city instead.",
+  suggested: "Suggested",
+  recent: "Recent",
+  empty: "No cities match this search.",
+  retry: "Retry",
+  clear: "Clear selection",
+  done: "Done",
+};
+
+const scanPickerVietnamese: typeof scanPickerEnglish = {
+  trigger: "Bạn đang ăn ở đâu? (Không bắt buộc)",
+  sheetTitle: "Chọn vị trí thực đơn",
+  searchPlaceholder: "Tìm thành phố hoặc quốc gia…",
+  searching: "Đang tìm thành phố…",
+  useLocation: "Dùng vị trí của tôi",
+  locating: "Đang định vị…",
+  unavailable: "Không lấy được vị trí — hãy chọn thành phố.",
+  suggested: "Gợi ý",
+  recent: "Gần đây",
+  empty: "Không có thành phố nào khớp.",
+  retry: "Thử lại",
+  clear: "Xóa lựa chọn",
+  done: "Xong",
+};
+
+export const scanPickerHindi: typeof scanPickerEnglish = {
+  trigger: "आप कहां खा रहे हैं? (वैकल्पिक)",
+  sheetTitle: "मेन्यू स्थान चुनें",
+  searchPlaceholder: "शहर या देश खोजें…",
+  searching: "शहर खोजे जा रहे हैं…",
+  useLocation: "मेरा वर्तमान स्थान उपयोग करें",
+  locating: "आपका स्थान पता लगाया जा रहा है…",
+  unavailable: "स्थान अनुपलब्ध — शहर चुनें।",
+  suggested: "सुझाए गए",
+  recent: "हाल के",
+  empty: "इस खोज से कोई शहर नहीं मिला।",
+  retry: "फिर से कोशिश करें",
+  clear: "चयन साफ़ करें",
+  done: "हो गया",
+};
+
+export const scanPickerSpanish: typeof scanPickerEnglish = {
+  trigger: "¿Dónde estás comiendo? (Opcional)",
+  sheetTitle: "Elige la ubicación del menú",
+  searchPlaceholder: "Busca ciudad o país…",
+  searching: "Buscando ciudades…",
+  useLocation: "Usar mi ubicación actual",
+  locating: "Localizando tu ubicación…",
+  unavailable: "Ubicación no disponible: elige una ciudad.",
+  suggested: "Sugerencias",
+  recent: "Recientes",
+  empty: "Ninguna ciudad coincide con esta búsqueda.",
+  retry: "Reintentar",
+  clear: "Borrar selección",
+  done: "Listo",
+};
+
+export const scanPickerChinese: typeof scanPickerEnglish = {
+  trigger: "你在哪里用餐？（可选）",
+  sheetTitle: "选择菜单位置",
+  searchPlaceholder: "搜索城市或国家…",
+  searching: "正在搜索城市…",
+  useLocation: "使用我当前的位置",
+  locating: "正在定位你的位置…",
+  unavailable: "位置不可用——请选择城市。",
+  suggested: "推荐",
+  recent: "最近",
+  empty: "没有匹配的城市。",
+  retry: "重试",
+  clear: "清除选择",
+  done: "完成",
+};
+
+export const scanPickerJapanese: typeof scanPickerEnglish = {
+  trigger: "どこで食べていますか？（任意）",
+  sheetTitle: "メニューの場所を選ぶ",
+  searchPlaceholder: "都市や国を検索…",
+  searching: "都市を検索中…",
+  useLocation: "現在地を使う",
+  locating: "現在地を特定中…",
+  unavailable: "位置情報不可——都市を選んでください。",
+  suggested: "おすすめ",
+  recent: "最近",
+  empty: "一致する都市がありません。",
+  retry: "再試行",
+  clear: "選択を消去",
+  done: "完了",
+};
+
+export const scanPickerGerman: typeof scanPickerEnglish = {
+  trigger: "Wo isst du? (Optional)",
+  sheetTitle: "Menüstandort wählen",
+  searchPlaceholder: "Stadt oder Land suchen…",
+  searching: "Städte werden gesucht…",
+  useLocation: "Meinen aktuellen Standort nutzen",
+  locating: "Dein Standort wird ermittelt…",
+  unavailable: "Standort nicht verfügbar — wähle eine Stadt.",
+  suggested: "Vorschläge",
+  recent: "Zuletzt",
+  empty: "Keine Stadt passt zu dieser Suche.",
+  retry: "Erneut versuchen",
+  clear: "Auswahl löschen",
+  done: "Fertig",
+};
+
+export const scanPickerDutch: typeof scanPickerEnglish = {
+  trigger: "Waar eet je? (Optioneel)",
+  sheetTitle: "Kies menulocatie",
+  searchPlaceholder: "Zoek stad of land…",
+  searching: "Steden zoeken…",
+  useLocation: "Gebruik mijn huidige locatie",
+  locating: "Je locatie bepalen…",
+  unavailable: "Locatie niet beschikbaar — kies een stad.",
+  suggested: "Suggesties",
+  recent: "Recent",
+  empty: "Geen stad komt overeen met deze zoekopdracht.",
+  retry: "Opnieuw proberen",
+  clear: "Selectie wissen",
+  done: "Klaar",
+};
+
+const scanPickerTranslations: ReadonlyMap<string, typeof scanPickerEnglish> = new Map([
+  ["en", scanPickerEnglish],
+  ["vi", scanPickerVietnamese],
+  ["hi", scanPickerHindi],
+  ["es", scanPickerSpanish],
+  ["zh", scanPickerChinese],
+  ["ja", scanPickerJapanese],
+  ["de", scanPickerGerman],
+  ["nl", scanPickerDutch],
+]);
+
+export const scanLocationPickerCopy = (locale: string): typeof scanPickerEnglish =>
+  scanPickerTranslations.get(locale) ?? scanPickerEnglish;

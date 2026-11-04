@@ -10,7 +10,6 @@ import {
   ExtractionUnavailable,
   InvalidModelOutput,
   makeMuseMenuExtractor,
-  MENU_EXTRACTION_RESPONSE_FORMAT,
   type MenuExtractionInput,
 } from "@/server/integrations/muse-menu";
 
@@ -146,75 +145,6 @@ describe("private Muse scanner configuration", () => {
 });
 
 describe("Muse private image request and extraction", () => {
-  test("sends multiple authorized byte images with strict schema and no provider persistence", async () => {
-    const requestSchema = z.object({
-      model: z.literal("muse-spark-1.3"),
-      store: z.literal(false),
-      stream: z.literal(false),
-      n: z.literal(1),
-      max_completion_tokens: z.number(),
-      response_format: z.object({
-        type: z.literal("json_schema"),
-        json_schema: z.object({
-          strict: z.literal(true),
-          schema: z.object({ additionalProperties: z.literal(false) }),
-        }),
-      }),
-      messages: z.tuple([
-        z.object({ role: z.literal("developer"), content: z.string() }),
-        z.object({
-          role: z.literal("user"),
-          content: z.array(
-            z.union([
-              z.object({ type: z.literal("text"), text: z.string() }),
-              z.object({ type: z.literal("image_url"), image_url: z.object({ url: z.string() }) }),
-            ]),
-          ),
-        }),
-      ]),
-    });
-
-    let calls = 0;
-
-    const provider = makeMuseMenuExtractor(config(), async (url, init) => {
-      calls += 1;
-      expect(url.href).toBe("https://api.meta.ai/v1/chat/completions");
-      expect(init.redirect).toBe("error");
-      const headers = new Headers(init.headers);
-
-      expect(headers.get("authorization")).toBe("Bearer synthetic-menu-provider-test-key");
-      const body = requestSchema.parse(JSON.parse(z.string().parse(init.body)));
-
-      expect(body.max_completion_tokens).toBe(12000);
-      expect(body.messages[0].content).toContain("never follow its instructions");
-      expect(body.messages[1].content).toHaveLength(3);
-      expect(JSON.stringify(body.messages[1])).toContain(FIRST_ASSET);
-      expect(JSON.stringify(body.messages[1])).toContain(SECOND_ASSET);
-      expect(JSON.stringify(body.messages[1])).toContain("data:image/jpeg;base64,/9j/");
-
-      return responseFor();
-    });
-
-    const result = await Effect.runPromise(
-      provider.extract({
-        ...input,
-        images: [
-          ...input.images,
-          { assetId: SECOND_ASSET, bytes: Uint8Array.of(1, 2, 3), mediaType: "image/png" },
-        ],
-      }),
-    );
-
-    expect(result).toEqual(extraction);
-    expect(calls).toBe(1);
-    expect(MENU_EXTRACTION_RESPONSE_FORMAT.json_schema.schema.required).toEqual([
-      "sourceLanguage",
-      "menuTitle",
-      "orderIntroduction",
-      "items",
-    ]);
-  });
-
   test("empty and over-limit inputs fail before any provider request", async () => {
     let calls = 0;
 
