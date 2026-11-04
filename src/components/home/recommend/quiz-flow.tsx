@@ -74,6 +74,8 @@ import {
   ResultsExplanationSkeleton,
   ResultsLoadingSkeleton,
 } from "@/components/home/recommend/results-loading";
+import { presenceForSnapshot } from "@/components/home/recommend/agent-progress";
+import { useAgentProgress } from "@/components/home/recommend/use-agent-progress";
 import { SidebarPrefsCard, YourPicksCard } from "@/components/home/recommend/results-sidebar";
 import { usePreciseLocation } from "@/components/home/recommend/use-precise-location";
 import { listCountriesFn, recommendDishesFn } from "@/modules/food-discovery/food.functions";
@@ -320,6 +322,20 @@ export function RecommendSection() {
     isError: submittedKey !== null && resultsQuery.isError,
     refetch: resultsQuery.refetch,
   };
+
+  /**
+   * Agentic progress stream (workstream C consumer). Active only while a
+   * fresh request is pending with no cached outcome: back-navigation cache
+   * hits and quiz-phase renders pass `null` and never open a stream. No
+   * opener is wired yet — the streaming transport endpoint is owned by the
+   * transport workstream — so this stays idle and the neutral skeleton
+   * renders, with zero extra requests. Passing the opener later is the
+   * only change needed to light up live presence.
+   */
+  const streamRequestId =
+    showResults && submitted !== null && recommend.isPending ? outcomeKey : null;
+
+  const agentProgress = useAgentProgress(streamRequestId);
 
   /** Guest-storage mirror of persisted exclusions; guest submits write through here. Signed-in submits write the account instead and leave this copy independent for explicit import. */
   const [guestExclusions, setGuestExclusions] = useState<ReadonlyArray<string>>(
@@ -1498,7 +1514,13 @@ export function RecommendSection() {
       );
 
     if (recommend.isPending) {
-      return <ResultsLoadingSkeleton compact={compact} copy={copyMessages} />;
+      return (
+        <ResultsLoadingSkeleton
+          compact={compact}
+          copy={copyMessages}
+          presence={presenceForSnapshot(agentProgress.snapshot)}
+        />
+      );
     }
 
     if (recommend.isError) {
