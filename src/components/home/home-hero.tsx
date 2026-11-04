@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { MapPinned } from "lucide-react";
+import { MapPinned, Store } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { SURPRISE_DISH_EVENT } from "@/components/home/globe/food-locations";
@@ -107,6 +107,7 @@ export function HomeHero({ copy, lang }: { copy: Messages; lang: Locale }) {
             search={{ lang }}
             className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full border-2 border-white/40 bg-transparent px-6 text-base font-bold text-white transition hover:border-white/65 hover:bg-white/10 sm:min-h-13 sm:px-8 sm:text-lg"
           >
+            <Store aria-hidden="true" className="h-5 w-5 flex-none" />
             {copy.navRestaurants}
           </Link>
         </div>
