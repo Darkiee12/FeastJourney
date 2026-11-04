@@ -1,0 +1,114 @@
+/* Ask Muse workspace — the galaxy band and cream card stay (see muse.css);
+ * this adds the site's ink outlines, hard shadows and mango accents on top.
+ * muse.css loads later (imported by the shell), so rules that share its
+ * selectors are scoped under .muse-workspace to win on specificity. Remove the
+ * import in styles.css to roll back.
+ */
+
+.muse-workspace .muse-workspace-card {
+  border: var(--fj-line);
+  box-shadow: none;
+}
+
+.muse-workspace .muse-workspace-identity {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  text-shadow: 0.06em 0.06em 0 var(--color-food-orange-strong);
+}
+
+.muse-workspace .muse-workspace-city {
+  border: 2px solid var(--fj-night);
+  background: var(--color-mango);
+  color: var(--fj-ink);
+  box-shadow: 2px 2px 0 var(--fj-night);
+}
+
+.muse-workspace .muse-workspace-city:hover {
+  background: var(--color-mango);
+  color: var(--fj-ink);
+}
+
+.muse-workspace .muse-workspace-city svg {
+  color: var(--fj-ink);
+}
+
+/* Greeting band: the same comic headline as the homepage hero. */
+.muse-workspace-card div[class~="bg-gradient-to-b"] {
+  border: var(--fj-line);
+  border-radius: 1.1rem;
+  background: var(--color-space-deep);
+  box-shadow: 4px 4px 0 var(--color-mango);
+}
+
+.muse-workspace-card div[class~="bg-gradient-to-b"] h1 {
+  text-shadow: 0.06em 0.06em 0 var(--color-food-orange-strong);
+}
+
+/* Tool rows. */
+.muse-workspace-card ul[class~="flex-col"] {
+  gap: 0.75rem;
+  padding-inline-end: 0.25rem;
+}
+
+.muse-workspace-card ul[class~="flex-col"] > li > :is(a, button) {
+  border: var(--fj-line);
+  border-radius: 1rem;
+  box-shadow: 3px 3px 0 var(--fj-ink);
+  transition:
+    translate 100ms ease-out,
+    box-shadow 100ms ease-out;
+}
+
+.muse-workspace-card ul[class~="flex-col"] > li > :is(a, button):hover {
+  border-color: var(--fj-ink);
+  translate: -1px -1px;
+  box-shadow: 4px 4px 0 var(--fj-ink);
+}
+
+.muse-workspace-card ul[class~="flex-col"] > li > :is(a, button):active {
+  translate: 2px 2px;
+  box-shadow: none;
+}
+
+.muse-workspace-card ul[class~="flex-col"] span[class~="bg-space-deep"] {
+  border: var(--fj-line);
+  background: var(--color-mango);
+  color: var(--fj-ink);
+}
+
+/* Composer. */
+.muse-workspace-composer textarea {
+  border: var(--fj-line);
+  background: white;
+}
+
+.muse-workspace-composer button[class~="rounded-full"] {
+  border: var(--fj-line);
+  box-shadow: 2px 2px 0 var(--fj-ink);
+}
+
+/* Conversation: Muse's replies are outlined cards, the traveller's are mango. */
+.muse-workspace-card div[class~="rounded-bl-md"] {
+  border: var(--fj-line);
+  box-shadow: 3px 3px 0 var(--fj-ink);
+}
+
+.muse-workspace-card p[class~="rounded-br-md"] {
+  border: var(--fj-line);
+  background: var(--fj-mango-soft);
+  box-shadow: 3px 3px 0 var(--fj-ink);
+}
+
+.muse-workspace-card span[class~="size-7"][class~="bg-space-deep"] {
+  border: 2px solid var(--fj-ink);
+  background: var(--color-mango);
+  color: var(--fj-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .muse-workspace-card ul :is(a, button) {
+    transition: none;
+  }
+}

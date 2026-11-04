@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { PersonalNav } from "@/components/personal-nav";
 import { getDishSummariesFn } from "@/modules/food-discovery/food.functions";
+import { venueTint } from "@/modules/restaurant-discovery/components/restaurant-card";
 import {
   favoriteIdsQueryKey,
   SaveDishButton,
@@ -342,7 +343,7 @@ function SavedPages({
         </p>
       ) : null}
 
-      <ul className="mt-6 grid gap-4">
+      <ul className="saved-grid mt-6">
         {dishIds.map((dishId) => {
           const summary = byId.get(dishId);
 
@@ -367,6 +368,7 @@ function SavedPages({
               dishId={dishId}
               slug={summary.slug}
               title={summary.name ?? summary.englishName ?? summary.slug}
+              region={summary.regionNames[0] ?? null}
               lang={lang}
               session={session}
               status={statusForDish(combinedStatus, dishId)}
@@ -405,7 +407,7 @@ function UnavailableRow({
   const copy = messagesFor(lang);
 
   return (
-    <li className="rounded-2xl border border-border-soft bg-white p-6">
+    <li className="saved-card">
       <h2 className="text-lg leading-tight font-extrabold">Dish {dishId}</h2>
       <p role="note" className="mt-2 text-sm text-muted">
         {copy.savedUnavailable}
@@ -427,6 +429,7 @@ function FavoriteRow({
   dishId,
   slug,
   title,
+  region,
   lang,
   session,
   status,
@@ -434,31 +437,33 @@ function FavoriteRow({
   readonly dishId: string;
   readonly slug: string;
   readonly title: string;
+  readonly region: string | null;
   readonly lang: Locale;
   readonly session: SessionState;
   readonly status: SaveButtonStatus;
 }) {
   return (
-    <li className="rounded-2xl border border-border-soft bg-white p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg leading-tight font-extrabold">
-          <Link
-            to="/dishes/$dishId"
-            params={{ dishId: slug }}
-            search={{ lang }}
-            className="underline decoration-food-orange/60 underline-offset-4 hover:text-food-orange-strong"
-          >
-            {title}
-          </Link>
-        </h2>
-        <SaveDishButton
-          dishId={dishId}
-          lang={lang}
-          returnTo="/saved"
-          session={session}
-          status={status}
-        />
+    <li className="saved-card" data-tint={venueTint(title)}>
+      <div className="saved-card-top">
+        <div className="min-w-0">
+          {region === null ? null : <p className="saved-card-region">{region}</p>}
+          <h2 className="saved-card-title">
+            <Link to="/dishes/$dishId" params={{ dishId: slug }} search={{ lang }}>
+              {title}
+            </Link>
+          </h2>
+        </div>
+        <span aria-hidden="true" className="res-stamp">
+          <span className="res-stamp-initial">{Array.from(title)[0] ?? ""}</span>
+        </span>
       </div>
+      <SaveDishButton
+        dishId={dishId}
+        lang={lang}
+        returnTo="/saved"
+        session={session}
+        status={status}
+      />
     </li>
   );
 }

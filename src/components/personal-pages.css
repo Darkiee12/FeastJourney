@@ -1,0 +1,233 @@
+/* Saved dishes, Account and Security — the "food passport" language from
+ * home-overhaul.css. All three render PersonalNav, so `:has(.personal-nav)`
+ * scopes these rules. Saved dishes read as a collection of passport stamps;
+ * settings stay calm, with ink panels and one orange action per form.
+ * Unlayered, so it beats utilities. Remove the import in styles.css to roll
+ * back.
+ */
+
+.app-shell:has(.personal-nav) {
+  background:
+    radial-gradient(rgb(23 32 51 / 0.09) 1px, transparent 1.4px) 0 0 / 16px 16px,
+    var(--color-cream);
+}
+
+main:has(.personal-nav) h1 {
+  width: fit-content;
+  padding: 0 0.15em;
+  font-size: clamp(2.5rem, 7vw, 3.5rem);
+  line-height: 1.05;
+  background: linear-gradient(
+    transparent 54%,
+    var(--fj-highlight) 54%,
+    var(--fj-highlight) 90%,
+    transparent 90%
+  );
+}
+
+/* Saved page breadcrumb, as the shared mango back pill. */
+main:has(.personal-nav) p > a[class~="text-brand-blue-hover"][href^="/"] {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.5rem;
+  padding: 0.25rem 1rem;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  background: var(--fj-mango-soft);
+  color: var(--fj-ink);
+  box-shadow: 2px 2px 0 var(--fj-ink);
+  text-decoration: none;
+}
+
+/* ------------------------------------------------------------- tabs --- */
+
+/* Room for the hard shadows inside the nav's horizontal scroller. */
+.personal-nav {
+  padding-block: 0.25rem 0.5rem;
+}
+
+.personal-nav ul {
+  gap: 0.5rem;
+}
+
+.personal-nav a {
+  min-height: 2.5rem;
+  border: var(--fj-line);
+  background: white;
+  color: var(--fj-ink);
+  box-shadow: 2px 2px 0 var(--fj-ink);
+  font-weight: 700;
+}
+
+.personal-nav a:hover {
+  background: var(--fj-mango-soft);
+  color: var(--fj-ink);
+}
+
+.personal-nav a[aria-current="page"],
+.personal-nav a[aria-current="page"]:hover {
+  background: var(--color-mango);
+  color: var(--fj-ink);
+}
+
+/* ------------------------------------------------------- saved dishes --- */
+
+main:has(.saved-grid) > * > div:has(> .saved-grid),
+main:has(.saved-grid) div:has(> .saved-grid) {
+  max-width: 56rem;
+}
+
+.saved-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+  gap: 1.1rem;
+  margin-inline: 0;
+  padding: 0 0.3rem 0.3rem 0;
+  list-style: none;
+}
+
+.saved-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.9rem;
+  padding: 1rem 1rem 1.05rem 1.1rem;
+  border: var(--fj-line);
+  border-radius: 1.1rem;
+  background: white;
+  box-shadow: 4px 4px 0 var(--fj-ink);
+  transition:
+    translate 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+.saved-card:hover {
+  translate: -2px -2px;
+  box-shadow: 6px 6px 0 var(--fj-ink);
+}
+
+.saved-card:hover .res-stamp {
+  rotate: -4deg;
+}
+
+.saved-card-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.saved-card-region {
+  width: fit-content;
+  margin-block-end: 0.35rem;
+  padding: 0 0.25em;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  background: linear-gradient(
+    transparent 45%,
+    var(--fj-highlight) 45%,
+    var(--fj-highlight) 92%,
+    transparent 92%
+  );
+}
+
+.saved-card-title {
+  font-family: var(--font-display);
+  font-size: 1.55rem;
+  font-weight: 400;
+  line-height: 1.08;
+  letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
+}
+
+.saved-card-title a {
+  color: var(--fj-ink);
+  text-decoration: none;
+}
+
+.saved-card-title a:hover {
+  color: var(--color-food-orange-strong);
+}
+
+.saved-card button[class~="rounded-full"] {
+  min-height: 2.5rem;
+  border: var(--fj-line);
+  box-shadow: 2px 2px 0 var(--fj-ink);
+}
+
+/* ---------------------------------------------------------- settings --- */
+
+main:has(.personal-nav) section[class~="rounded-lg"] {
+  border: var(--fj-line);
+  border-radius: 1.1rem;
+  box-shadow: 4px 4px 0 var(--fj-ink);
+}
+
+main:has(.personal-nav) section h2[class~="font-display"] {
+  width: fit-content;
+  padding: 0 0.15em;
+  background: linear-gradient(
+    transparent 54%,
+    var(--fj-highlight) 54%,
+    var(--fj-highlight) 90%,
+    transparent 90%
+  );
+}
+
+main:has(.personal-nav)
+  section
+  :is(input:not([type="checkbox"], [type="radio"]), select, textarea) {
+  border: var(--fj-line);
+  border-radius: 0.75rem;
+}
+
+main:has(.personal-nav) section :is(input, select, textarea):focus {
+  border-color: var(--color-brand-blue);
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 0.2);
+}
+
+main:has(.personal-nav) section button[class~="rounded-md"] {
+  min-height: 2.5rem;
+  padding-inline: 1.1rem;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  box-shadow: 2px 2px 0 var(--fj-ink);
+  font-weight: 700;
+}
+
+main:has(.personal-nav) section button[class~="bg-brand-blue"] {
+  background: var(--color-food-orange-strong);
+  color: white;
+}
+
+main:has(.personal-nav) section button[class~="rounded-md"]:hover:not(:disabled) {
+  translate: -1px -1px;
+  box-shadow: var(--fj-hard);
+}
+
+main:has(.personal-nav) section button[class~="rounded-md"]:active:not(:disabled) {
+  translate: 2px 2px;
+  box-shadow: none;
+}
+
+/* Destructive actions keep their red outline and take a red shadow. */
+main:has(.personal-nav) section button[class~="border-red-700"] {
+  border-color: #b91c1c;
+  box-shadow: 2px 2px 0 #b91c1c;
+}
+
+main:has(.personal-nav) section li[class~="rounded-md"] {
+  border: var(--fj-line);
+  border-radius: 0.85rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .saved-card,
+  .saved-card .res-stamp {
+    transition: none;
+  }
+}

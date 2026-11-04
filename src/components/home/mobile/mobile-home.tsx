@@ -185,6 +185,17 @@ function MobileHomeInner({ copy, lang }: { copy: Messages; lang: Locale }) {
         </button>
       ) : null}
 
+      {/* Dims the stage behind an open sheet; tapping it closes the sheet.
+          Keyboard users already have the sheet's Close button and Escape. */}
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={lang === "vi" ? "Đóng" : "Close"}
+        onClick={mobile.closeSheet}
+        data-open={mode !== "collapsed"}
+        className="absolute inset-0 z-30 cursor-default bg-space-deep/65 opacity-0 data-[open=false]:pointer-events-none data-[open=true]:opacity-100 motion-safe:transition-opacity motion-safe:duration-[450ms] motion-safe:ease-[cubic-bezier(0.32,0.72,0,1)]"
+      />
+
       <MobileSheet heightPx={sheetHeightPx} lang={lang} discoverLabel={copy.navDiscover}>
         <div
           className={discoveryActive ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "hidden"}

@@ -59,6 +59,9 @@ export const MOBILE_SHEET_PEEK_PX = 76;
 const MIN_STAGE_TOP_PX = 56;
 const MIN_GLOBE_ARC_PX = 96;
 
+/** Open sheets are for reading: they keep only a sliver of the stage above. */
+const OPEN_SHEET_RATIO = 0.88;
+
 export function mobileSheetHeightPx(mode: MobileSheetMode, viewportHeight: number): number {
   const height = Math.max(1, viewportHeight);
   const capped = Math.max(MOBILE_SHEET_PEEK_PX, height - MIN_STAGE_TOP_PX);
@@ -67,13 +70,13 @@ export function mobileSheetHeightPx(mode: MobileSheetMode, viewportHeight: numbe
     case "collapsed":
       return Math.min(MOBILE_SHEET_PEEK_PX, height);
     case "quiz":
-      return Math.min(capped, Math.max(300, height * 0.52));
+      return Math.min(capped, Math.max(300, height * OPEN_SHEET_RATIO));
     case "results":
-      return Math.min(capped, Math.max(280, height * 0.46));
+      return Math.min(capped, Math.max(280, height * OPEN_SHEET_RATIO));
     case "discovery":
-      return Math.min(capped, Math.max(300, height * 0.52));
+      return Math.min(capped, Math.max(300, height * OPEN_SHEET_RATIO));
     case "location":
-      return Math.min(capped, Math.max(320, height * 0.72));
+      return Math.min(capped, Math.max(320, height * OPEN_SHEET_RATIO));
   }
 
   return MOBILE_SHEET_PEEK_PX;
