@@ -275,10 +275,11 @@ function ScanPriceResearch({
 
   const [currency, setCurrency] = useState(selectedCurrency);
   // Prefill comes from the traveler-selected menu location only: the
-  // label is the real stored city display name. There is no
-  // resolveMenuCountry resolver in menu-price-evidence and no country
-  // travels with the scan location, so the country field stays empty
-  // rather than inventing one. Currency still defaults from the dish.
+  // label is the real stored city display name. resolveMenuCountry in
+  // menu-price-evidence needs a server-resolved CurrencyContext (place
+  // catalog country) that never travels with the client scan location,
+  // so the country field stays empty rather than inventing one.
+  // Currency still defaults from the dish.
   const [city, setCity] = useState(menuLocation?.label ?? "");
   const [country, setCountry] = useState("");
   const [state, setState] = useState<ResearchStatusState>("idle");
