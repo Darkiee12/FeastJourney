@@ -20,6 +20,9 @@
 #   APP_HOST=example.test GARAGE_RPC_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
 #   GARAGE_BOOTSTRAP_ACCESS_KEY=x GARAGE_BOOTSTRAP_SECRET_KEY=x \
 #   S3_ACCESS_KEY_ID=x S3_SECRET_ACCESS_KEY=x \
+#   RECOMMEND_AGENT_ENABLED=false RECOMMEND_AGENT_MAX_ROUNDS=3 RECOMMEND_AGENT_MAX_TOOL_CALLS=8 \
+#   RECOMMEND_AGENT_DETAILS_PER_CALL=10 RECOMMEND_AGENT_CANDIDATE_POOL_CAP=60 RECOMMEND_AGENT_FINAL_LIMIT=10 \
+#   MODEL_AGENT_TIMEOUT_MS=20000 RECOMMEND_AGENT_DEADLINE_MS=90000 \
 #   docker compose -f docker-compose.swarm.yml config --quiet
 #
 # Storage prerequisite (operator, once per Swarm): label exactly one durable
@@ -186,6 +189,18 @@ services:
       MODEL_CANDIDATE_LIMIT: ${MODEL_CANDIDATE_LIMIT:-60}
       MODEL_OUTPUT_LIMIT: ${MODEL_OUTPUT_LIMIT:-10}
       MODEL_MAX_TOKENS: ${MODEL_MAX_TOKENS:-4000}
+      # Agentic recommendations (PR #24). Explicit operator config: no
+      # defaults baked here — unset falls back to the documented Effect
+      # Config values and the server-only resolver fails loudly naming
+      # field + reason on explicitly set invalid values.
+      RECOMMEND_AGENT_ENABLED: ${RECOMMEND_AGENT_ENABLED:?RECOMMEND_AGENT_ENABLED must be set}
+      RECOMMEND_AGENT_MAX_ROUNDS: ${RECOMMEND_AGENT_MAX_ROUNDS:?RECOMMEND_AGENT_MAX_ROUNDS must be set}
+      RECOMMEND_AGENT_MAX_TOOL_CALLS: ${RECOMMEND_AGENT_MAX_TOOL_CALLS:?RECOMMEND_AGENT_MAX_TOOL_CALLS must be set}
+      RECOMMEND_AGENT_DETAILS_PER_CALL: ${RECOMMEND_AGENT_DETAILS_PER_CALL:?RECOMMEND_AGENT_DETAILS_PER_CALL must be set}
+      RECOMMEND_AGENT_CANDIDATE_POOL_CAP: ${RECOMMEND_AGENT_CANDIDATE_POOL_CAP:?RECOMMEND_AGENT_CANDIDATE_POOL_CAP must be set}
+      RECOMMEND_AGENT_FINAL_LIMIT: ${RECOMMEND_AGENT_FINAL_LIMIT:?RECOMMEND_AGENT_FINAL_LIMIT must be set}
+      MODEL_AGENT_TIMEOUT_MS: ${MODEL_AGENT_TIMEOUT_MS:?MODEL_AGENT_TIMEOUT_MS must be set}
+      RECOMMEND_AGENT_DEADLINE_MS: ${RECOMMEND_AGENT_DEADLINE_MS:?RECOMMEND_AGENT_DEADLINE_MS must be set}
       # Muse menu scanner (PR #17). Disabled unless explicitly enabled;
       # reuses the shared MODEL_API_KEY / MODEL_BASE_URL above.
       MENU_SCANNER_ENABLED: ${MENU_SCANNER_ENABLED:-false}

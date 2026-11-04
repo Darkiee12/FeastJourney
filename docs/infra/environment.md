@@ -41,6 +41,10 @@ fast when a required value is missing; see `.env.example` for the full list):
   `RECOMMENDATION_PROVIDER`, `MODEL_API_KEY`, `MODEL_MODEL_ID`,
   `MODEL_BASE_URL`, `MODEL_TIMEOUT_MS`, `MODEL_CANDIDATE_LIMIT`,
   `MODEL_OUTPUT_LIMIT`, `MODEL_MAX_TOKENS`, `OWNER_EMAIL`,
+  `RECOMMEND_AGENT_ENABLED`, `RECOMMEND_AGENT_MAX_ROUNDS`,
+  `RECOMMEND_AGENT_MAX_TOOL_CALLS`, `RECOMMEND_AGENT_DETAILS_PER_CALL`,
+  `RECOMMEND_AGENT_CANDIDATE_POOL_CAP`, `RECOMMEND_AGENT_FINAL_LIMIT`,
+  `MODEL_AGENT_TIMEOUT_MS`, `RECOMMEND_AGENT_DEADLINE_MS`,
   `MENU_SCANNER_ENABLED`, `MENU_SCAN_*`, `WEB_RESEARCH_ENABLED`,
   `WEB_RESEARCH_*`, `REVIEW_INTELLIGENCE_ENABLED`,
   `REVIEW_INTELLIGENCE_TIMEOUT_MS`, `COPILOT_VISION_ENABLED`,
@@ -59,7 +63,8 @@ fast when a required value is missing; see `.env.example` for the full list):
 
 The deployment operator owns environment configuration. Every operator-set
 value in `MODEL_*`, `MENU_SCAN_*`, `COPILOT_VISION_*`, `WEB_RESEARCH_*`,
-`REVIEW_INTELLIGENCE_*`, `REQUEST_TIMEOUT_MS`, `RECOMMEND_TIMEOUT_MS`, and
+`REVIEW_INTELLIGENCE_*`, `RECOMMEND_AGENT_*`, `REQUEST_TIMEOUT_MS`,
+`RECOMMEND_TIMEOUT_MS`, and
 rate-limit/storage knobs flows through exactly as configured: defaults apply
 only when a variable is unset, and there are intentionally no upper bounds.
 Explicitly set invalid values (non-positive timeouts, negative retries,
