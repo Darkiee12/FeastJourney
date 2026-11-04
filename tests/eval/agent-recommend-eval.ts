@@ -299,6 +299,24 @@ export const FIXTURE_DISHES: ReadonlyArray<FixtureDish> = [
     ingredients: ["tomato", "bean"],
     description: "Hearty vegetable soup.",
   },
+  {
+    id: "d25",
+    name: "Xoi Lac",
+    cuisines: ["vietnamese"],
+    categories: ["breakfast"],
+    region: "VN",
+    ingredients: ["rice", "peanut", "sesame"],
+    description: "Morning sticky rice with peanuts.",
+  },
+  {
+    id: "d26",
+    name: "Enchiladas Verdes",
+    cuisines: ["mexican"],
+    categories: ["dinner"],
+    region: "MX",
+    ingredients: ["corn", "chicken", "tomatillo"],
+    description: "Baked tortillas in green salsa.",
+  },
 ];
 
 /** Deterministic query matrix: regions × moods × meals × exclusions. */

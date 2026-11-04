@@ -135,7 +135,7 @@ describe("private Muse scanner configuration", () => {
           MODEL_API_KEY: "synthetic",
           ...override,
         }),
-      ).toThrow("Menu scanner configuration is invalid.");
+      ).toThrow("Menu scanner configuration is invalid");
     }
   });
 });

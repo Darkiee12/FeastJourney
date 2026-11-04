@@ -89,7 +89,7 @@ const streamRequest = (body: string, headers: Record<string, string> = {}): Requ
     body,
   });
 
-const validBody = { meal: "dinner", mood: "comfort", locale: "en" };
+const validBody = { meal: "dinner", mood: "comforting", locale: "en" };
 
 const invalidInputResponseSchema = z.object({
   error: z.literal("invalid_input"),
