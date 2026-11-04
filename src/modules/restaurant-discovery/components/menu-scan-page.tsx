@@ -8,7 +8,11 @@ import { researchCopyFor } from "@/components/research/research-copy";
 import { ResearchFindingsList } from "@/components/research/research-findings";
 import type { ResearchFinding } from "@/components/research/research-findings";
 import { SharedSelectField } from "@/components/ui/select";
-import { menuCopy, menuScanPageCopy } from "@/modules/restaurant-discovery/components/menu-copy";
+import {
+  menuCopy,
+  menuScanPageCopy,
+  menuScanResultsCopy,
+} from "@/modules/restaurant-discovery/components/menu-copy";
 import { parsePriceResearchOutcome } from "@/modules/restaurant-discovery/components/price-compare-panel";
 import { ScanCapture } from "@/modules/restaurant-discovery/components/scan-capture";
 import type { ScanMenuLocation } from "@/modules/restaurant-discovery/components/scan-capture";
@@ -1010,6 +1014,10 @@ export function MenuScanPage({
   }));
 
   const scanAnother = (): void => {
+    // Starting over detaches the remembered session so a reload does not
+    // re-adopt the abandoned scan. Server-side data is untouched; only the
+    // explicit delete path removes it.
+    sessionStorage.removeItem(storageScan);
     setScanId(null);
     setView(null);
     setDocument(null);
@@ -1157,6 +1165,13 @@ export function MenuScanPage({
             <output className="scan-status" aria-live="polite">
               {status}
             </output>
+          )}
+          {scanId !== null && !busy && (
+            <p className="scan-return">
+              <button type="button" onClick={scanAnother}>
+                {menuScanResultsCopy(locale).scanAnother}
+              </button>
+            </p>
           )}
         </>
       )}
