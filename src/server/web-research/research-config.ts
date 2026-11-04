@@ -49,8 +49,11 @@ export interface ResearchConfig {
  * default applies only when the variable is unset. There is intentionally
  * no upper bound — upstream provider limits are the provider's
  * responsibility and surface as provider failures, never as silent
- * rewrites. An explicitly set value that is not a positive safe integer
- * fails loudly naming field + reason.
+ * rewrites. Strict whole-string matching: Number.parseInt alone would accept
+ * "2000oops" as 2000, so anything that is not all digits fails loudly
+ * naming field + reason. This mirrors the strict gate in
+ * meta-responses.ts so the two parsers of WEB_RESEARCH_MAX_OUTPUT_TOKENS
+ * can never silently diverge.
  */
 const parseOperatorPositiveInt = (
   raw: string | undefined,
@@ -59,6 +62,10 @@ const parseOperatorPositiveInt = (
 ): number => {
   if (raw === undefined) {
     return fallback;
+  }
+
+  if (!/^[0-9]+$/.test(raw)) {
+    throw new Error(`${field} must be a positive safe integer or unset (unset uses ${fallback}).`);
   }
 
   const parsed = Number.parseInt(raw, 10);

@@ -250,12 +250,20 @@ export interface ReviewIntelligenceConfig {
 /**
  * Operator-owned timeout: a valid explicitly configured value flows through
  * exactly as set; the default applies only when unset. No upper bound —
- * upstream provider limits surface as provider failures. An explicitly set
- * non-positive-integer fails loudly naming field + reason.
+ * upstream provider limits surface as provider failures. Strict
+ * whole-string matching: Number.parseInt alone would accept "20000abc" as
+ * 20000, so anything that is not all digits fails loudly naming field +
+ * reason.
  */
 const parseOperatorTimeoutMs = (raw: string | undefined): number => {
   if (raw === undefined) {
     return REVIEW_INTELLIGENCE_DEFAULT_TIMEOUT_MS;
+  }
+
+  if (!/^[0-9]+$/.test(raw)) {
+    throw new Error(
+      `REVIEW_INTELLIGENCE_TIMEOUT_MS must be a positive safe integer of milliseconds or unset (unset uses ${REVIEW_INTELLIGENCE_DEFAULT_TIMEOUT_MS}).`,
+    );
   }
 
   const parsed = Number.parseInt(raw, 10);

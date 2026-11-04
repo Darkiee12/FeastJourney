@@ -219,14 +219,27 @@ services:
       WEB_RESEARCH_MAX_RESULTS: ${WEB_RESEARCH_MAX_RESULTS:-5}
       WEB_RESEARCH_CACHE_TTL_MS: ${WEB_RESEARCH_CACHE_TTL_MS:-21600000}
       WEB_RESEARCH_NEGATIVE_CACHE_TTL_MS: ${WEB_RESEARCH_NEGATIVE_CACHE_TTL_MS:-1800000}
+      # Operator-owned token budgets: every line below has a code default,
+      # so `:-` (not `:?`) is correct — unset uses the documented default,
+      # explicit-valid flows through exactly, explicit-invalid fails loudly
+      # in server logs naming field + reason. Same convention as the
+      # neighboring MODEL_* lines.
+      WEB_RESEARCH_MAX_OUTPUT_TOKENS: ${WEB_RESEARCH_MAX_OUTPUT_TOKENS:-2000}
       # Review summarization + translation (PR #17). Disabled unless
       # explicitly enabled; reuses the shared MODEL_API_KEY / MODEL_BASE_URL.
       REVIEW_INTELLIGENCE_ENABLED: ${REVIEW_INTELLIGENCE_ENABLED:-false}
       REVIEW_INTELLIGENCE_TIMEOUT_MS: ${REVIEW_INTELLIGENCE_TIMEOUT_MS:-20000}
+      REVIEW_INTELLIGENCE_MODEL_ID: ${REVIEW_INTELLIGENCE_MODEL_ID:-muse-spark-1.3}
+      REVIEW_INTELLIGENCE_MAX_COMPLETION_TOKENS: ${REVIEW_INTELLIGENCE_MAX_COMPLETION_TOKENS:-12000}
+      REVIEW_INTELLIGENCE_MAX_SAMPLE: ${REVIEW_INTELLIGENCE_MAX_SAMPLE:-12}
+      REVIEW_INTELLIGENCE_MAX_RESPONSE_BYTES: ${REVIEW_INTELLIGENCE_MAX_RESPONSE_BYTES:-24576}
       # Copilot food-photo identification (PR #17). Disabled unless
       # explicitly enabled; reuses the shared MODEL_API_KEY / MODEL_BASE_URL.
       COPILOT_VISION_ENABLED: ${COPILOT_VISION_ENABLED:-false}
       COPILOT_VISION_TIMEOUT_MS: ${COPILOT_VISION_TIMEOUT_MS:-20000}
+      COPILOT_VISION_MAX_COMPLETION_TOKENS: ${COPILOT_VISION_MAX_COMPLETION_TOKENS:-2000}
+      COPILOT_SYNTHESIS_MAX_COMPLETION_TOKENS: ${COPILOT_SYNTHESIS_MAX_COMPLETION_TOKENS:-1200}
+      MENU_LOCALIZATION_MAX_COMPLETION_TOKENS: ${MENU_LOCALIZATION_MAX_COMPLETION_TOKENS:-4000}
       # Reference FX for local-currency display (Frankfurter v2). Same
       # defaults as Effect Config in
       # src/modules/restaurant-discovery/server/operations/fx.ts; forwarding

@@ -47,8 +47,14 @@ fast when a required value is missing; see `.env.example` for the full list):
   `MODEL_AGENT_TIMEOUT_MS`, `RECOMMEND_AGENT_DEADLINE_MS`,
   `MENU_SCANNER_ENABLED`, `MENU_SCAN_*`, `WEB_RESEARCH_ENABLED`,
   `WEB_RESEARCH_*`, `REVIEW_INTELLIGENCE_ENABLED`,
-  `REVIEW_INTELLIGENCE_TIMEOUT_MS`, `COPILOT_VISION_ENABLED`,
-  `COPILOT_VISION_TIMEOUT_MS`, `FX_ENDPOINT`, `FX_REFRESH_HOURS`,
+  `REVIEW_INTELLIGENCE_TIMEOUT_MS`, `REVIEW_INTELLIGENCE_MODEL_ID`,
+  `REVIEW_INTELLIGENCE_MAX_COMPLETION_TOKENS`,
+  `REVIEW_INTELLIGENCE_MAX_SAMPLE`,
+  `REVIEW_INTELLIGENCE_MAX_RESPONSE_BYTES`, `COPILOT_VISION_ENABLED`,
+  `COPILOT_VISION_TIMEOUT_MS`, `COPILOT_VISION_MAX_COMPLETION_TOKENS`,
+  `COPILOT_SYNTHESIS_MAX_COMPLETION_TOKENS`,
+  `MENU_LOCALIZATION_MAX_COMPLETION_TOKENS`,
+  `WEB_RESEARCH_MAX_OUTPUT_TOKENS`, `FX_ENDPOINT`, `FX_REFRESH_HOURS`,
   `FX_MAX_AGE_HOURS`. `DATABASE_DIRECT_URL` is declared in server config
   but not consumed by any application path yet.
 
@@ -78,6 +84,27 @@ remain the provider's responsibility and surface as provider failures.
 Genuine technical limits (provider inline-payload size, decode-bomb guards,
 guest-endpoint attempt/concurrency caps, proxy timeouts) are documented at
 their use sites, not silently applied to operator values.
+
+### Per-integration token/output budgets
+
+Each AI integration below owns exactly one operator-set budget variable;
+`MODEL_MAX_TOKENS` governs **only** the dish-ranking call and is never
+assumed to govern any other feature. Defaults apply only when the variable
+is unset; explicit valid values flow through exactly as configured (no
+upper bounds, no silent ceilings); explicit invalid values fail loudly
+with field + reason in server logs, never with credentials.
+
+| Variable | Default | What it budgets | Interaction |
+| --- | --- | --- | --- |
+| `MODEL_MAX_TOKENS` | `4000` | Ranking call only (reasoning + output). | Independent; no other feature reads it. |
+| `COPILOT_SYNTHESIS_MAX_COMPLETION_TOKENS` | `1200` | One copilot synthesis call (`max_tokens`, Chat Completions). | The chat backstop (`resolveCopilotChatDeadlineMs`) derives from the synthesis **timeout** plus `COPILOT_MAX_TOOL_CALLS × TOOL_TIMEOUT_MS` plus margin — a timeout, not this token budget. |
+| `COPILOT_VISION_MAX_COMPLETION_TOKENS` | `2000` | One food-photo vision call (`max_tokens`, Chat Completions). | The photo server function derives its deadline from `COPILOT_VISION_TIMEOUT_MS` plus scan-read overhead, not from this budget. |
+| `MENU_LOCALIZATION_MAX_COMPLETION_TOKENS` | `4000` | One localization batch call (`max_tokens`, Chat Completions). | Independent per-batch budget; monthly call/char ceilings stay hardcoded (see below). |
+| `WEB_RESEARCH_MAX_OUTPUT_TOKENS` | `2000` | One web-research call (`max_output_tokens`, Responses endpoint — note the field name differs from Chat Completions `max_tokens`). | Parsed in both `research-config.ts` (info) and `meta-responses.ts` (operative gate) with identical strict semantics. |
+| `REVIEW_INTELLIGENCE_MAX_COMPLETION_TOKENS` | `12000` | One review-highlights call (`max_tokens`, Chat Completions). | Matches the menu-scanner budget for the same endpoint family; the provider limit stays final. |
+| `REVIEW_INTELLIGENCE_MODEL_ID` | `MODEL_MODEL_ID`, then `muse-spark-1.3` | Pins review output to one model independently of ranking-model churn. | Must satisfy the shared supported-model shape; invalid ids fail fast at startup. |
+| `REVIEW_INTELLIGENCE_MAX_SAMPLE` | `12` | Reviews sent to the provider in one call. | Output-contract bounds (overview/bullet/snippet lengths) stay hardcoded. |
+| `REVIEW_INTELLIGENCE_MAX_RESPONSE_BYTES` | `24576` (24 KiB) | Response-body read budget. | Cache TTLs/entries and per-review char bounds stay hardcoded. |
 
 **Important:** local Compose intentionally publishes no database port, so a host `DATABASE_URL=postgres://localhost:5432/...` is **not** reachable without a separate, explicitly approved dev access arrangement. Never solve this by exposing 0.0.0.0:5432.
 
