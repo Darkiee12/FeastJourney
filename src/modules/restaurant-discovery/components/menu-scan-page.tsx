@@ -794,6 +794,10 @@ export function MenuScanPage({
       return next;
     });
 
+  // Submit always analyzes what is selected: any locally selected photo
+  // set starts a fresh scan (delete + re-upload), because selected files are
+  // the source of truth and the server cannot prove they match a previous
+  // upload. Resume observes an existing scan id and never uploads.
   const analyze = (resume = false): void => {
     if (submitGuard.current || busy) return;
 
@@ -801,45 +805,68 @@ export function MenuScanPage({
     void runTask(
       copy.analyzing,
       async (signal) => {
-        if (photos.length === 0) throw new Error(copy.empty);
         const branch = verifiedBranch === null ? null : verifiedBranch.id;
 
         try {
-          // Resume keeps server-side work: when every photo is already
-          // uploaded for this scan, skip delete/recreate/re-upload and poll
-          // the same scan id. A fresh start is required when there is no
-          // scan, photos changed, or the previous attempt never uploaded.
-          const canResume =
-            resume && scanId !== null && uploaded === photos.length && photos.length > 0;
+          if (resume && scanId !== null && photos.length === 0) {
+            // Resume without local files (post-refresh): observe the existing
+            // scan. A completed document adopts immediately; a running
+            // extraction polls to completion. Anything else drops the dead
+            // reference so the next attempt asks for fresh photographs.
+            const current = await menuScanClient.get(scanId, signal);
+
+            if (current.document !== null) {
+              if (!signal.aborted) adoptView(current);
+
+              return;
+            }
+
+            if (current.scan.status === "processing") {
+              setReading(true);
+              setStatus(copy.analyzing);
+
+              const next = await menuScanClient.extractAndWait(
+                scanId,
+                signal,
+                menuLocation?.cityId,
+              );
+
+              if (!signal.aborted) adoptView(next);
+
+              return;
+            }
+
+            setScanId(null);
+            sessionStorage.removeItem(storageScan);
+            throw new MenuScanClientError(
+              "Menu analysis did not finish. Please try again.",
+              true,
+              null,
+            );
+          }
+
+          if (photos.length === 0) throw new Error(copy.empty);
 
           let id = scanId;
 
-          if (!canResume) {
-            if (id !== null) await menuScanClient.remove(id, signal);
+          if (id !== null) await menuScanClient.remove(id, signal);
 
-            const created = await menuScanClient.create(
-              { targetLanguage, venueId: branch },
-              signal,
-            );
+          const created = await menuScanClient.create({ targetLanguage, venueId: branch }, signal);
+          setScanId(created.id);
+          sessionStorage.setItem(storageScan, created.id);
+          sessionStorage.setItem(storageOwner, owner);
 
-            setScanId(created.id);
-            sessionStorage.setItem(storageScan, created.id);
-            sessionStorage.setItem(storageOwner, owner);
+          setUploaded(0);
+          setUploadTotal(photos.length);
 
-            setUploaded(0);
-            setUploadTotal(photos.length);
-
-            for (const [index, photo] of photos.entries()) {
-              setStatus(`${copy.uploading} ${index + 1}/${photos.length}`);
-              // oxlint-disable-next-line no-await-in-loop -- Photos upload in page order so progress matches the visible list.
-              await menuScanClient.attach(created.id, index + 1, photo.file, signal);
-              setUploaded(index + 1);
-            }
-
-            id = created.id;
+          for (const [index, photo] of photos.entries()) {
+            setStatus(`${copy.uploading} ${index + 1}/${photos.length}`);
+            // oxlint-disable-next-line no-await-in-loop -- Photos upload in page order so the visible list matches the recorded order.
+            await menuScanClient.attach(created.id, index + 1, photo.file, signal);
+            setUploaded(index + 1);
           }
 
-          if (id === null) throw new Error(copy.empty);
+          id = created.id;
 
           setReading(true);
           setStatus(copy.analyzing);
@@ -1063,7 +1090,7 @@ export function MenuScanPage({
             busy={busy}
             submitDisabled={busy || photos.length === 0}
             submitHint={submitHint}
-            onSubmit={analyze}
+            onSubmit={() => analyze()}
           />
           {capturePhase !== null && (
             <ScanProcessing

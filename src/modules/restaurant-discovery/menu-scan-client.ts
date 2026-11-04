@@ -424,6 +424,7 @@ export async function decodeScanResponse<A>(response: Response, schema: z.ZodTyp
         classified.retryable,
         classified.retryAfterSeconds,
         failure.data,
+        classified._tag,
       );
     }
 

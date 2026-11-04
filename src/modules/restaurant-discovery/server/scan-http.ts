@@ -119,15 +119,25 @@ export async function handleMenuScanRequest(request: Request): Promise<Response>
     // Status polls ("get") arrive as POST through the same transport but are
     // cheap reads: a 2.5 s poll loop over a minutes-long extraction would
     // otherwise drain the shared search budget and 429 its own retry button.
-    // Peek at the action before charging; anything else stays on search.
-    const actionName = yield* Effect.tryPromise({
-      try: async (): Promise<string | null> => {
-        const peeked = z.object({ action: z.string() }).safeParse(await request.clone().json());
+    // Peek at JSON command bodies before charging; anything else (including
+    // multipart photo uploads, which are never read here) stays on search.
+    // Only JSON command bodies are peeked: multipart photo uploads skip
+    // inspection entirely (no unbounded body read, no double processing).
+    const commandContentType = request.headers.get("content-type") ?? "";
 
-        return peeked.success ? peeked.data.action : null;
-      },
-      catch: (): null => null,
-    });
+    const actionName =
+      request.method === "POST" && commandContentType.includes("application/json")
+        ? yield* Effect.tryPromise({
+            try: async (): Promise<string | null> => {
+              const peeked = z
+                .object({ action: z.string() })
+                .safeParse(await request.clone().json());
+
+              return peeked.success ? peeked.data.action : null;
+            },
+            catch: (): null => null,
+          })
+        : null;
 
     yield* policy.check(
       actionName === "get" || request.method !== "POST" ? "public" : "search",
