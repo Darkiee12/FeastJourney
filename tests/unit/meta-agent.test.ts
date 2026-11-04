@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { Cause, Effect, Exit, Match } from "effect";
 import { z } from "zod";
 
-import { AGENT_BOUNDS, RECOMMEND_AGENT_FLAG } from "@/modules/food-discovery/server/agent/protocol";
+import { RECOMMEND_AGENT_FLAG } from "@/modules/food-discovery/server/agent/protocol";
 import type { ServerEnv } from "@/server/env";
 import {
   AGENT_SELECTION_RESPONSE_FORMAT,
@@ -192,7 +192,9 @@ describe("agent tool-calling loop", () => {
     const calls: Array<string> = [];
 
     recordingStub([
-      chatResponse(toolCallMessage([{ id: "call_1", name: "searchDishes", args: { query: "pho" } }])),
+      chatResponse(
+        toolCallMessage([{ id: "call_1", name: "searchDishes", args: { query: "pho" } }]),
+      ),
       chatResponse({ role: "assistant", content: "I have what I need." }),
       chatResponse(finalMessage([{ dish_id: "7", reason: "A comforting dinner pick." }])),
     ]);
@@ -402,20 +404,40 @@ describe("agent tool-calling loop", () => {
 
   test("executor failures become bounded tool-error content and the loop continues", async () => {
     recordingStub([
-      chatResponse(toolCallMessage([{ id: "call_1", name: "searchDishes", args: {} }])),
+      chatResponse(
+        toolCallMessage([
+          { id: "call_1", name: "searchDishes", args: {} },
+          { id: "call_2", name: "getDishDetails", args: { ids: ["7"] } },
+        ]),
+      ),
       chatResponse({ role: "assistant", content: "Continuing after the error." }),
       chatResponse(finalMessage([{ dish_id: "7", reason: "A comforting dinner pick." }])),
     ]);
 
     const result = await Effect.runPromise(
-      runAgentLoop(baseRequest(() => new MetaAgentToolError({ reason: "synthetic db failure" }))),
+      runAgentLoop(
+        baseRequest((call) => {
+          if (call.name === "searchDishes") {
+            return new MetaAgentToolError({ reason: "synthetic db failure".repeat(100) });
+          }
+
+          return okExecutor(call);
+        }),
+      ),
     );
 
     expect(result.selections).toHaveLength(1);
 
-    const toolMessage = bodyAt(1).messages.find((entry) => entry.role === "tool");
+    const toolMessages = bodyAt(1).messages.filter((entry) => entry.role === "tool");
 
-    expect(toolMessage?.content).toContain("tool_failed");
+    expect(toolMessages.map((entry) => entry.tool_call_id)).toEqual(["call_1", "call_2"]);
+    expect(toolMessages[0]?.content).toEqual(
+      JSON.stringify({
+        error: "tool_failed",
+        message: `The tool call failed: ${"synthetic db failure".repeat(100)}`.slice(0, 200),
+      }),
+    );
+    expect(toolMessages[1]?.content).toContain("Pho");
   });
 });
 
@@ -589,7 +611,7 @@ describe("agent configuration", () => {
     expect(RECOMMEND_AGENT_FLAG).toBe("RECOMMEND_AGENT_ENABLED");
   });
 
-  test("agent config inherits Muse credentials with bounded agent timeouts", () => {
+  test("agent config inherits Muse credentials and preserves explicit agent timeouts", () => {
     const muse = {
       apiKey: "key",
       baseUrl: "https://api.meta.ai/v1",
@@ -597,19 +619,26 @@ describe("agent configuration", () => {
       maxTokens: 4000,
     };
 
-    const config = agentConfigFromMuse(muse, validEnv);
-
-    expect(config.providerTimeoutMs).toBe(AGENT_BOUNDS.providerTimeoutMs);
-    expect(config.orchestrationDeadlineMs).toBe(AGENT_BOUNDS.orchestrationDeadlineMs);
-
-    const clamped = agentConfigFromMuse(muse, {
+    const config = agentConfigFromMuse(muse, {
       ...validEnv,
       MODEL_AGENT_TIMEOUT_MS: 5,
       RECOMMEND_AGENT_DEADLINE_MS: 9999999,
     });
 
-    expect(clamped.providerTimeoutMs).toBe(1000);
-    expect(clamped.orchestrationDeadlineMs).toBe(180000);
+    expect(config).toEqual({
+      ...muse,
+      providerTimeoutMs: 5,
+      orchestrationDeadlineMs: 9999999,
+    });
+
+    expect(() => agentConfigFromMuse(muse, validEnv)).toThrow(z.ZodError);
+    expect(() =>
+      agentConfigFromMuse(muse, {
+        ...validEnv,
+        MODEL_AGENT_TIMEOUT_MS: 5.5,
+        RECOMMEND_AGENT_DEADLINE_MS: 30000,
+      }),
+    ).toThrow(z.ZodError);
   });
 
   test("final selection schema pins the strict id-keyed contract", () => {
