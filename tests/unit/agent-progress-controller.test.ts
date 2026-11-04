@@ -34,16 +34,16 @@ const sseBody = (chunks: Array<string>): ReadableStream<Uint8Array> => {
   });
 };
 
-const successChunks = [
+const successChunksFor = (requestId: string): Array<string> => [
   encodeProgressEvent({
-    requestId: "r1",
+    requestId,
     seq: 0,
     stage: "preparing",
     detail: null,
     terminal: false,
   }),
   encodeProgressEvent({
-    requestId: "r1",
+    requestId,
     seq: 1,
     stage: "searching-catalog",
     detail: null,
@@ -51,21 +51,23 @@ const successChunks = [
   }),
   // Out-of-order redelivery of seq 1: must drop.
   encodeProgressEvent({
-    requestId: "r1",
+    requestId,
     seq: 1,
     stage: "searching-catalog",
     detail: null,
     terminal: false,
   }),
   encodeProgressEvent({
-    requestId: "r1",
+    requestId,
     seq: 2,
     stage: "completed",
     detail: null,
     terminal: true,
   }),
-  `event: result\ndata: {"requestId":"r1","wire":{"mode":"deterministic"}}\n\n`,
+  `event: result\ndata: ${JSON.stringify({ requestId, wire: { mode: "deterministic" } })}\n\n`,
 ];
+
+const successChunks = successChunksFor("r1");
 
 const okFetch =
   (chunks: Array<string> = successChunks): StreamFetch =>
@@ -330,7 +332,7 @@ describe("AgentStreamController", () => {
     const counting: StreamFetch = () => {
       calls += 1;
 
-      return Promise.resolve(new Response(sseBody(successChunks), { status: 200 }));
+      return Promise.resolve(new Response(sseBody(successChunksFor("a")), { status: 200 }));
     };
 
     const controller = new AgentStreamController();
@@ -397,7 +399,7 @@ describe("AgentStreamController", () => {
 
     const { done } = controller.start({ meal: "dinner" }, keyA, {
       requestId: "ttl",
-      fetchImpl: okFetch(),
+      fetchImpl: okFetch(successChunksFor("ttl")),
     });
 
     const result = await done;

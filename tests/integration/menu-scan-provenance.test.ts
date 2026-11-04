@@ -5,11 +5,15 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import postgres from "postgres";
 import sharp from "sharp";
 
-import type { MenuExtraction } from "@/modules/restaurant-discovery/menu-scan.schema";
+import type {
+  MenuExtraction,
+  MenuScanDocument,
+} from "@/modules/restaurant-discovery/menu-scan.schema";
 import {
   attachMenuPhoto,
   createMenuScan,
   extractMenu,
+  getMenuScan,
   reviseMenuScan,
   type ScanPrincipal,
 } from "@/modules/restaurant-discovery/server/operations/menu-scans";
@@ -126,11 +130,30 @@ const photo = sharp({ create: { width: 48, height: 48, channels: 3, background: 
   .png()
   .toBuffer();
 
-async function extractedScan() {
+async function waitForExtractionDocument(scanId: string) {
+  const deadline = Date.now() + 10000;
+
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- Status polling is sequential by design.
+    const current = await run(getMenuScan(guest, scanId));
+
+    if (current.document !== null) return current;
+
+    if (Date.now() >= deadline) throw new Error("synthetic extraction document missing");
+
+    // oxlint-disable-next-line no-await-in-loop -- Status polling is sequential by design.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+async function extractedScan(): Promise<{ scanId: string; document: MenuScanDocument }> {
   const created = await run(createMenuScan(guest, { targetLanguage: "en", venueId: null }));
   scanIds.push(created.id);
   await run(attachMenuPhoto(guest, created.id, 1, await photo, "image/png"));
-  const view = await run(extractMenu(guest, created.id, crypto.randomUUID()));
+  // Extraction runs detached server-side; the accept returns the processing
+  // view promptly, so poll the scan view until the document lands.
+  await run(extractMenu(guest, created.id, crypto.randomUUID()));
+  const view = await waitForExtractionDocument(created.id);
 
   if (view.document === null) throw new Error("synthetic extraction document missing");
 

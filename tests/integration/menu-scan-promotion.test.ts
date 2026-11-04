@@ -224,6 +224,22 @@ afterAll(async () => {
   resetServerEnvCache();
 });
 
+const waitForExtractionDocument = async (targetScanId: string) => {
+  const deadline = Date.now() + 10000;
+
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- Status polling is sequential by design.
+    const current = await run(getMenuScan(principal, targetScanId));
+
+    if (current.document !== null) return current;
+
+    if (Date.now() >= deadline) throw new Error("synthetic extraction document missing");
+
+    // oxlint-disable-next-line no-await-in-loop -- Status polling is sequential by design.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+};
+
 const noiseJpeg = async (): Promise<Uint8Array> => {
   // Sequential by design: each candidate size is measured before trying the next.
   for (const edge of [2700, 2800, 2900, 3000]) {
@@ -253,7 +269,10 @@ describe("menu scan promotion and cleanup", () => {
       run(attachMenuPhoto(principal, scanId, 2, await photoBytes(200), "image/png")),
     ]);
 
-    const extracted = await run(extractMenu(principal, scanId, `promotion-${stamp}`));
+    // Extraction runs detached server-side; the accept returns the
+    // processing view promptly, so poll the scan view until the document lands.
+    await run(extractMenu(principal, scanId, `promotion-${stamp}`));
+    const extracted = await waitForExtractionDocument(scanId);
     expect(extracted.document?.items.length).toBe(2);
 
     const submitted = await run(
