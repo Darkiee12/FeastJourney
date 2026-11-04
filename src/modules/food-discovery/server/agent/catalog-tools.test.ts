@@ -1,5 +1,8 @@
+// oxlint-disable-next-line import/no-unassigned-import -- side-effectful test environment setup, runs before server modules initialize.
 import "@/modules/food-discovery/server/agent/test-env";
 import { describe, expect, test } from "bun:test";
+
+import { Predicate } from "effect";
 
 import {
   GET_DISH_DETAILS_JSON_SCHEMA,
@@ -12,6 +15,7 @@ import {
 import {
   buildAgentEligibility,
   type AgentEligibility,
+  type AgentEligibilityInput,
 } from "@/modules/food-discovery/server/agent/eligibility";
 import type { RecommendationCandidateRow } from "@/modules/food-discovery/server/operations/recommendation-service";
 
@@ -24,6 +28,7 @@ const rowFor = (
   id: string,
   overrides?: Partial<RecommendationCandidateRow>,
 ): RecommendationCandidateRow =>
+  // SAFETY: pool fixtures carry only the fields the tools read; the remaining columns are never touched.
   ({
     id,
     slug: `dish-${id}`,
@@ -35,12 +40,13 @@ const rowFor = (
     ingredientNames: [],
     updatedAt: "2026-01-01",
     ...overrides,
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Reylo row types need the content mapper; tsc against the migrated database is authoritative.
   }) as RecommendationCandidateRow;
 
 const vietnamese = (id: string): RecommendationCandidateRow =>
   rowFor(id, { cuisines: ["vietnamese"], description: `Pho-style dish ${id}` });
 
-const eligibilityFor = (overrides?: Partial<AgentEligibility>): AgentEligibility => {
+const eligibilityFor = (overrides?: Partial<AgentEligibilityInput>): AgentEligibility => {
   const snapshot = buildAgentEligibility({
     scope: "country",
     cuisine: undefined,
@@ -55,7 +61,7 @@ const eligibilityFor = (overrides?: Partial<AgentEligibility>): AgentEligibility
     throw new Error("test eligibility must be valid");
   }
 
-  return { ...snapshot, ...overrides };
+  return snapshot;
 };
 
 const pool: ReadonlyArray<RecommendationCandidateRow> = [
@@ -71,7 +77,7 @@ describe("searchEligiblePool", () => {
 
     expect(outcome._tag).toBe("Matched");
 
-    if (outcome._tag !== "Matched") {
+    if (!Predicate.isTagged(outcome, "Matched")) {
       return;
     }
 
@@ -83,7 +89,7 @@ describe("searchEligiblePool", () => {
   test("follows the opaque cursor to the second page and terminates", () => {
     const first = searchEligiblePool(pool, eligibilityFor(), { limit: 2 }, 10);
 
-    if (first._tag !== "Matched" || first.result.nextCursor === null) {
+    if (!Predicate.isTagged(first, "Matched") || first.result.nextCursor === null) {
       throw new Error("first page must have a cursor");
     }
 
@@ -96,7 +102,7 @@ describe("searchEligiblePool", () => {
 
     expect(second._tag).toBe("Matched");
 
-    if (second._tag !== "Matched") {
+    if (!Predicate.isTagged(second, "Matched")) {
       return;
     }
 
@@ -116,7 +122,7 @@ describe("searchEligiblePool", () => {
 
     expect(outcome._tag).toBe("Rejected");
 
-    if (outcome._tag !== "Rejected") {
+    if (!Predicate.isTagged(outcome, "Rejected")) {
       return;
     }
 
@@ -129,7 +135,7 @@ describe("searchEligiblePool", () => {
 
     expect(outcome._tag).toBe("Matched");
 
-    if (outcome._tag !== "Matched") {
+    if (!Predicate.isTagged(outcome, "Matched")) {
       return;
     }
 
@@ -141,7 +147,7 @@ describe("searchEligiblePool", () => {
 
     expect(outcome._tag).toBe("Matched");
 
-    if (outcome._tag !== "Matched") {
+    if (!Predicate.isTagged(outcome, "Matched")) {
       return;
     }
 
@@ -153,7 +159,7 @@ describe("searchEligiblePool", () => {
 
     expect(byCategory._tag).toBe("Matched");
 
-    if (byCategory._tag === "Matched") {
+    if (Predicate.isTagged(byCategory, "Matched")) {
       expect(byCategory.result.dishes.map((dish) => dish.id)).toEqual(["303"]);
     }
 
@@ -161,7 +167,7 @@ describe("searchEligiblePool", () => {
 
     expect(byQuery._tag).toBe("Matched");
 
-    if (byQuery._tag === "Matched") {
+    if (Predicate.isTagged(byQuery, "Matched")) {
       expect(byQuery.result.dishes.map((dish) => dish.id)).toEqual(["404"]);
     }
   });
@@ -171,7 +177,7 @@ describe("searchEligiblePool", () => {
 
     expect(outcome._tag).toBe("Matched");
 
-    if (outcome._tag !== "Matched") {
+    if (!Predicate.isTagged(outcome, "Matched")) {
       return;
     }
 

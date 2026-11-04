@@ -1,4 +1,4 @@
-import { Data, Duration, Effect } from "effect";
+import { Data, Duration, Effect, Predicate } from "effect";
 
 import type { ResolvedAgentBounds } from "@/modules/food-discovery/server/agent/bounds";
 import { resolveAgentBounds } from "@/modules/food-discovery/server/agent/bounds";
@@ -27,7 +27,7 @@ import { validateAgentFinalSelection } from "@/modules/food-discovery/server/age
 import type { RecommendationCandidateRow } from "@/modules/food-discovery/server/operations/recommendation-service";
 import { type DishRelationsRepository } from "@/modules/food-discovery/server/repository/dish-relations-repository";
 import { type IngredientRepository } from "@/modules/food-discovery/server/repository/ingredient-repository";
-import { type PlaceRepository } from "@/modules/food-discovery/server/repository/place-repository";
+import type { Database } from "@/server/database/client";
 import type { MetaAuthError, MetaPermanentError } from "@/server/integrations/meta-client";
 
 /**
@@ -102,9 +102,9 @@ export interface AgentRunInput {
 
 export type AgentRunEnv =
   | AgentModelClient
+  | Database
   | DishRelationsRepository
-  | IngredientRepository
-  | PlaceRepository;
+  | IngredientRepository;
 
 export type AgentRunError = MetaAuthError | MetaPermanentError;
 
@@ -135,10 +135,7 @@ export const runAgentLoop = (
       return sink({ detail, requestId: input.requestId, seq, stage, terminal });
     };
 
-    const fallback = (
-      cause: AgentFallbackCause,
-      warning: string,
-    ): Effect.Effect<AgentRunOutcome, never> =>
+    const fallback = (cause: AgentFallbackCause, warning: string): Effect.Effect<AgentRunOutcome> =>
       emit("degraded", warning, true).pipe(
         Effect.andThen(
           Effect.succeed(
@@ -225,7 +222,7 @@ export const runAgentLoop = (
               bounds.toolPageLimit,
             );
 
-            if (outcome._tag === "Rejected") {
+            if (Predicate.isTagged(outcome, "Rejected")) {
               results.push({
                 name: "searchDishes",
                 ok: false,
@@ -277,7 +274,7 @@ export const runAgentLoop = (
               ),
             );
 
-            if (outcome._tag === "Rejected") {
+            if (Predicate.isTagged(outcome, "Rejected")) {
               results.push({
                 name: "getDishDetails",
                 ok: false,
@@ -339,11 +336,7 @@ export const runAgentLoop = (
         return results;
       });
 
-    const loop = Effect.gen(function* (): Effect.Effect<
-      AgentRunOutcome,
-      AgentRunError,
-      AgentRunEnv
-    > {
+    const loop = Effect.gen(function* () {
       for (let round = 1; round <= bounds.maxRounds; round += 1) {
         yield* emit(
           "muse-curating",
@@ -362,7 +355,10 @@ export const runAgentLoop = (
           }),
         );
 
-        if (turn._tag === "DeterministicFallback" || turn._tag === "Selected") {
+        if (
+          Predicate.isTagged(turn, "DeterministicFallback") ||
+          Predicate.isTagged(turn, "Selected")
+        ) {
           // Fallback short-circuits the loop (only the Degraded variant is
           // produced here; Selected is unreachable but narrowed for safety).
           return turn;
@@ -503,7 +499,7 @@ export const runAgentLoop = (
       }),
     );
 
-    if (outcome._tag === "DeterministicFallback") {
+    if (Predicate.isTagged(outcome, "DeterministicFallback")) {
       yield* Effect.logWarning("Agent recommendation degraded").pipe(
         Effect.annotateLogs({
           backend: "muse-agent",

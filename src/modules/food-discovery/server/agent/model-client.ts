@@ -1,4 +1,5 @@
 import { Context, Data, type Effect } from "effect";
+import { z } from "zod";
 
 import {
   GET_DISH_DETAILS_JSON_SCHEMA,
@@ -195,10 +196,8 @@ export const parseFinalSelection = (rawJson: string): ParsedFinalSelection | nul
     return null;
   }
 
-  const unwrapped =
-    typeof raw === "object" && raw !== null && !Array.isArray(raw) && "selections" in raw
-      ? raw.selections
-      : raw;
+  const unwrappedEnvelope = z.object({ selections: z.unknown() }).safeParse(raw);
+  const unwrapped = unwrappedEnvelope.success ? unwrappedEnvelope.data.selections : raw;
 
   const parsed = agentSelectionsSchema.safeParse(unwrapped);
 

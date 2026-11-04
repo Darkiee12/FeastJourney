@@ -1,12 +1,11 @@
+// oxlint-disable-next-line import/no-unassigned-import -- side-effectful test environment setup, runs before server modules initialize.
 import "@/modules/food-discovery/server/agent/test-env";
 import { afterAll, describe, expect, test } from "bun:test";
 
 import { SQL } from "bun";
-import { Layer, ManagedRuntime } from "effect";
+import { Layer, ManagedRuntime, Predicate } from "effect";
 
-import {
-  fetchDishDetails,
-} from "@/modules/food-discovery/server/agent/catalog-tools";
+import { fetchDishDetails } from "@/modules/food-discovery/server/agent/catalog-tools";
 import {
   buildAgentEligibility,
   type AgentEligibility,
@@ -29,6 +28,7 @@ const hasLoopbackDb = (process.env.DATABASE_URL ?? "").includes("127.0.0.1");
 const testDb = hasLoopbackDb ? test : test.skip;
 
 const rowFor = (id: string, name: string): RecommendationCandidateRow =>
+  // SAFETY: integration fixtures carry only the fields the details path reads; the remaining columns are never touched.
   ({
     id,
     slug: `dish-${id}`,
@@ -39,6 +39,7 @@ const rowFor = (id: string, name: string): RecommendationCandidateRow =>
     description: null,
     ingredientNames: [],
     updatedAt: "2026-01-01",
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Reylo row types need the content mapper; tsc against the migrated database is authoritative.
   }) as RecommendationCandidateRow;
 
 const eligibility: AgentEligibility = (() => {
@@ -106,7 +107,7 @@ describe("fetchDishDetails (seeded database)", () => {
 
     expect(outcome._tag).toBe("Resolved");
 
-    if (outcome._tag !== "Resolved") {
+    if (!Predicate.isTagged(outcome, "Resolved")) {
       return;
     }
 
@@ -145,7 +146,7 @@ describe("fetchDishDetails (seeded database)", () => {
 
     expect(outcome._tag).toBe("Resolved");
 
-    if (outcome._tag !== "Resolved") {
+    if (!Predicate.isTagged(outcome, "Resolved")) {
       return;
     }
 
@@ -174,6 +175,7 @@ describe("fetchDishDetails (seeded database)", () => {
     ];
 
     for (const { args, limit } of cases) {
+      // oxlint-disable-next-line no-await-in-loop -- Cases assert in listed order so a failure attributes to one arg shape.
       const outcome = await runtime.runPromise(
         fetchDishDetails({ detailsPerCall: limit, eligibility, pool, rawArgs: args }),
       );

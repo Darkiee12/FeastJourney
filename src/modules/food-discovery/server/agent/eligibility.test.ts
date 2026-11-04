@@ -1,3 +1,4 @@
+// oxlint-disable-next-line import/no-unassigned-import -- side-effectful test environment setup, runs before server modules initialize.
 import "@/modules/food-discovery/server/agent/test-env";
 import { describe, expect, test } from "bun:test";
 
@@ -44,7 +45,12 @@ describe("buildAgentEligibility", () => {
 
   test("fails closed on an unknown scope", () => {
     expect(
-      buildAgentEligibility({ ...base, scope: "galaxy" as AgentEligibilityInput["scope"] }),
+      buildAgentEligibility({
+        ...base,
+        // SAFETY: intentionally invalid scope exercises the fail-closed null path; never reaches SQL.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- "galaxy" is outside the scope union by design; tsc accepts the test-only downcast.
+        scope: "galaxy" as AgentEligibilityInput["scope"],
+      }),
     ).toBeNull();
   });
 

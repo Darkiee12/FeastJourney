@@ -1,3 +1,4 @@
+// oxlint-disable-next-line import/no-unassigned-import -- side-effectful test environment setup, runs before server modules initialize.
 import "@/modules/food-discovery/server/agent/test-env";
 import { describe, expect, test } from "bun:test";
 
@@ -17,6 +18,7 @@ import type { RecommendationCandidateRow } from "@/modules/food-discovery/server
  * membership to ids alone via the existing service validator.
  */
 const rowFor = (id: string): RecommendationCandidateRow =>
+  // SAFETY: served-row fixtures carry only the id the validator reads; the remaining columns are never touched.
   ({
     id,
     slug: `dish-${id}`,
@@ -27,6 +29,7 @@ const rowFor = (id: string): RecommendationCandidateRow =>
     description: null,
     ingredientNames: [],
     updatedAt: "2026-01-01",
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Reylo row types need the content mapper; tsc against the migrated database is authoritative.
   }) as RecommendationCandidateRow;
 
 const served: ReadonlyArray<RecommendationCandidateRow> = [rowFor("101"), rowFor("202")];
@@ -36,7 +39,7 @@ const validate = (
 ): Promise<{ readonly data: { ids: ReadonlyArray<string> } | null; readonly error: unknown }> =>
   Effect.runPromise(
     validateAgentFinalSelection(selections, served, 10).pipe(
-      Effect.map((result) => ({ data: { ids: result.ids }, error: null as unknown })),
+      Effect.map((result) => ({ data: { ids: result.ids }, error: null })),
       Effect.catchTag("AgentInvalidSelection", (error: AgentInvalidSelection) =>
         Effect.succeed({ data: null, error }),
       ),
@@ -76,7 +79,7 @@ describe("validateAgentFinalSelection", () => {
   test("rejects over-limit selections", async () => {
     const outcome = await Effect.runPromise(
       validateAgentFinalSelection([{ dishId: "101", reason: goodReason("101") }], served, 0).pipe(
-        Effect.map(() => ({ data: true as const, error: null as unknown })),
+        Effect.map(() => ({ data: true as const, error: null })),
         Effect.catchTag("AgentInvalidSelection", (error: AgentInvalidSelection) =>
           Effect.succeed({ data: null, error }),
         ),

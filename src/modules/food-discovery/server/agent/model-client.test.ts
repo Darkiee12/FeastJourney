@@ -1,3 +1,4 @@
+// oxlint-disable-next-line import/no-unassigned-import -- side-effectful test environment setup, runs before server modules initialize.
 import "@/modules/food-discovery/server/agent/test-env";
 import { describe, expect, test } from "bun:test";
 
@@ -61,6 +62,7 @@ describe("agent prompt construction", () => {
   });
 
   test("user block carries context and overview but never coordinates or raw terms", () => {
+    // SAFETY: prompt fixture carries only the fields the user-block renderer reads; the remaining columns are never touched.
     const row = {
       id: "101",
       slug: "pho",
@@ -71,6 +73,7 @@ describe("agent prompt construction", () => {
       description: "Noodle soup",
       ingredientNames: [],
       updatedAt: "2026-01-01",
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Reylo row types need the content mapper; tsc against the migrated database is authoritative.
     } as RecommendationCandidateRow;
 
     const block = buildAgentUserBlock({

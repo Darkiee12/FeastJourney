@@ -1,7 +1,8 @@
+// oxlint-disable-next-line import/no-unassigned-import -- side-effectful test environment setup, runs before server modules initialize.
 import "@/modules/food-discovery/server/agent/test-env";
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime, Predicate } from "effect";
 
 import { resolveAgentBounds } from "@/modules/food-discovery/server/agent/bounds";
 import type { ResolvedAgentBounds } from "@/modules/food-discovery/server/agent/bounds";
@@ -16,7 +17,10 @@ import {
   type AgentTurnInput,
   type AgentTurnOutput as TurnOutput,
 } from "@/modules/food-discovery/server/agent/model-client";
-import { runAgentLoop } from "@/modules/food-discovery/server/agent/orchestrator";
+import {
+  runAgentLoop,
+  type AgentRunError,
+} from "@/modules/food-discovery/server/agent/orchestrator";
 import type { ProgressEvent } from "@/modules/food-discovery/server/agent/protocol";
 import { RepositoriesLive } from "@/modules/food-discovery/server/index";
 import type { RecommendationCandidateRow } from "@/modules/food-discovery/server/operations/recommendation-service";
@@ -33,6 +37,7 @@ const rowFor = (
   id: string,
   overrides?: Partial<RecommendationCandidateRow>,
 ): RecommendationCandidateRow =>
+  // SAFETY: pool fixtures carry only the fields the loop and tools read; the remaining columns are never touched.
   ({
     id,
     slug: `dish-${id}`,
@@ -70,13 +75,14 @@ const eligibility: AgentEligibility = (() => {
   return snapshot;
 })();
 
-const runtimes: Array<{ dispose: () => Promise<unknown> }> = [];
+const runtimes: Array<{ dispose: () => Promise<void> }> = [];
 
 afterEach(async () => {
   const pending = [...runtimes];
   runtimes.length = 0;
 
   for (const runtime of pending) {
+    // oxlint-disable-next-line no-await-in-loop -- Cleanup disposes runtimes in order so layer finalizers never race.
     await runtime.dispose();
   }
 });
@@ -121,7 +127,6 @@ const runWithScript = (
         overrides?.events === undefined
           ? undefined
           : (event: ProgressEvent) => Effect.sync(() => void overrides.events?.push(event)),
-      meal: "dinner",
       mood: "comforting",
       occasion: "dinner",
       pool,
@@ -195,7 +200,7 @@ describe("runAgentLoop", () => {
 
     expect(outcome._tag).toBe("Selected");
 
-    if (outcome._tag !== "Selected") {
+    if (!Predicate.isTagged(outcome, "Selected")) {
       return;
     }
 
@@ -239,7 +244,7 @@ describe("runAgentLoop", () => {
 
     expect(outcome._tag).toBe("DeterministicFallback");
 
-    if (outcome._tag !== "DeterministicFallback") {
+    if (!Predicate.isTagged(outcome, "DeterministicFallback")) {
       return;
     }
 
@@ -286,7 +291,7 @@ describe("runAgentLoop", () => {
 
     expect(outcome._tag).toBe("DeterministicFallback");
 
-    if (outcome._tag !== "DeterministicFallback") {
+    if (!Predicate.isTagged(outcome, "DeterministicFallback")) {
       return;
     }
 
@@ -302,7 +307,7 @@ describe("runAgentLoop", () => {
 
     expect(outcome._tag).toBe("DeterministicFallback");
 
-    if (outcome._tag !== "DeterministicFallback") {
+    if (!Predicate.isTagged(outcome, "DeterministicFallback")) {
       return;
     }
 
@@ -315,8 +320,8 @@ describe("runAgentLoop", () => {
     const failure = await runWithScript(seen, [
       () => Effect.fail(new MetaAuthError({ reason: "bad key", status: 401 })),
     ]).then(
-      () => ({ thrown: null as unknown }),
-      (error: unknown) => ({ thrown: error }),
+      () => ({ thrown: null }),
+      (error: AgentRunError) => ({ thrown: error }),
     );
 
     expect(failure.thrown).toBeInstanceOf(MetaAuthError);
@@ -333,7 +338,7 @@ describe("runAgentLoop", () => {
 
     expect(outcome._tag).toBe("DeterministicFallback");
 
-    if (outcome._tag !== "DeterministicFallback") {
+    if (!Predicate.isTagged(outcome, "DeterministicFallback")) {
       return;
     }
 
@@ -353,7 +358,7 @@ describe("runAgentLoop", () => {
 
     expect(outcome._tag).toBe("DeterministicFallback");
 
-    if (outcome._tag !== "DeterministicFallback") {
+    if (!Predicate.isTagged(outcome, "DeterministicFallback")) {
       return;
     }
 

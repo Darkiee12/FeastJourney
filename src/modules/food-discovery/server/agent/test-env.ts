@@ -12,7 +12,7 @@
  * protocol is loaded.
  */
 
-const TEST_AGENT_BOUNDS: Readonly<Record<string, string>> = {
+const TEST_AGENT_BOUNDS = {
   RECOMMEND_AGENT_MAX_ROUNDS: "3",
   RECOMMEND_AGENT_MAX_TOOL_CALLS: "8",
   RECOMMEND_AGENT_DETAILS_PER_CALL: "10",
@@ -20,7 +20,7 @@ const TEST_AGENT_BOUNDS: Readonly<Record<string, string>> = {
   RECOMMEND_AGENT_FINAL_LIMIT: "10",
   MODEL_AGENT_TIMEOUT_MS: "20000",
   RECOMMEND_AGENT_DEADLINE_MS: "90000",
-};
+} satisfies Record<string, string>;
 
 for (const [key, value] of Object.entries(TEST_AGENT_BOUNDS)) {
   process.env[key] = value;

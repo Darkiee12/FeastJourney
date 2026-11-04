@@ -2,6 +2,7 @@ import { Data, Effect } from "effect";
 import { z } from "zod";
 
 import type { AgentEligibility } from "@/modules/food-discovery/server/agent/eligibility";
+import type { AgentToolCall } from "@/modules/food-discovery/server/agent/model-client";
 import type {
   AgentDishDetail,
   AgentDishSummary,
@@ -14,7 +15,7 @@ import { asLocalizedName, pickDisplayName } from "@/modules/food-discovery/serve
 import type { RecommendationCandidateRow } from "@/modules/food-discovery/server/operations/recommendation-service";
 import { DishRelationsRepository } from "@/modules/food-discovery/server/repository/dish-relations-repository";
 import { IngredientRepository } from "@/modules/food-discovery/server/repository/ingredient-repository";
-import { PlaceRepository } from "@/modules/food-discovery/server/repository/place-repository";
+import type { Database } from "@/server/database/client";
 import type { DatabaseError } from "@/server/database/query";
 
 /**
@@ -114,7 +115,8 @@ export const SearchToolOutcome = Data.taggedEnum<SearchToolOutcome>();
 export const searchEligiblePool = (
   pool: ReadonlyArray<RecommendationCandidateRow>,
   eligibility: AgentEligibility,
-  rawArgs: unknown,
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- boundary parser: model-supplied tool args, narrowed by safeParse into the Zod contract below.
+  rawArgs: AgentToolCall["args"],
   pageLimit: number,
 ): SearchToolOutcome => {
   const parsed = searchDishesArgsSchema.safeParse(rawArgs);
@@ -183,7 +185,8 @@ export const searchEligiblePool = (
 export interface DetailsBatchInput {
   readonly pool: ReadonlyArray<RecommendationCandidateRow>;
   readonly eligibility: AgentEligibility;
-  readonly rawArgs: unknown;
+  // Model-supplied tool args at the trust boundary; safeParse narrows them first.
+  readonly rawArgs: AgentToolCall["args"];
   readonly detailsPerCall: number;
 }
 
@@ -198,9 +201,29 @@ export type DetailsToolOutcome = Data.TaggedEnum<{
 
 export const DetailsToolOutcome = Data.taggedEnum<DetailsToolOutcome>();
 
-type DetailsEnv = DishRelationsRepository | IngredientRepository | PlaceRepository;
+type DetailsEnv = Database | DishRelationsRepository | IngredientRepository;
 
 const MAX_INGREDIENT_NAMES = 12;
+
+const groupByDishId = <Row>(
+  rows: ReadonlyArray<Row>,
+  key: (row: Row) => bigint,
+): Map<string, Array<Row>> => {
+  const groups = new Map<string, Array<Row>>();
+
+  for (const row of rows) {
+    const groupKey = key(row).toString();
+    const existing = groups.get(groupKey);
+
+    if (existing === undefined) {
+      groups.set(groupKey, [row]);
+    } else {
+      existing.push(row);
+    }
+  }
+
+  return groups;
+};
 
 /**
  * Inspect previously-served dish ids. Per-row isolation: each requested id
@@ -268,7 +291,6 @@ export const fetchDishDetails = (
           repo.namesByDishIds(eligibleIds),
           repo.descriptionsByDishIds(eligibleIds),
           repo.ingredientsByDishIds(eligibleIds),
-          repo.placesByDishIds(eligibleIds),
           repo.categoriesByDishIds(eligibleIds),
           repo.cuisinesByDishIds(eligibleIds),
         ] as const,
@@ -276,40 +298,18 @@ export const fetchDishDetails = (
       ),
     );
 
-    const [nameRows, descriptionRows, ingredientRows, placeRows, categoryRows, cuisineRows] =
-      relations;
+    const [nameRows, descriptionRows, ingredientRows, categoryRows, cuisineRows] = relations;
 
     const ingredientIds = [...new Set(ingredientRows.map((row) => row.ingredient_id))];
-    const placeIds = [...new Set(placeRows.map((row) => row.place_id))];
 
-    const [ingredientNameRows, placeNameRows] = yield* Effect.all(
+    const [ingredientNameRows] = yield* Effect.all(
       [
         ingredientIds.length > 0
           ? Effect.flatMap(IngredientRepository, (repo) => repo.namesByIngredientIds(ingredientIds))
           : Effect.succeed([] as const),
-        placeIds.length > 0
-          ? Effect.flatMap(PlaceRepository, (repo) => repo.namesByPlaceIds(placeIds))
-          : Effect.succeed([] as const),
       ] as const,
       { concurrency: "unbounded" },
     );
-
-    const groupByDishId = <Row>(rows: ReadonlyArray<Row>, key: (row: Row) => bigint) => {
-      const groups = new Map<string, Array<Row>>();
-
-      for (const row of rows) {
-        const groupKey = key(row).toString();
-        const existing = groups.get(groupKey);
-
-        if (existing === undefined) {
-          groups.set(groupKey, [row]);
-        } else {
-          existing.push(row);
-        }
-      }
-
-      return groups;
-    };
 
     const namesByDish = groupByDishId(nameRows, (row) => row.dish_id);
     const descriptionsByDish = groupByDishId(descriptionRows, (row) => row.dish_id);

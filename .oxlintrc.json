@@ -126,6 +126,7 @@
       "files": [
         "src/modules/food-discovery/server/repository/**/*.ts",
         "src/modules/food-discovery/server/operations/*.ts",
+        "src/modules/food-discovery/server/agent/**/*.ts",
         "src/modules/user/server/repository/**/*.ts",
         "src/modules/user/server/operations/*.ts",
         "tests/integration/database-boundary.test.ts",
