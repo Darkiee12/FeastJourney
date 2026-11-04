@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   contributeScanSchema,
   createScanSchema,
+  menuCityIdSchema,
   reviseScanSchema,
   scanIdSchema,
   scanReviewSchema,
@@ -33,6 +34,7 @@ import { withActor } from "@/server/auth/current-actor";
 import { resolveSession } from "@/server/auth/session";
 import { appConfig } from "@/server/config";
 import { serverEnv } from "@/server/env";
+import { getTrustedVisitorCountry } from "@/server/geo/trusted-region";
 import { BodyLimitError, boundedBody } from "@/server/http/body-limit";
 import { clientFailure } from "@/server/http/client-failure";
 import { RateLimitPolicy } from "@/server/http/rate-limit";
@@ -44,7 +46,10 @@ import { appRuntime, withRequestTimeout } from "@/server/runtime";
 const commandSchema = z.discriminatedUnion("action", [
   createScanSchema.extend({ action: z.literal("create") }),
   scanIdSchema.extend({ action: z.literal("get") }),
-  scanIdSchema.extend({ action: z.literal("extract") }),
+  scanIdSchema.extend({
+    action: z.literal("extract"),
+    menuCityId: menuCityIdSchema.optional(),
+  }),
   scanIdSchema.extend({ action: z.literal("claim") }),
   scanIdSchema.extend({ action: z.literal("delete") }),
   reviseScanSchema.extend({ action: z.literal("revise") }),
@@ -203,6 +208,7 @@ export async function handleMenuScanRequest(request: Request): Promise<Response>
             new ExtractionUnavailable({
               reason: "Menu analysis is unavailable. Please retry later.",
               retryable: false,
+              category: "unavailable",
             }),
         });
 
@@ -210,6 +216,7 @@ export async function handleMenuScanRequest(request: Request): Promise<Response>
           return yield* new ExtractionUnavailable({
             reason: "Menu analysis is unavailable. Please retry later.",
             retryable: false,
+            category: "unavailable",
           });
 
         const { action: _action, ...command } = input;
@@ -219,8 +226,26 @@ export async function handleMenuScanRequest(request: Request): Promise<Response>
 
       case "get":
         return Response.json(yield* getMenuScan(principal, input.scanId), { headers });
-      case "extract":
-        return Response.json(yield* extractMenu(principal, input.scanId, requestId), { headers });
+      case "extract": {
+        // Coarse visitor country only; never raw GPS, street addresses, or
+        // header values beyond the already-trusted boundary. extractMenu
+        // merges this under the linked venue and printed-address evidence,
+        // with the visitor-selected menu city (opaque id, server-resolved)
+        // ranked below the venue.
+        const trustedCountry = getTrustedVisitorCountry(
+          request.headers,
+          config.trustedProxies,
+        ).country;
+
+        return Response.json(
+          yield* extractMenu(principal, input.scanId, requestId, {
+            trustedCountry,
+            menuCityId: input.menuCityId,
+          }),
+          { headers },
+        );
+      }
+
       case "revise": {
         const { action: _action, ...command } = input;
 

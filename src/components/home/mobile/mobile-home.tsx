@@ -119,7 +119,10 @@ function MobileHomeInner({ copy, lang }: { copy: Messages; lang: Locale }) {
         <GlobeCanvas copy={copy} lang={lang} />
       </div>
 
-      <div className="relative z-[2] mx-auto w-full max-w-3xl px-5 pt-[clamp(1.5rem,6vh,3rem)] text-center">
+      <div
+        data-hero-copy
+        className="relative z-[2] mx-auto w-full max-w-3xl px-5 pt-[clamp(1.5rem,6vh,3rem)] text-center"
+      >
         <h1 className="font-display mb-4 text-[clamp(2.6rem,11vw,4rem)] leading-[1.02] tracking-[0.015em] text-balance text-white uppercase text-shadow-hero">
           {copy.heroHeading}
         </h1>
@@ -184,11 +187,7 @@ function MobileHomeInner({ copy, lang }: { copy: Messages; lang: Locale }) {
 
       <MobileSheet heightPx={sheetHeightPx} lang={lang} discoverLabel={copy.navDiscover}>
         <div
-          className={
-            discoveryActive
-              ? `flex min-h-0 flex-1 flex-col ${mode === "location" ? "overflow-hidden" : "overflow-y-auto overscroll-contain"}`
-              : "hidden"
-          }
+          className={discoveryActive ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "hidden"}
           aria-hidden={!discoveryActive}
         >
           <DiscoverySection copy={copy} lang={lang} variant="sheet" />

@@ -1,6 +1,12 @@
 import { z } from "zod";
 
 import {
+  associationNoteSchema,
+  currencyProvenanceSchema,
+  isMenuCityId,
+  priceAssociationSchema,
+} from "@/modules/restaurant-discovery/menu-price-evidence";
+import {
   amountSchema,
   currencySchema,
   channelSchema,
@@ -16,10 +22,22 @@ const menuText = z.string().refine((value) => !value.includes("\u0000") && value
 const text = menuText.trim().min(1).max(300);
 const description = menuText.trim().min(1).max(3000).nullable();
 
+/**
+ * Additive V3 price evidence (§4): rawText stays verbatim OCR, amount stays a
+ * canonical decimal string, and the three optional fields record currency
+ * provenance, item/variant association, and a short association note.
+ * Optional keeps schemaVersion at 1 and old records parsing: absent
+ * provenance reads as unknown and absent association as clear (see
+ * provenanceOf/associationOf), so stored revisions are never reinterpreted
+ * and customerAdded/repair semantics are untouched.
+ */
 export const scanPriceSchema = z.strictObject({
   rawText: menuText.max(200),
   amount: amountSchema.nullable(),
   currency: currencySchema.nullable(),
+  currencyProvenance: currencyProvenanceSchema.optional(),
+  association: priceAssociationSchema.optional(),
+  associationNote: associationNoteSchema.nullable().optional(),
   taxTreatment: z.enum(["included", "excluded", "unknown"]),
 });
 
@@ -98,6 +116,16 @@ export const menuScanDocumentSchema = menuExtractionSchema.extend({
 });
 
 export type MenuScanDocument = z.infer<typeof menuScanDocumentSchema>;
+
+/**
+ * Visitor-indicated menu location id. Grammar (see isMenuCityId): curated
+ * preset ids ("hcmc" | "hanoi" | "bangalore"), "geo:<name>" nearest-city
+ * names, and "place:<decimalId>" canonical registry identities. Anything
+ * else is rejected at this boundary. Max length stays 80.
+ */
+export const menuCityIdSchema = z.string().trim().min(1).max(80).refine(isMenuCityId, {
+  message: "Choose a supported menu location.",
+});
 
 export const createScanSchema = z.strictObject({
   targetLanguage: menuLanguageSchema,

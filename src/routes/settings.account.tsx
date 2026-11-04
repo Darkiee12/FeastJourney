@@ -17,6 +17,8 @@ import {
   messagesFor,
   displayLocales,
   locales,
+  localeNameFor,
+  bcp47TagFor,
   markLocaleExplicit,
   writeLocaleCookie,
 } from "@/shared/i18n";
@@ -276,12 +278,11 @@ function AccountSettings() {
               }}
               className={inputClass}
             >
-              <option value="en" lang="en">
-                English
-              </option>
-              <option value="vi" lang="vi">
-                Tiếng Việt
-              </option>
+              {displayLocales.map((option) => (
+                <option key={option} value={option} lang={bcp47TagFor(option)}>
+                  {localeNameFor(option)}
+                </option>
+              ))}
             </select>
           </div>
           {saveProfile.isError ? (

@@ -482,12 +482,12 @@ describe("in-card Muse reason strip", () => {
     expect(html).toContain("h-[var(--dish-feature-media-mobile,clamp(180px,48vw,240px))]");
   });
 
-  test("compact layout renders the strip above the thumb row", async () => {
+  test("compact layout renders the reason inline in the text column", async () => {
     const html = await renderCarousel(createElement("p", null, "WHY-PHO-MARKER"), "compact");
 
     expect(html).toContain("WHY-PHO-MARKER");
-    expect(html).toContain("bg-cream/60");
-    expect(html).toContain("h-28 w-28");
-    expect(html.indexOf("WHY-PHO-MARKER")).toBeLessThan(html.indexOf("h-28 w-28"));
+    expect(html).not.toContain("bg-cream/60");
+    expect(html).toContain("h-20 w-20");
+    expect(html.indexOf("WHY-PHO-MARKER")).toBeGreaterThan(html.indexOf("h-20 w-20"));
   });
 });

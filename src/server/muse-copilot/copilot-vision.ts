@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import { Data, Effect } from "effect";
+import { Clock, Data, Duration, Effect, Predicate } from "effect";
 import { z } from "zod";
 
 import { DishService } from "@/modules/food-discovery/server/index";
@@ -9,7 +9,6 @@ import {
   readMenuPhoto,
   type ScanPrincipal,
 } from "@/modules/restaurant-discovery/server/operations/menu-scans";
-import { Actor } from "@/server/auth/actor";
 import type { Database } from "@/server/database/client";
 import { DEFAULT_MODEL_BASE_URL, isSupportedModelId } from "@/server/env";
 
@@ -21,6 +20,9 @@ import { DEFAULT_MODEL_BASE_URL, isSupportedModelId } from "@/server/env";
  * dish candidates with visual evidence, then every candidate name is
  * grounded against the published catalog: only real catalog ids are
  * attached, unmatched names stay id-less, and certainty is never claimed.
+ * Transport and model-output failures carry a typed retryable/category
+ * taxonomy; at most one retry runs inside the shared vision budget, honoring
+ * Retry-After and cancellation, reusing the already-read photo bytes.
  * Never identifies a restaurant from a food photo and never publishes
  * anything to the catalog.
  */
@@ -66,12 +68,57 @@ export const resolveCopilotVisionConfig = (
   };
 };
 
+/**
+ * Typed vision failure taxonomy. The `_tag` stays coarse so the copilot
+ * fallback mapping (by `_tag` only in `identifyFoodPhoto`) is untouched;
+ * `category` carries the diagnostic distinction, `retryable` gates the
+ * single bounded retry, and `reason` stays a safe user-facing message.
+ * Mirrors `muse-menu.ts` without sharing its module: vision has no
+ * photo-reference or extraction-schema concerns.
+ */
+export const visionFailureCategories = [
+  "unavailable",
+  "timeout",
+  "rate-limited",
+  "auth-rejected",
+  "non-json",
+  "envelope",
+  "refusal",
+  "truncated",
+  "invalid-json",
+  "schema-failure",
+  "no-content",
+] as const;
+
+export type VisionFailureCategory = (typeof visionFailureCategories)[number];
+
 export class VisionUnavailable extends Data.TaggedError("VisionUnavailable")<{
   readonly reason: string;
+  readonly retryable: boolean;
+  readonly retryAfterSeconds?: number | undefined;
+  readonly status?: number | undefined;
+  readonly category: Extract<
+    VisionFailureCategory,
+    "unavailable" | "timeout" | "rate-limited" | "auth-rejected"
+  >;
 }> {}
 
 export class VisionInvalidOutput extends Data.TaggedError("VisionInvalidOutput")<{
   readonly reason: string;
+  readonly retryable: boolean;
+  readonly category: Extract<
+    VisionFailureCategory,
+    | "non-json"
+    | "envelope"
+    | "refusal"
+    | "truncated"
+    | "invalid-json"
+    | "schema-failure"
+    | "no-content"
+  >;
+  /** Safe schema issue paths only; never values, raw text, or responses. */
+  readonly issues?: ReadonlyArray<string> | undefined;
+  readonly finish?: string | undefined;
 }> {}
 
 export type VisionError = VisionUnavailable | VisionInvalidOutput;
@@ -94,7 +141,11 @@ const chatEnvelopeSchema = z.object({
   choices: z
     .array(
       z.object({
-        message: z.object({ content: z.string() }),
+        finish_reason: z.string(),
+        message: z.object({
+          content: z.string(),
+          refusal: z.string().nullable().optional(),
+        }),
       }),
     )
     .length(1),
@@ -113,21 +164,289 @@ const flattenField = (value: string, maxLength: number): string =>
 
 const normalizeName = (value: string): string => value.toLowerCase().trim();
 
+const VISION_RETRY_BACKOFF_MS = 250;
+
+const VISION_ATTEMPT_RESERVE_MS = 1000;
+
+async function readBoundedVisionBody(
+  response: Response,
+  maxBytes: number,
+  controller: AbortController,
+): Promise<string> {
+  const declaredLength = response.headers.get("content-length");
+
+  if (declaredLength !== null && Number(declaredLength) > maxBytes) {
+    controller.abort();
+    throw new VisionInvalidOutput({
+      reason: "The vision response was too large to read.",
+      retryable: false,
+      category: "truncated",
+    });
+  }
+
+  if (response.body === null) {
+    throw new VisionInvalidOutput({
+      reason: "Food photo analysis returned an unexpected shape.",
+      retryable: true,
+      category: "non-json",
+    });
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Array<Uint8Array> = [];
+  let byteLength = 0;
+
+  try {
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- A stream reader advances one chunk at a time.
+      const chunk = await reader.read();
+
+      if (chunk.done) break;
+
+      byteLength += chunk.value.byteLength;
+
+      if (byteLength > maxBytes) {
+        controller.abort();
+        throw new VisionInvalidOutput({
+          reason: "The vision response was too large to read.",
+          retryable: false,
+          category: "truncated",
+        });
+      }
+
+      chunks.push(chunk.value);
+    }
+
+    return Buffer.concat(chunks, byteLength).toString("utf8");
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function parseVisionRetryAfterSeconds(response: Response): number | undefined {
+  const raw = response.headers.get("retry-after");
+
+  if (raw === null) return undefined;
+
+  const seconds = Number(raw);
+
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds);
+
+  const date = Date.parse(raw);
+
+  if (!Number.isFinite(date)) return undefined;
+
+  return Math.max(0, Math.ceil((date - Date.now()) / 1000));
+}
+
+/** Map a non-2xx provider status to its typed failure (status only, no body). */
+const classifyVisionStatus = (
+  status: number,
+  retryAfterSeconds: number | undefined,
+): VisionUnavailable => {
+  if (status === 401 || status === 403) {
+    return new VisionUnavailable({
+      reason: "Food photo analysis is temporarily unavailable.",
+      retryable: false,
+      status,
+      category: "auth-rejected",
+    });
+  }
+
+  if (status === 429) {
+    return new VisionUnavailable({
+      reason: "Food photo analysis is temporarily unavailable.",
+      retryable: true,
+      retryAfterSeconds,
+      status,
+      category: "rate-limited",
+    });
+  }
+
+  if (status === 408 || status === 504) {
+    return new VisionUnavailable({
+      reason: "Food photo analysis timed out. Please try again.",
+      retryable: true,
+      retryAfterSeconds,
+      status,
+      category: "timeout",
+    });
+  }
+
+  return new VisionUnavailable({
+    reason: "Food photo analysis is temporarily unavailable.",
+    retryable: status === 500 || status === 502 || status === 503,
+    retryAfterSeconds,
+    status,
+    category: "unavailable",
+  });
+};
+
+const decodeVisionPayload = (body: string): z.infer<typeof candidatePayloadSchema> => {
+  let rawEnvelope: unknown;
+
+  try {
+    rawEnvelope = JSON.parse(body);
+  } catch {
+    throw new VisionInvalidOutput({
+      reason: "Food photo analysis returned an unexpected shape.",
+      retryable: true,
+      category: "non-json",
+    });
+  }
+
+  const envelope = chatEnvelopeSchema.safeParse(rawEnvelope);
+
+  if (!envelope.success) {
+    throw new VisionInvalidOutput({
+      reason: "Food photo analysis returned an unexpected shape.",
+      retryable: true,
+      category: "envelope",
+    });
+  }
+
+  const choice = envelope.data.choices[0];
+
+  if (choice === undefined) {
+    throw new VisionInvalidOutput({
+      reason: "Food photo analysis returned an unexpected shape.",
+      retryable: true,
+      category: "envelope",
+    });
+  }
+
+  if (choice.message.refusal) {
+    throw new VisionInvalidOutput({
+      reason: "No recognizable dish was found in this photo.",
+      retryable: true,
+      category: "refusal",
+      finish: choice.finish_reason,
+    });
+  }
+
+  if (choice.finish_reason !== "stop") {
+    const truncated = choice.finish_reason === "length";
+
+    throw new VisionInvalidOutput({
+      reason: truncated
+        ? "Food photo analysis was cut short. Please try again."
+        : "No recognizable dish was found in this photo.",
+      retryable: true,
+      category: truncated ? "truncated" : "refusal",
+      finish: choice.finish_reason,
+    });
+  }
+
+  if (choice.message.content.trim().length === 0) {
+    throw new VisionInvalidOutput({
+      reason: "No recognizable dish was found in this photo.",
+      retryable: false,
+      category: "no-content",
+      finish: choice.finish_reason,
+    });
+  }
+
+  let rawPayload: unknown;
+
+  try {
+    rawPayload = JSON.parse(choice.message.content);
+  } catch {
+    throw new VisionInvalidOutput({
+      reason: "Food photo analysis returned an unexpected shape.",
+      retryable: true,
+      category: "invalid-json",
+      finish: choice.finish_reason,
+    });
+  }
+
+  const payload = candidatePayloadSchema.safeParse(rawPayload);
+
+  if (!payload.success) {
+    throw new VisionInvalidOutput({
+      reason: "Food photo analysis returned an unexpected shape.",
+      retryable: true,
+      category: "schema-failure",
+      issues: payload.error.issues.map((issue) => issue.path.join(".")),
+      finish: choice.finish_reason,
+    });
+  }
+
+  // An empty candidate list is a valid terminal abstention, not a failure
+  // worth spending a second provider call on. No invented ids: unmatched
+  // names stay id-less downstream.
+  if (payload.data.candidates.length === 0) {
+    throw new VisionInvalidOutput({
+      reason: "No recognizable dish was found in this photo.",
+      retryable: false,
+      category: "no-content",
+      finish: choice.finish_reason,
+    });
+  }
+
+  return payload.data;
+};
+
+/** Magic-byte allow-list: JPEG, PNG, WebP. Pure; never trusts MIME claims. */
+const sniffVisionMediaType = (
+  bytes: Uint8Array,
+): "image/jpeg" | "image/png" | "image/webp" | undefined => {
+  if (bytes.byteLength >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+
+  if (
+    bytes.byteLength >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+
+  if (
+    bytes.byteLength >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+
+  return undefined;
+};
+
 const runVisionCall = (
   config: CopilotVisionConfig,
   bytes: Uint8Array,
+  mediaType: "image/jpeg" | "image/png" | "image/webp",
   language: string | undefined,
 ): Effect.Effect<z.infer<typeof candidatePayloadSchema>, VisionError> =>
   Effect.gen(function* () {
     if (config.apiKey.length === 0) {
-      return yield* new VisionUnavailable({ reason: "Food photo analysis is not configured." });
+      return yield* new VisionUnavailable({
+        reason: "Food photo analysis is not configured.",
+        retryable: false,
+        category: "unavailable",
+      });
     }
 
     const base64 = Buffer.from(bytes).toString("base64");
 
-    const response = yield* Effect.tryPromise({
-      try: (signal) =>
-        fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+    const attempt = Effect.tryPromise({
+      try: async (signal) => {
+        const controller = new AbortController();
+
+        const response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -149,7 +468,7 @@ const runVisionCall = (
                   },
                   {
                     type: "image_url",
-                    image_url: { url: `data:image/jpeg;base64,${base64}` },
+                    image_url: { url: `data:${mediaType};base64,${base64}` },
                   },
                 ],
               },
@@ -158,91 +477,87 @@ const runVisionCall = (
             max_tokens: 2000,
             store: false,
           }),
-          signal: AbortSignal.any([signal, AbortSignal.timeout(config.timeoutMs)]),
-        }),
-      catch: () => new VisionUnavailable({ reason: "Food photo analysis could not finish." }),
-    }).pipe(
-      Effect.annotateLogs({
-        backend: "muse",
-        modelId: config.modelId,
-        operation: "copilot-vision",
-      }),
-    );
+          // Surface fiber interruption (request timeout, client disconnect)
+          // to the provider request instead of leaving it running in the
+          // background. The shared Effect timeout below bounds every attempt.
+          signal: AbortSignal.any([signal, controller.signal]),
+        });
 
-    if (!response.ok) {
-      yield* Effect.logWarning("Copilot vision request failed").pipe(
-        Effect.annotateLogs({ status: response.status }),
-      );
+        if (!response.ok) {
+          const retryAfterSeconds = parseVisionRetryAfterSeconds(response);
 
-      return yield* new VisionUnavailable({
-        reason: "Food photo analysis is temporarily unavailable.",
-      });
-    }
+          controller.abort();
 
-    const declared = response.headers.get("content-length");
+          throw classifyVisionStatus(response.status, retryAfterSeconds);
+        }
 
-    if (declared !== null && Number(declared) > config.maxResponseBytes) {
-      return yield* new VisionInvalidOutput({
-        reason: "The vision response was too large to read.",
-      });
-    }
+        return decodeVisionPayload(
+          await readBoundedVisionBody(response, config.maxResponseBytes, controller),
+        );
+      },
+      catch: (error) => {
+        if (error instanceof VisionUnavailable || error instanceof VisionInvalidOutput) {
+          return error;
+        }
 
-    const body = yield* Effect.tryPromise({
-      try: () => response.text(),
-      catch: () => new VisionUnavailable({ reason: "Food photo analysis could not be read." }),
+        return new VisionUnavailable({
+          reason: "Food photo analysis could not finish.",
+          retryable: true,
+          category: "unavailable",
+        });
+      },
     });
 
-    if (new TextEncoder().encode(body).length > config.maxResponseBytes) {
-      return yield* new VisionInvalidOutput({
-        reason: "The vision response was too large to read.",
+    const startedAt = yield* Clock.currentTimeMillis;
+    const deadline = startedAt + config.timeoutMs;
+
+    // Single retry layer for both transport and model-output failures: at
+    // most one extra attempt inside the shared timeout budget, honoring
+    // provider Retry-After and cancellation. Photograph bytes are reused,
+    // never re-uploaded, and no nested retry multiplies provider calls.
+    const retryOnce = (failure: VisionError) =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+
+        const backoffMs = Predicate.isTagged(failure, "VisionUnavailable")
+          ? Math.max(VISION_RETRY_BACKOFF_MS, (failure.retryAfterSeconds ?? 0) * 1000)
+          : VISION_RETRY_BACKOFF_MS;
+
+        if (!failure.retryable || now + backoffMs + VISION_ATTEMPT_RESERVE_MS >= deadline) {
+          return yield* failure;
+        }
+
+        yield* Effect.logInfo("Copilot vision retrying").pipe(
+          Effect.annotateLogs({ category: failure.category, waitMs: backoffMs }),
+        );
+        yield* Effect.sleep(Duration.millis(backoffMs));
+
+        return yield* attempt;
       });
-    }
 
-    let rawEnvelope: unknown;
-
-    try {
-      rawEnvelope = JSON.parse(body);
-    } catch {
-      return yield* new VisionInvalidOutput({
-        reason: "Food photo analysis returned an unexpected shape.",
-      });
-    }
-
-    const envelope = chatEnvelopeSchema.safeParse(rawEnvelope);
-
-    if (!envelope.success) {
-      return yield* new VisionInvalidOutput({
-        reason: "Food photo analysis returned an unexpected shape.",
-      });
-    }
-
-    const content = envelope.data.choices[0]?.message.content;
-
-    if (content === undefined) {
-      return yield* new VisionInvalidOutput({
-        reason: "Food photo analysis returned no content.",
-      });
-    }
-
-    let rawPayload: unknown;
-
-    try {
-      rawPayload = JSON.parse(content);
-    } catch {
-      return yield* new VisionInvalidOutput({
-        reason: "Food photo analysis returned an unexpected shape.",
-      });
-    }
-
-    const payload = candidatePayloadSchema.safeParse(rawPayload);
-
-    if (!payload.success) {
-      return yield* new VisionInvalidOutput({
-        reason: "Food photo analysis returned an unexpected shape.",
-      });
-    }
-
-    return payload.data;
+    return yield* attempt.pipe(
+      Effect.catchTags({
+        VisionUnavailable: retryOnce,
+        VisionInvalidOutput: retryOnce,
+      }),
+      // This deadline covers fetch, body consumption, backoff, and the one
+      // retry. Interruption reaches fetch through tryPromise's AbortSignal;
+      // the timed-out source is interrupted before the fallback runs.
+      // Budget: vision timeout <= photo server-function deadline (vision
+      // budget + scan-read overhead). Keep coordinated; do not raise limits.
+      (operation) =>
+        Effect.timeoutOrElse(operation, {
+          duration: Duration.millis(config.timeoutMs),
+          orElse: () =>
+            Effect.fail(
+              new VisionUnavailable({
+                reason: "Food photo analysis timed out. Please try again.",
+                retryable: true,
+                category: "timeout",
+              }),
+            ),
+        }),
+    );
   });
 
 const matchCatalogDish = (
@@ -284,9 +599,9 @@ export interface CopilotIdentifyPhotoRequest {
 
 export const identifyFoodPhoto = Effect.fn("copilot.identifyPhoto")(function* (
   request: CopilotIdentifyPhotoRequest,
-  actor: Actor,
+  principal: ScanPrincipal | null,
 ) {
-  const startedAt = Date.now();
+  const startedAt = yield* Clock.currentTimeMillis;
   const config = resolveCopilotVisionConfig(process.env);
 
   if (!config.enabled) {
@@ -294,19 +609,19 @@ export const identifyFoodPhoto = Effect.fn("copilot.identifyPhoto")(function* (
       Effect.annotateLogs({ reason: "disabled" }),
     );
 
-    return { candidates: [], unmatchedNote: "Food photo analysis is currently disabled." };
+    return {
+      candidates: [],
+      unmatchedNote: "Food photo analysis is currently disabled.",
+      status: "disabled",
+    };
   }
-
-  const principal: ScanPrincipal | null = Actor.$match(actor, {
-    Guest: () => null,
-    Member: ({ userId }) => ({ userId, guestHash: "" }),
-  });
 
   if (principal === null) {
     return {
       candidates: [],
       unmatchedNote:
         "Private scan photos cannot be identified without the signed-in owner. Open this scan in the menu scanner instead.",
+      status: "auth-required",
     };
   }
 
@@ -331,32 +646,62 @@ export const identifyFoodPhoto = Effect.fn("copilot.identifyPhoto")(function* (
     }
   }
 
+  // Magic-byte gate before any provider call: the bytes come from owned
+  // scan storage, but the vision boundary never trusts stored MIME claims.
+  // Unknown signatures fail closed as unreadable; the photo is preserved.
+  const mediaType = bytes === null ? undefined : sniffVisionMediaType(bytes);
+
   if (
     bytes === null ||
     bytes.byteLength === 0 ||
-    bytes.byteLength > COPILOT_VISION_MAX_IMAGE_BYTES
+    bytes.byteLength > COPILOT_VISION_MAX_IMAGE_BYTES ||
+    mediaType === undefined
   ) {
     yield* Effect.logWarning("Copilot vision could not read the photo").pipe(
-      Effect.annotateLogs({ readable: bytes !== null }),
+      Effect.annotateLogs({ readable: bytes !== null && mediaType !== undefined }),
     );
 
-    return { candidates: [], unmatchedNote: "This photo could not be read. Try another image." };
+    return {
+      candidates: [],
+      unmatchedNote: "This photo could not be read. Try another image.",
+      status: "unreadable",
+    };
   }
 
-  const payload = yield* runVisionCall(config, bytes, request.language).pipe(
+  const payload = yield* runVisionCall(config, bytes, mediaType, request.language).pipe(
     Effect.catchTags({
       VisionUnavailable: (failure) =>
-        Effect.succeed({ candidates: [], failed: failure.reason } as const),
-      VisionInvalidOutput: () => Effect.succeed({ candidates: [], failed: null } as const),
+        Effect.gen(function* () {
+          yield* Effect.logWarning("Copilot vision request failed").pipe(
+            Effect.annotateLogs({
+              category: failure.category,
+              status: failure.status ?? "unknown",
+            }),
+          );
+
+          return { candidates: [], failed: failure.reason } as const;
+        }),
+      VisionInvalidOutput: (failure) =>
+        Effect.gen(function* () {
+          yield* Effect.logWarning("Copilot vision output rejected").pipe(
+            Effect.annotateLogs({ category: failure.category }),
+          );
+
+          return { candidates: [], failed: null } as const;
+        }),
     }),
   );
 
   if ("failed" in payload && payload.failed !== null) {
-    return { candidates: [], unmatchedNote: payload.failed };
+    return { candidates: [], unmatchedNote: payload.failed, status: "unavailable" };
   }
 
   if ("failed" in payload || payload.candidates.length === 0) {
-    return { candidates: [], unmatchedNote: "No recognizable dish was found in this photo." };
+    return {
+      candidates: [],
+      unmatchedNote: "No recognizable dish was found in this photo.",
+      status: "no-candidate",
+    };
   }
 
   const grounded = yield* Effect.forEach(
@@ -386,11 +731,13 @@ export const identifyFoodPhoto = Effect.fn("copilot.identifyPhoto")(function* (
     (candidate): candidate is NonNullable<typeof candidate> => candidate !== null,
   );
 
+  const elapsedMs = yield* Clock.currentTimeMillis.pipe(Effect.map((now) => now - startedAt));
+
   yield* Effect.logInfo("Copilot vision completed").pipe(
     Effect.annotateLogs({
       candidateCount: candidates.length,
       groundedCount: candidates.filter((candidate) => candidate.dishId !== undefined).length,
-      durationMs: Date.now() - startedAt,
+      durationMs: elapsedMs,
     }),
   );
 
@@ -398,8 +745,9 @@ export const identifyFoodPhoto = Effect.fn("copilot.identifyPhoto")(function* (
     return {
       candidates: [],
       unmatchedNote: "No recognizable dish was found in this photo.",
+      status: "no-candidate",
     };
   }
 
-  return { candidates };
+  return { candidates, status: "identified" };
 });

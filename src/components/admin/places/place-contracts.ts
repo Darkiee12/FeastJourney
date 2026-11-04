@@ -154,6 +154,10 @@ const placeSearchPageSchema = z.object({
       displayName: z.string().nullable(),
       iso3166: z.string().nullable(),
       kind: z.string(),
+      // Forward-compatible: the list projection carries no parent context
+      // today (enrichment fills it client-side), but a future projection
+      // that names the direct parent flows straight into the hit.
+      parentName: z.string().nullable().optional(),
     }),
   ),
 });
@@ -170,7 +174,7 @@ export const parseSearchHits = (page: unknown): ReadonlyArray<PlaceSearchHit> =>
   return parsed.data.items.map((entry) => ({
     id: entry.id,
     name: entry.displayName,
-    parentName: null,
+    parentName: entry.parentName ?? null,
     iso: entry.iso3166,
     kind: entry.kind,
   }));

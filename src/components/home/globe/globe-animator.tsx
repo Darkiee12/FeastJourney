@@ -83,7 +83,8 @@ function readAnchor(
   // card to fit without covering the headline or primary CTAs.
   // On narrow phones the hero copy stacks full-width above the globe, so the
   // zone additionally clears the copy block plus one card height — the card
-  // extends upward from its anchor and must never cover a CTA. When the
+  // extends upward from its anchor and must never cover a CTA. Both desktop
+  // and mobile heroes mark the copy block with `data-hero-copy`. When the
   // remaining band is too thin, no dish is eligible: fewer labels beat
   // colliding ones.
   const narrow = size.width < 640;
@@ -193,6 +194,24 @@ export function GlobeAnimator({
   }, []);
 
   const pickDishes = (camera: THREE.Camera, size: ViewportSize, now: number): Array<string> => {
+    const narrow = size.width < NARROW_VIEWPORT_PX;
+
+    // Visibility policy on narrow phones: an expanded bottom sheet covers
+    // the globe, so auto popups stand down instead of fighting the open
+    // sheet — labels only auto-cycle over the collapsed peek. The mobile
+    // sheet marks its mode on `data-mobile-sheet`; desktop has no such
+    // node and is unaffected. Hover/focus pins still work; this gates
+    // only the automatic set.
+    if (narrow && typeof document !== "undefined") {
+      const sheetMode = document
+        .querySelector("[data-mobile-sheet]")
+        ?.getAttribute("data-mobile-sheet");
+
+      if (sheetMode !== null && sheetMode !== undefined && sheetMode !== "collapsed") {
+        return [];
+      }
+    }
+
     const eligible: Array<ScoredDish> = [];
 
     // Only the currently visible pin subset is eligible: popups never pick

@@ -7,7 +7,7 @@ import { z } from "zod";
  */
 export const profileUpdateSchema = z.object({
   display_name: z.string().trim().min(1).max(100).nullable().default(null),
-  locale: z.enum(["en", "vi", "hi", "es", "zh"]).default("en"),
+  locale: z.enum(["en", "vi", "hi", "es", "zh", "ja", "de", "nl"]).default("en"),
 });
 
 export type ProfileUpdate = z.infer<typeof profileUpdateSchema>;

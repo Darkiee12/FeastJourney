@@ -1,8 +1,16 @@
-import { Camera, Images } from "lucide-react";
-import { useId, type ReactNode } from "react";
+import { Camera, ChevronRight, Images, MapPin } from "lucide-react";
+import { useId, useState, type ReactNode } from "react";
 
 import { SharedSelectField } from "@/components/ui/select";
-import { menuLanguageNames } from "@/modules/restaurant-discovery/components/menu-copy";
+import {
+  menuLanguageNames,
+  scanLocationCopy,
+  scanLocationPickerCopy,
+} from "@/modules/restaurant-discovery/components/menu-copy";
+import {
+  ScanLocationPicker,
+  type ScanLocationPickerProps,
+} from "@/modules/restaurant-discovery/components/scan-location-picker";
 import {
   ScanPhotoPreview,
   type ScanPreviewPhoto,
@@ -11,7 +19,21 @@ import {
   ScanPrivacyDetails,
   ScanPrivacyNotice,
 } from "@/modules/restaurant-discovery/components/scan-privacy";
+import { CITY_PRESETS } from "@/modules/restaurant-discovery/map-bounds";
 import { menuLanguages } from "@/modules/restaurant-discovery/menu-scan.schema";
+
+/**
+ * Optional coarse menu location: a curated city id + display label.
+ *
+ * cityId grammar: curated preset ids ("hcmc" | "hanoi" | "bangalore"),
+ * geolocated labels ("geo:<name>", taken as-is from nearestCityFn), or
+ * canonical catalog identities ("place:<decimalId>" from city search).
+ * Only cityId + label persist (feastjourney:menu-location:v1).
+ */
+export interface ScanMenuLocation {
+  readonly cityId: string;
+  readonly label: string;
+}
 
 interface CaptureCopy {
   readonly camera: string;
@@ -46,16 +68,105 @@ const captureCopy = (locale: string): CaptureCopy => {
   };
 };
 
+const cityLabelFor = (cityId: string, locale: string): string => {
+  const copy = scanLocationCopy(locale);
+
+  if (cityId === "hcmc") return copy.cityHcmc;
+
+  if (cityId === "hanoi") return copy.cityHanoi;
+
+  if (cityId === "bangalore") return copy.cityBangalore;
+
+  return cityId;
+};
+
+/**
+ * Compact location trigger: one row opening the location sheet. Recent
+ * history is real session state only — selections made through this row,
+ * seeded with the stored location — capped at five, never invented.
+ * Dismissing the sheet preserves the choice; selecting auto-closes.
+ */
+function ScanLocationSetting({
+  locale,
+  menuLocation,
+  disabled,
+  onLocationChange,
+}: {
+  readonly locale: string;
+  readonly menuLocation: ScanMenuLocation | null;
+  readonly disabled: boolean;
+  readonly onLocationChange: (location: ScanMenuLocation | null) => void;
+}): ReactNode {
+  const copy = scanLocationPickerCopy(locale);
+
+  const [open, setOpen] = useState(false);
+
+  const [recent, setRecent] = useState<ReadonlyArray<ScanMenuLocation>>(() =>
+    menuLocation === null ? [] : [menuLocation],
+  );
+
+  const presets: ReadonlyArray<ScanMenuLocation> = CITY_PRESETS.map((city) => ({
+    cityId: city.id,
+    label: cityLabelFor(city.id, locale),
+  }));
+
+  const choose: ScanLocationPickerProps["onSelect"] = (location) => {
+    if (location !== null) {
+      setRecent((previous) =>
+        [location, ...previous.filter((entry) => entry.cityId !== location.cityId)].slice(0, 5),
+      );
+    }
+
+    onLocationChange(location);
+    setOpen(false);
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen(true)}
+        className="flex min-h-11 w-full items-center gap-2 rounded-lg border border-border-soft bg-white px-3 py-2 text-left disabled:opacity-60"
+      >
+        <MapPin aria-hidden="true" className="size-4 flex-none text-muted" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold text-ink">{copy.trigger}</span>
+          {menuLocation === null ? null : (
+            <span className="block truncate text-sm text-muted">{menuLocation.label}</span>
+          )}
+        </span>
+        <ChevronRight aria-hidden="true" className="size-4 flex-none text-muted" />
+      </button>
+      <ScanLocationPicker
+        locale={locale}
+        open={open}
+        disabled={disabled}
+        current={menuLocation}
+        recent={recent}
+        presets={presets}
+        onOpenChange={setOpen}
+        onSelect={choose}
+      />
+    </>
+  );
+}
+
 /**
  * Cohesive capture surface: camera primary, gallery secondary, compact
- * language setting, thumbnail strip, and the single inline primary action.
- * Upload limits appear only contextually (once photos exist). No giant navy
- * blocks, no sticky bar, no duplicate submit buttons.
+ * language setting, optional coarse location, thumbnail strip, and the
+ * single inline primary action. Upload limits appear only contextually
+ * (once photos exist). No giant navy blocks, no sticky bar, no duplicate
+ * submit buttons.
  */
 export function ScanCapture({
   locale,
   targetLanguage,
   onTargetLanguageChange,
+  menuLocation,
+  onLocationChange,
   photos,
   onAddFiles,
   onRemovePhoto,
@@ -68,6 +179,8 @@ export function ScanCapture({
   readonly locale: string;
   readonly targetLanguage: string;
   readonly onTargetLanguageChange: (value: string) => void;
+  readonly menuLocation: ScanMenuLocation | null;
+  readonly onLocationChange: (location: ScanMenuLocation | null) => void;
   readonly photos: ReadonlyArray<ScanPreviewPhoto>;
   readonly onAddFiles: (files: FileList | null) => void;
   readonly onRemovePhoto: (id: string) => void;
@@ -128,6 +241,13 @@ export function ScanCapture({
           value: language,
         }))}
         size="regular"
+      />
+
+      <ScanLocationSetting
+        locale={locale}
+        menuLocation={menuLocation}
+        disabled={busy}
+        onLocationChange={onLocationChange}
       />
 
       {photos.length > 0 ? (

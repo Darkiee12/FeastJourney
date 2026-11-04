@@ -30,7 +30,12 @@ function dishLabel(dish: FoodLocation, lang: Locale, popupHint: string): string 
   return `${names}, ${localizedDishText(dish.country, lang)}. ${popupHint}`;
 }
 
-/** DOM popup and preview cards positioned each frame from real 3D anchors. */
+/** DOM popup and preview cards positioned each frame from real 3D anchors.
+ * Layering contract: this overlay paints below the hero copy and CTAs
+ * (they carry explicit z-index; the overlay keeps none), so labels can
+ * never cover Find-your-dish / Let's Explore / Ask Muse — and the
+ * animator's zone/visibility policy keeps anchors out of the CTA band
+ * and stands auto popups down while a mobile sheet is expanded. */
 export function GlobeFoodOverlay({
   copy,
   lang,
@@ -108,7 +113,7 @@ export function GlobeFoodOverlay({
                   }
                 }}
                 aria-label={dishLabel(active.dish, lang, copy.popupHint)}
-                className={`pointer-events-auto flex cursor-pointer items-center gap-3 rounded-2xl border border-border-soft bg-white py-2 pr-4 pl-2 text-left text-ink shadow-[0_16px_40px_rgba(3,10,30,0.45)] transition-colors hover:border-food-orange ${
+                className={`pointer-events-auto flex max-w-[calc(100vw-2rem)] cursor-pointer items-center gap-3 rounded-2xl border border-border-soft bg-white py-2 pr-4 pl-2 text-left text-ink shadow-[0_16px_40px_rgba(3,10,30,0.45)] transition-colors hover:border-food-orange ${
                   active.exiting
                     ? "motion-safe:animate-popup-exit"
                     : "motion-safe:animate-popup-swap-in"
@@ -121,16 +126,16 @@ export function GlobeFoodOverlay({
                   {active.dish.emoji}
                 </span>
 
-                <span className="flex flex-col py-0.5 pr-1 leading-tight">
-                  <span className="text-base font-extrabold whitespace-nowrap">
+                <span className="flex min-w-0 flex-col py-0.5 pr-1 leading-tight">
+                  <span className="truncate text-base font-extrabold text-ink">
                     {active.dish.name}
                   </span>
                   {sameDishName(active.dish) ? null : (
-                    <span className="text-sm font-semibold whitespace-nowrap text-food-orange-strong">
+                    <span className="truncate text-sm font-semibold text-food-orange-strong">
                       {active.dish.englishName}
                     </span>
                   )}
-                  <span className="text-sm whitespace-nowrap text-muted">
+                  <span className="truncate text-sm text-muted">
                     {localizedDishText(active.dish.country, lang)}
                   </span>
                 </span>

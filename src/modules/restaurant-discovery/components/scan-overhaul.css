@@ -6,8 +6,7 @@
  * menu-order.css. Remove the import in styles.css to roll back.
  */
 
-.app-shell:has(.menu-scan-page),
-.app-shell:has(.muse-shell) {
+.app-shell:has(.menu-scan-page) {
   background:
     radial-gradient(rgb(23 32 51 / 0.09) 1px, transparent 1.4px) 0 0 / 16px 16px,
     var(--color-cream);
@@ -341,8 +340,7 @@
 }
 
 .scan-results-diet,
-.scan-results-price-note,
-.menu-order-language-note {
+.scan-results-price-note {
   max-width: none;
   margin: 0.5rem 0 0;
   padding: 0.6rem 0.85rem;

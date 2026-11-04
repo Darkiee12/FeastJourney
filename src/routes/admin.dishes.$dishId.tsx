@@ -28,7 +28,7 @@ import {
   adminPublicationCheckFn,
   adminUpdateDishStatusFn,
 } from "@/modules/food-discovery/admin.functions";
-import type { DishProfile } from "@/modules/food-discovery/server/domain/dish";
+import type { DishPlace, DishProfile } from "@/modules/food-discovery/server/domain/dish";
 import { authorizeFn } from "@/modules/user/admin.functions";
 import { getSessionFn } from "@/modules/user/session.functions";
 import { formatAdminDate } from "@/shared/format";
@@ -96,6 +96,9 @@ const dishPlaceSchema = z.object({
   name: z.string().nullable().optional(),
   association: z.string(),
   isDisputed: z.boolean(),
+  // Link note from the detail projection; missing reads as empty and the
+  // editor treats it accordingly.
+  note: z.string().nullable().optional(),
 });
 
 const dishTaxonomySchema = z.object({
@@ -144,8 +147,15 @@ const dishDetailSchema = z.object({
 });
 
 interface DishDetailData {
-  readonly dish: DishProfile;
+  readonly dish: Omit<DishProfile, "places"> & {
+    readonly places: ReadonlyArray<DishPlaceWithNote>;
+  };
   readonly notes: ReadonlyArray<DishNoteItem>;
+}
+
+/** Dish-place link with the editor-visible link note from the detail projection. */
+export interface DishPlaceWithNote extends DishPlace {
+  readonly note: string | null;
 }
 
 const adminDishDetailLoader = async (input: {
@@ -156,7 +166,7 @@ const adminDishDetailLoader = async (input: {
     await adminDishDetailFn({ data: { dishId: input.dishId, locale: input.locale } }),
   );
 
-  const dish: DishProfile = {
+  const dish: DishDetailData["dish"] = {
     id: parsed.dish.id,
     slug: parsed.dish.slug,
     name: parsed.dish.name ?? undefined,
@@ -176,6 +186,7 @@ const adminDishDetailLoader = async (input: {
       name: entry.name ?? undefined,
       association: entry.association,
       isDisputed: entry.isDisputed,
+      note: entry.note ?? null,
       kind: "",
       iso3166: null,
       displayLatitude: null,

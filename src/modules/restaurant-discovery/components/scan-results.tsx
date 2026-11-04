@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 
 import { InteractiveMenuView } from "@/modules/restaurant-discovery/components/interactive-menu";
-import { menuScanResultsCopy } from "@/modules/restaurant-discovery/components/menu-copy";
+import {
+  menuLanguageNames,
+  menuScanResultsCopy,
+} from "@/modules/restaurant-discovery/components/menu-copy";
+import { MenuPhotoViewer } from "@/modules/restaurant-discovery/components/menu-item-detail";
+import type { ScanMenuLocation } from "@/modules/restaurant-discovery/components/scan-capture";
+import {
+  ScanCurrencyControl,
+  useScanCurrency,
+} from "@/modules/restaurant-discovery/components/scan-currency-control";
 import { ScanEditor } from "@/modules/restaurant-discovery/components/scan-editor";
 import { menuBcp47TagFor, presentScan } from "@/modules/restaurant-discovery/menu-presentation";
 import {
@@ -50,12 +59,56 @@ const priceUnclear = (document: MenuScanDocument): boolean =>
     ),
   );
 
+const sourceCurrenciesOf = (document: MenuScanDocument): ReadonlyArray<string | null> =>
+  document.items.flatMap((item) => item.variants.map((variant) => variant.price?.currency ?? null));
+
+/** Two-step delete confirmation inside the overflow disclosure. */
+function ScanDeleteAction({
+  label,
+  confirm,
+  yes,
+  no,
+  busy,
+  onDelete,
+}: {
+  readonly label: string;
+  readonly confirm: string;
+  readonly yes: string;
+  readonly no: string;
+  readonly busy: boolean;
+  readonly onDelete: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+
+  if (!confirming)
+    return (
+      <button type="button" className="scan-delete" onClick={() => setConfirming(true)}>
+        {label}
+      </button>
+    );
+
+  return (
+    <span className="scan-delete-confirm">
+      <span role="alert">{confirm}</span>
+      <button type="button" className="scan-delete" disabled={busy} onClick={onDelete}>
+        {yes}
+      </button>
+      <button type="button" disabled={busy} onClick={() => setConfirming(false)}>
+        {no}
+      </button>
+    </span>
+  );
+}
+
 /**
- * Post-analysis results screen. Self-sufficient default mount: loads the scan
- * by id, renders the traveler-friendly header, translated ordering menu
- * (existing selection controller + waiter card, no second subtotal), original
- * photo verification, a subdued correction flow, and technical metadata in a
- * collapsed section.
+ * Post-analysis results shell. Single heading ("Your menu is ready" +
+ * "Choose what you'd like to order"), then one compact context row
+ * (restaurant / location / source → target language / currency status),
+ * the single menu-wide currency control, and the dishes. Overflow actions
+ * (scan another / reload / delete with confirmation) live in a compact
+ * disclosure — never giant stacked buttons above the food. IDs, model,
+ * revision, provenance, and expiry detail collapse into "Scan details";
+ * the visible UI keeps only a concise privacy/expiry line.
  *
  * Price research is intentionally NOT rendered here: the single research
  * trigger per screen stays with S1's ScanPriceResearch, mounted as a sibling
@@ -64,10 +117,16 @@ const priceUnclear = (document: MenuScanDocument): boolean =>
  */
 export function ScanResults({
   scanId,
+  menuLocation,
   onEditDish,
+  onScanAnother,
+  onDeleteScan,
 }: {
   readonly scanId: string;
+  readonly menuLocation?: ScanMenuLocation | null | undefined;
   readonly onEditDish?: ((itemKey: string) => void) | undefined;
+  readonly onScanAnother?: (() => void) | undefined;
+  readonly onDeleteScan?: (() => void) | undefined;
 }) {
   const [view, setView] = useState<ScanView | null>(null);
   const [document, setDocument] = useState<MenuScanDocument | null>(null);
@@ -124,6 +183,7 @@ export function ScanResults({
 
   const locale = view?.scan.target_language ?? "en";
   const copy = menuScanResultsCopy(locale);
+  const currency = useScanCurrency(document === null ? [] : sourceCurrenciesOf(document));
 
   const reload = (): void => {
     setLoading(true);
@@ -217,33 +277,56 @@ export function ScanResults({
 
   const revisionNumber = view.revision?.number ?? view.scan.current_revision;
 
+  const documentSource = document.sourceLanguage;
+
+  const sourceName =
+    documentSource === null ? null : (menuLanguageNames.get(documentSource) ?? documentSource);
+
+  const targetName = menuLanguageNames.get(document.targetLanguage) ?? document.targetLanguage;
+
+  const contextLine = [
+    venueName,
+    menuLocation?.label ?? null,
+    sourceName === null
+      ? null
+      : copy.contextLanguages.replace("{source}", sourceName).replace("{target}", targetName),
+    currency.enabled && currency.target !== ""
+      ? copy.currencyConverted.replace("{target}", currency.target)
+      : copy.currencyOriginalOnly,
+  ]
+    .flatMap((part) => (part === null ? [] : [part]))
+    .join(" · ");
+
   return (
     <article className="scan-results" lang={menuBcp47TagFor(locale)}>
       <header className="scan-results-head">
-        <h1 className="font-display text-4xl">{copy.ready}</h1>
+        <h1
+          id="scan-results-title"
+          tabIndex={-1}
+          className="scan-results-title font-display text-4xl"
+        >
+          {copy.ready}
+        </h1>
         <p>{copy.subtitle}</p>
-        {venueName !== null && <p>{copy.atVenue.replace("{name}", venueName)}</p>}
+        <p className="scan-results-context">{contextLine}</p>
+        <ScanCurrencyControl
+          sources={sourceCurrenciesOf(document)}
+          locale={locale}
+          state={currency}
+        />
         {expiry !== null && <p className="scan-results-expiry">{expiry}</p>}
       </header>
       <p className="scan-results-diet">{copy.dietNote}</p>
       {priceUnclear(document) && <p className="scan-results-price-note">{copy.priceUnclear}</p>}
       {assets.length > 0 && (
-        <section className="scan-results-photos" aria-label={copy.originalMenu}>
-          <h2>{copy.originalMenu}</h2>
-          <p>{copy.originalMenuHelp}</p>
-          <ul>
-            {assets.map((asset) => (
-              <li key={asset.id}>
-                <a
-                  href={`/api/menu-scans?scanId=${view.scan.id}&assetId=${asset.id}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {copy.originalPage.replace("{n}", String(asset.page_number))}
-                </a>
-              </li>
-            ))}
-          </ul>
+        <section className="scan-results-photos" aria-label={copy.photosTitle}>
+          <h2>{copy.photosTitle}</h2>
+          <p>{copy.photosHelp}</p>
+          <MenuPhotoViewer
+            photos={assets.map((asset) => ({ assetId: asset.id, page: asset.page_number }))}
+            photoUrl={(assetId) => `/api/menu-scans?scanId=${view.scan.id}&assetId=${assetId}`}
+            locale={locale}
+          />
         </section>
       )}
       <InteractiveMenuView
@@ -251,11 +334,35 @@ export function ScanResults({
         menu={presentScan(document, venueName)}
         locale={locale}
         photoUrl={(assetId) => `/api/menu-scans?scanId=${view.scan.id}&assetId=${assetId}`}
+        rates={currency.rates}
         onEditDish={handleEditDish}
       />
       {/* Price-research mount point (S1): render ScanPriceResearch as a sibling
           directly below ScanResults with locale + items. ScanResults renders no
           research trigger so the screen keeps exactly one (single-trigger rule). */}
+      <details className="scan-results-overflow">
+        <summary>{copy.overflowLabel}</summary>
+        <div className="scan-results-overflow-actions">
+          {onScanAnother !== undefined && (
+            <button type="button" onClick={onScanAnother}>
+              {copy.scanAnother}
+            </button>
+          )}
+          <button type="button" onClick={reload}>
+            {copy.reloadAction}
+          </button>
+          {onDeleteScan !== undefined && (
+            <ScanDeleteAction
+              label={copy.deleteAction}
+              confirm={copy.deleteConfirm}
+              yes={copy.deleteYes}
+              no={copy.deleteNo}
+              busy={loading}
+              onDelete={onDeleteScan}
+            />
+          )}
+        </div>
+      </details>
       <details
         ref={correctionsRef}
         className="scan-results-corrections"
@@ -303,6 +410,18 @@ export function ScanResults({
               <dd>{revisionModel}</dd>
             </div>
           )}
+          <div>
+            <dt>{copy.detailsProvenance}</dt>
+            <dd>{view.revision?.origin ?? copy.notReady}</dd>
+          </div>
+          <div>
+            <dt>{copy.detailsExpiry}</dt>
+            <dd>
+              <time dateTime={view.scan.expires_at}>
+                {new Date(view.scan.expires_at).toLocaleString(locale)}
+              </time>
+            </dd>
+          </div>
           {assets.length > 0 && (
             <div>
               <dt>{copy.metaPhotos}</dt>
