@@ -76,55 +76,47 @@ export interface ProgressEvent {
   readonly terminal: boolean;
 }
 
-/**
- * Hard bounds for every agentic run. There are NO hardcoded defaults:
- * every value MUST be stated explicitly in the environment, otherwise this
- * module throws at load time naming the missing variable. Present values
- * must be positive safe integers — invalid input fails loudly, never
- * silently clamped. The operator owns these tradeoffs entirely.
- */
-const requirePositiveInt = (varName: string): number => {
-  const raw = process.env[varName];
+/** Agentic run bounds. Every value is required from the environment (no defaults). */
+import { z } from "zod";
 
-  if (raw === undefined || raw === "") {
-    throw new Error(
-      `${varName} is required: agentic recommendation bounds must be stated explicitly in the environment (no built-in defaults).`,
-    );
-  }
-
-  const parsed = Number(raw);
-
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new Error(
-      `${varName} must be a positive integer, got ${JSON.stringify(raw)}.`,
-    );
-  }
-
-  return parsed;
+type EnvBag = {
+  readonly [key: string]: string | undefined;
 };
 
-export const AGENT_BOUNDS = {
-  /** Maximum model rounds (initial + tool-follow-ups) per request. */
-  maxRounds: requirePositiveInt("RECOMMEND_AGENT_MAX_ROUNDS"),
-  /** Maximum tool calls in total across all rounds. */
-  maxToolCalls: requirePositiveInt("RECOMMEND_AGENT_MAX_TOOL_CALLS"),
-  /** Maximum dish IDs per getDishDetails call. */
-  detailsPerCall: requirePositiveInt("RECOMMEND_AGENT_DETAILS_PER_CALL"),
-  /** Maximum unique candidate IDs the agent may hold. */
-  candidatePoolCap: requirePositiveInt("RECOMMEND_AGENT_CANDIDATE_POOL_CAP"),
-  /** Final selection cap (keeps the existing top-10 contract). */
-  finalLimit: requirePositiveInt("RECOMMEND_AGENT_FINAL_LIMIT"),
-  /**
-   * Per-provider-call timeout in milliseconds.
-   * Owned by workstream B via MODEL_AGENT_TIMEOUT_MS — same rule, no default.
-   */
-  providerTimeoutMs: requirePositiveInt("MODEL_AGENT_TIMEOUT_MS"),
-  /**
-   * Total orchestration deadline in milliseconds.
-   * Owned by workstream B via RECOMMEND_AGENT_DEADLINE_MS — same rule.
-   */
-  orchestrationDeadlineMs: requirePositiveInt("RECOMMEND_AGENT_DEADLINE_MS"),
-} as const;
+const PositiveIntFromEnv = (varName: string) =>
+  z
+    .string()
+    .min(1, `${varName} must not be empty.`)
+    .transform((raw) => Number(raw))
+    .pipe(z.number())
+    .refine((n) => Number.isSafeInteger(n) && n > 0, {
+      message: `${varName} must be a positive integer.`,
+    });
+
+const parsePositiveInt = (varName: string, env: EnvBag): number => {
+  const result = PositiveIntFromEnv(varName).safeParse(env[varName]);
+
+  if (!result.success) {
+    throw new Error(
+      `${varName} must be set to a positive integer in the environment. Received: ${JSON.stringify(env[varName] ?? null)}.`,
+    );
+  }
+
+  return result.data;
+};
+
+export const resolveAgentBounds = (env: EnvBag = process.env) =>
+  ({
+    maxRounds: parsePositiveInt("RECOMMEND_AGENT_MAX_ROUNDS", env),
+    maxToolCalls: parsePositiveInt("RECOMMEND_AGENT_MAX_TOOL_CALLS", env),
+    detailsPerCall: parsePositiveInt("RECOMMEND_AGENT_DETAILS_PER_CALL", env),
+    candidatePoolCap: parsePositiveInt("RECOMMEND_AGENT_CANDIDATE_POOL_CAP", env),
+    finalLimit: parsePositiveInt("RECOMMEND_AGENT_FINAL_LIMIT", env),
+    providerTimeoutMs: parsePositiveInt("MODEL_AGENT_TIMEOUT_MS", env),
+    orchestrationDeadlineMs: parsePositiveInt("RECOMMEND_AGENT_DEADLINE_MS", env),
+  }) as const;
+
+export const AGENT_BOUNDS = resolveAgentBounds();
 
 export type AgentBounds = typeof AGENT_BOUNDS;
 
