@@ -1,5 +1,8 @@
-import { useCallback, useState } from "react";
+import * as maplibre from "maplibre-gl";
+import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from "react";
 import Map, { Marker, NavigationControl } from "react-map-gl/maplibre";
+import type { MapRef } from "react-map-gl/maplibre";
 import { z } from "zod";
 
 import {
@@ -9,13 +12,18 @@ import {
   AdminPrimaryButton,
   AdminSecondaryButton,
 } from "@/components/admin/ui";
+import { applyWarmBasemap } from "@/modules/restaurant-discovery/components/restaurant-map";
 import {
   RestaurantPhotoManager,
   type RestaurantPhotoManagerClient,
 } from "@/modules/restaurant-discovery/components/restaurant-photo-manager";
-import { requestUserPosition } from "@/modules/restaurant-discovery/location-storage";
-import { DEFAULT_MAP_CENTER } from "@/modules/restaurant-discovery/map-bounds";
+import {
+  prefersReducedMotion,
+  requestUserPosition,
+} from "@/modules/restaurant-discovery/location-storage";
+import { CITY_PRESETS, DEFAULT_MAP_CENTER } from "@/modules/restaurant-discovery/map-bounds";
 import { venueWriteSchema } from "@/modules/restaurant-discovery/restaurant.schema";
+import { resolveMapStyleUrl } from "@/shared/map-style-url";
 
 export interface EditorVenue {
   readonly id: string;
@@ -65,85 +73,331 @@ function statusLabel(status: EditorVenue["status"]): string {
   return "Draft";
 }
 
-function CoordinatePicker({
-  longitude,
-  latitude,
-  onPick,
-}: {
+/**
+ * Domain schemas are the single source of truth for coordinate validity.
+ * The text fields below hold raw strings; every validity decision (inline
+ * errors, save-disabled, submit gating) comes from these schemas — never
+ * from hand-rolled range checks. `Number()` is only the strict string→
+ * number conversion: malformed input such as `12abc` becomes NaN and the
+ * schema rejects it. Empty strings are treated as missing, never as zero.
+ */
+const latitudeSchema = venueWriteSchema.shape.latitude;
+const longitudeSchema = venueWriteSchema.shape.longitude;
+const coordinatePairSchema = venueWriteSchema.pick({ latitude: true, longitude: true });
+
+function parseCoordinateText(raw: string): number | null {
+  const trimmed = raw.trim();
+
+  if (trimmed === "") return null;
+
+  return Number(trimmed);
+}
+
+interface CommittedCoordinates {
   readonly longitude: number;
   readonly latitude: number;
-  readonly onPick: (longitude: number, latitude: number) => void;
+}
+
+interface CameraFrame {
+  readonly key: number;
+  readonly longitude: number;
+  readonly latitude: number;
+}
+
+/** Normalized free-text area → curated city preset. Explicit aliases only;
+ *  an unmatched area never produces a mismatch warning. */
+const CITY_AREA_LOOKUP: ReadonlyMap<string, string> = new Map([
+  ["hcmc", "hcmc"],
+  ["ho chi minh city", "hcmc"],
+  ["ho chi minh", "hcmc"],
+  ["saigon", "hcmc"],
+  ["thanh pho ho chi minh", "hcmc"],
+  ["hanoi", "hanoi"],
+  ["ha noi", "hanoi"],
+  ["bangalore", "bangalore"],
+  ["bengaluru", "bangalore"],
+]);
+
+function areaWarningFor(area: string, coordinates: CommittedCoordinates): string | null {
+  const cityId = CITY_AREA_LOOKUP.get(area.trim().toLowerCase());
+
+  if (cityId === undefined) return null;
+
+  const preset = CITY_PRESETS.find((entry) => entry.id === cityId);
+
+  if (preset === undefined) return null;
+
+  const inside =
+    coordinates.longitude >= preset.west &&
+    coordinates.longitude <= preset.east &&
+    coordinates.latitude >= preset.south &&
+    coordinates.latitude <= preset.north;
+
+  if (inside) return null;
+
+  return "These coordinates appear outside the selected area. Please verify the pin.";
+}
+
+function CoordinatePicker({
+  marker,
+  latitudeText,
+  longitudeText,
+  latitudeError,
+  longitudeError,
+  areaWarning,
+  disabled,
+  frame,
+  onLatitudeText,
+  onLongitudeText,
+  onPairPaste,
+  onMapPick,
+}: {
+  readonly marker: CommittedCoordinates;
+  readonly latitudeText: string;
+  readonly longitudeText: string;
+  readonly latitudeError: string | null;
+  readonly longitudeError: string | null;
+  readonly areaWarning: string | null;
+  readonly disabled: boolean;
+  /** Camera request from typed input: consumed once per key. Map picks and
+   *  geolocation move the camera directly; they never set this. */
+  readonly frame: CameraFrame | null;
+  readonly onLatitudeText: (raw: string) => void;
+  readonly onLongitudeText: (raw: string) => void;
+  /** Pasted "lat, lng" pair split across both fields. Validation still
+   *  runs through the domain schema in the parent. */
+  readonly onPairPaste: (pasted: string) => void;
+  /** Committed location from map click, marker drag, or geolocation. The
+   *  parent updates the marker, the text fields, and save state. */
+  readonly onMapPick: (longitude: number, latitude: number) => void;
 }) {
+  const mapRef = useRef<MapRef | null>(null);
+  const [ready, setReady] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   const [locating, setLocating] = useState(false);
   const [geoError, setGeoError] = useState("");
+  const [reducedMotion] = useState(() => prefersReducedMotion());
 
-  const useMyLocation = useCallback(() => {
+  let styleUrl: string | null = null;
+  let styleError: string | null = null;
+
+  try {
+    styleUrl = resolveMapStyleUrl(import.meta.env.VITE_MAP_STYLE_URL);
+  } catch (error) {
+    styleError = error instanceof Error ? error.message : "Invalid map style URL.";
+  }
+
+  const moveCamera = useCallback(
+    (longitude: number, latitude: number) => {
+      const map = mapRef.current?.getMap();
+
+      if (map === undefined || map === null) return;
+
+      const zoom = Math.max(map.getZoom(), 14);
+
+      if (reducedMotion) {
+        map.jumpTo({ center: [longitude, latitude], zoom });
+      } else {
+        map.easeTo({ center: [longitude, latitude], zoom, duration: 300 });
+      }
+    },
+    [reducedMotion],
+  );
+
+  useEffect(() => {
+    if (frame === null) return;
+
+    moveCamera(frame.longitude, frame.latitude);
+  }, [frame, moveCamera]);
+
+  // The dialog can mount the map while its container is still settling;
+  // force a resize once tiles start loading and once more right after so
+  // the canvas never stays a blank white rectangle.
+  useEffect(() => {
+    if (!ready || failed) return;
+
+    const map = mapRef.current?.getMap();
+
+    if (map === undefined || map === null) return;
+
+    map.resize();
+    const timer = setTimeout(() => {
+      map.resize();
+    }, 150);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [ready, retryKey, failed]);
+
+  const useMyLocation = () => {
+    if (disabled) return;
+
     setLocating(true);
     setGeoError("");
     requestUserPosition()
       .then((position) => {
-        onPick(position.longitude, position.latitude);
+        onMapPick(position.longitude, position.latitude);
+        moveCamera(position.longitude, position.latitude);
       })
       .catch(() => {
-        setGeoError("Could not read your location. Drag the pin instead.");
+        setGeoError("Could not read your location. Drag the pin or type coordinates instead.");
       })
       .finally(() => {
         setLocating(false);
       });
-  }, [onPick]);
+  };
 
-  const style = z.url().safeParse(import.meta.env.VITE_MAP_STYLE_URL);
+  const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
+    const text = event.clipboardData.getData("text");
 
-  if (!style.success) {
-    return (
-      <p className="text-sm text-muted" aria-live="polite">
-        Map tiles are not configured here. Enter the branch address, then refine the pin with your
-        device location.
-      </p>
-    );
-  }
+    if (!text.includes(",") && !text.includes(";")) return;
+
+    event.preventDefault();
+    onPairPaste(text);
+  };
 
   return (
-    <div className="flex flex-col gap-2">
-      <div
-        className="h-64 overflow-hidden rounded-xl border border-border-soft"
-        aria-label="Branch location picker"
-      >
-        <Map
-          mapLib={import("maplibre-gl")}
-          mapStyle={style.data}
-          initialViewState={{ longitude, latitude, zoom: 14 }}
-          attributionControl={{ compact: true }}
-          onClick={(event) => {
-            onPick(event.lngLat.lng, event.lngLat.lat);
-          }}
-        >
-          <NavigationControl position="top-right" />
-          <Marker
-            longitude={longitude}
-            latitude={latitude}
-            draggable
-            onDragEnd={(event) => {
-              onPick(event.lngLat.lng, event.lngLat.lat);
-            }}
+    <>
+      <fieldset className="flex flex-col gap-2">
+        <legend className="text-sm font-semibold">Coordinates</legend>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <AdminField
+            id="venue-latitude"
+            label="Latitude"
+            value={latitudeText}
+            placeholder="10.7769"
+            inputMode="decimal"
+            autoComplete="off"
+            spellCheck={false}
+            required
+            disabled={disabled}
+            error={latitudeError}
+            onChange={(event) => onLatitudeText(event.target.value)}
+            onPaste={handlePaste}
           />
-        </Map>
-      </div>
-      <p className="text-sm text-muted" aria-live="polite">
-        Pin: {latitude.toFixed(5)}, {longitude.toFixed(5)}. Click the map or drag the pin; no typed
-        coordinates needed.
-      </p>
-      <div>
-        <AdminGhostButton type="button" disabled={locating} onClick={useMyLocation}>
-          {locating ? "Locating…" : "Use my location"}
-        </AdminGhostButton>
-      </div>
-      {geoError !== "" && (
-        <p role="alert" className="text-sm font-semibold text-red-800">
-          {geoError}
+          <AdminField
+            id="venue-longitude"
+            label="Longitude"
+            value={longitudeText}
+            placeholder="106.7009"
+            inputMode="decimal"
+            autoComplete="off"
+            spellCheck={false}
+            required
+            disabled={disabled}
+            error={longitudeError}
+            onChange={(event) => onLongitudeText(event.target.value)}
+            onPaste={handlePaste}
+          />
+        </div>
+        <p className="text-sm text-muted">
+          Decimal degrees, e.g. 10.7769, 106.7009. You can also paste a “lat, lng” pair into either
+          field, or pick the pin on the map.
         </p>
-      )}
-    </div>
+        {areaWarning !== null && (
+          <p role="status" className="text-sm font-semibold text-amber-800">
+            {areaWarning}
+          </p>
+        )}
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-2">
+        <legend className="text-sm font-semibold">Map location</legend>
+        {styleError !== null || styleUrl === null ? (
+          <div role="alert" className="rounded-xl border border-border-soft bg-white px-3 py-2">
+            <p className="text-sm font-semibold text-red-800">{styleError ?? "Map unavailable."}</p>
+            <p className="mt-1 text-sm text-muted">
+              Type the coordinates above — valid manual coordinates can still be saved.
+            </p>
+          </div>
+        ) : failed ? (
+          <div
+            role="alert"
+            className="flex flex-col gap-2 rounded-xl border border-border-soft bg-white px-3 py-2"
+          >
+            <p className="text-sm font-semibold text-red-800">
+              The map could not load its tiles. The coordinates above are unaffected.
+            </p>
+            <div>
+              <AdminGhostButton
+                type="button"
+                onClick={() => {
+                  setFailed(false);
+                  setReady(false);
+                  setRetryKey((key) => key + 1);
+                }}
+              >
+                Retry map
+              </AdminGhostButton>
+            </div>
+          </div>
+        ) : (
+          <div
+            className="relative h-64 w-full overflow-hidden rounded-xl border border-border-soft"
+            aria-label="Branch location picker"
+          >
+            <Map
+              key={retryKey}
+              ref={mapRef}
+              mapLib={maplibre}
+              workerUrl={workerUrl}
+              mapStyle={styleUrl}
+              initialViewState={{
+                longitude: marker.longitude,
+                latitude: marker.latitude,
+                zoom: 14,
+              }}
+              style={{ width: "100%", height: "100%" }}
+              attributionControl={{ compact: true }}
+              onLoad={() => {
+                const map = mapRef.current?.getMap();
+
+                if (map !== undefined && map !== null) {
+                  applyWarmBasemap(map);
+                  map.resize();
+                }
+
+                setReady(true);
+              }}
+              onError={() => setFailed(true)}
+              onClick={(event) => {
+                if (!disabled) onMapPick(event.lngLat.lng, event.lngLat.lat);
+              }}
+            >
+              <NavigationControl position="top-right" />
+              <Marker
+                longitude={marker.longitude}
+                latitude={marker.latitude}
+                draggable={!disabled}
+                onDragEnd={(event) => {
+                  onMapPick(event.lngLat.lng, event.lngLat.lat);
+                }}
+              />
+            </Map>
+            {!ready && (
+              <p
+                role="status"
+                className="absolute inset-0 flex items-center justify-center bg-white/70 text-sm text-muted"
+              >
+                Loading map…
+              </p>
+            )}
+          </div>
+        )}
+        <div>
+          <AdminGhostButton type="button" disabled={disabled || locating} onClick={useMyLocation}>
+            {locating ? "Locating…" : "Use my location"}
+          </AdminGhostButton>
+        </div>
+        {geoError !== "" && (
+          <p role="alert" className="text-sm font-semibold text-red-800">
+            {geoError}
+          </p>
+        )}
+      </fieldset>
+    </>
   );
 }
 
@@ -187,6 +441,23 @@ export function RestaurantEditor({
 }) {
   const editing = venue !== null;
 
+  /**
+   * Initialization precedence (§5). The route remounts this editor with a
+   * fresh `key` for every branch, so these initializers run once per
+   * opened branch and never carry coordinates over from another branch:
+   * 1. Editing → the branch's persisted, schema-validated coordinates.
+   * 2. New branch → the documented neutral fallback (Vietnam country
+   *    preset); no flow currently supplies explicit coordinates and the
+   *    free-text area cannot reliably select a city preset, so no silent
+   *    geolocation or address-derived relocation happens here.
+   * Corrupt persisted coordinates keep their raw text visible and block
+   * saving with an explicit error instead of silently relocating the pin.
+   */
+  const persistedValid =
+    venue === null
+      ? null
+      : coordinatePairSchema.safeParse({ latitude: venue.latitude, longitude: venue.longitude });
+
   const [businessMode, setBusinessMode] = useState<"existing" | "new">(
     editing ? "existing" : "new",
   );
@@ -197,11 +468,141 @@ export function RestaurantEditor({
   const [address, setAddress] = useState(venue?.address ?? "");
   const [area, setArea] = useState(venue?.area ?? "");
   const [countryCode, setCountryCode] = useState(venue?.countryCode ?? "VN");
-  const [longitude, setLongitude] = useState(venue?.longitude ?? DEFAULT_MAP_CENTER.longitude);
-  const [latitude, setLatitude] = useState(venue?.latitude ?? DEFAULT_MAP_CENTER.latitude);
+  const [committed, setCommitted] = useState<CommittedCoordinates>(() =>
+    persistedValid !== null && persistedValid.success
+      ? { longitude: persistedValid.data.longitude, latitude: persistedValid.data.latitude }
+      : { longitude: DEFAULT_MAP_CENTER.longitude, latitude: DEFAULT_MAP_CENTER.latitude },
+  );
+  const [latitudeText, setLatitudeText] = useState(() =>
+    venue === null ? String(DEFAULT_MAP_CENTER.latitude) : String(venue.latitude),
+  );
+  const [longitudeText, setLongitudeText] = useState(() =>
+    venue === null ? String(DEFAULT_MAP_CENTER.longitude) : String(venue.longitude),
+  );
+  const [frame, setFrame] = useState<CameraFrame | null>(null);
   const [status, setStatus] = useState<EditorVenue["status"]>(venue?.status ?? "draft");
   const [cuisineIds, setCuisineIds] = useState<ReadonlyArray<string>>(venue?.cuisineIds ?? []);
-  const [formError, setFormError] = useState("");
+  const [formError, setFormError] = useState(() =>
+    venue !== null && !(persistedValid !== null && persistedValid.success)
+      ? "The saved coordinates for this branch look invalid. Enter a valid latitude and longitude, then save."
+      : "",
+  );
+
+  const frameKey = useRef(0);
+  const cameraTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (cameraTimer.current !== null) clearTimeout(cameraTimer.current);
+    },
+    [],
+  );
+
+  const parsedLatitude = parseCoordinateText(latitudeText);
+  const parsedLongitude = parseCoordinateText(longitudeText);
+  const coordsValid = coordinatePairSchema.safeParse({
+    latitude: parsedLatitude,
+    longitude: parsedLongitude,
+  }).success;
+
+  const latitudeError =
+    latitudeText.trim() === ""
+      ? "Latitude is required."
+      : latitudeSchema.safeParse(parsedLatitude).success
+        ? null
+        : "Enter a latitude between -90 and 90.";
+  const longitudeError =
+    longitudeText.trim() === ""
+      ? "Longitude is required."
+      : longitudeSchema.safeParse(parsedLongitude).success
+        ? null
+        : "Enter a longitude between -180 and 180.";
+
+  const areaWarning = areaWarningFor(area, committed);
+
+  const scheduleFrame = (longitude: number, latitude: number) => {
+    if (cameraTimer.current !== null) clearTimeout(cameraTimer.current);
+
+    // Debounced so typing a valid intermediate prefix never thrashes the
+    // camera; map picks and geolocation move it immediately instead.
+    cameraTimer.current = setTimeout(() => {
+      frameKey.current += 1;
+      setFrame({ key: frameKey.current, longitude, latitude });
+    }, 500);
+  };
+
+  const commitPair = (longitude: number, latitude: number) => {
+    setCommitted({ longitude, latitude });
+    setLatitudeText(String(latitude));
+    setLongitudeText(String(longitude));
+  };
+
+  /** Map click / marker drag: the map is already showing the picked point,
+   *  so only the committed pair and fields update — no camera request. */
+  const handleMapPick = (longitude: number, latitude: number) => {
+    if (cameraTimer.current !== null) {
+      clearTimeout(cameraTimer.current);
+      cameraTimer.current = null;
+    }
+
+    commitPair(longitude, latitude);
+  };
+
+  /** Typed input: raw text is kept verbatim (a lone "-" or "10." never
+   *  resets), the marker follows only complete schema-valid pairs, and the
+   *  last valid pin stays put while the text is incomplete. */
+  const handleLatitudeText = (raw: string) => {
+    setLatitudeText(raw);
+
+    const parsed = coordinatePairSchema.safeParse({
+      latitude: parseCoordinateText(raw),
+      longitude: parsedLongitude,
+    });
+
+    if (parsed.success) {
+      setCommitted({ longitude: parsed.data.longitude, latitude: parsed.data.latitude });
+      scheduleFrame(parsed.data.longitude, parsed.data.latitude);
+    }
+  };
+
+  const handleLongitudeText = (raw: string) => {
+    setLongitudeText(raw);
+
+    const parsed = coordinatePairSchema.safeParse({
+      latitude: parsedLatitude,
+      longitude: parseCoordinateText(raw),
+    });
+
+    if (parsed.success) {
+      setCommitted({ longitude: parsed.data.longitude, latitude: parsed.data.latitude });
+      scheduleFrame(parsed.data.longitude, parsed.data.latitude);
+    }
+  };
+
+  const handlePairPaste = (pasted: string) => {
+    const parts = pasted
+      .split(/[,;]/)
+      .map((part) => part.trim())
+      .filter((part) => part !== "");
+
+    if (parts.length !== 2) return;
+
+    const first = parts[0] ?? "";
+    const second = parts[1] ?? "";
+
+    setLatitudeText(first);
+    setLongitudeText(second);
+
+    const parsed = coordinatePairSchema.safeParse({
+      latitude: Number(first),
+      longitude: Number(second),
+    });
+
+    if (parsed.success) {
+      setCommitted({ longitude: parsed.data.longitude, latitude: parsed.data.latitude });
+      scheduleFrame(parsed.data.longitude, parsed.data.latitude);
+    }
+  };
 
   const toggleCuisine = (id: string) => {
     if (cuisineIds.includes(id)) {
@@ -214,6 +615,16 @@ export function RestaurantEditor({
   const save = (nextStatus: EditorVenue["status"]) => {
     const trimmedBusiness = businessName.trim();
 
+    if (parsedLatitude === null || parsedLongitude === null) {
+      setFormError(
+        latitudeError ?? longitudeError ?? "Enter a valid latitude and longitude.",
+      );
+
+      return;
+    }
+
+    // Submit gating runs through the domain schema: raw text converts
+    // strictly (empty → null, "12abc" → NaN) and the schema decides.
     const parsed = venueWriteSchema.safeParse({
       venueId: venue?.id,
       businessId: editing || businessMode === "existing" ? businessId || undefined : undefined,
@@ -225,8 +636,8 @@ export function RestaurantEditor({
       address,
       area,
       countryCode: countryCode.toUpperCase(),
-      longitude,
-      latitude,
+      longitude: parsedLongitude,
+      latitude: parsedLatitude,
       status: nextStatus,
       cuisineIds,
     });
@@ -359,48 +770,54 @@ export function RestaurantEditor({
           disabled={busy}
           onChange={(event) => setName(event.target.value)}
         />
-        <AdminField
-          id="venue-address"
-          label="Street address"
-          value={address}
-          maxLength={1000}
-          required
-          disabled={busy}
-          onChange={(event) => setAddress(event.target.value)}
-        />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <AdminField
-            id="venue-area"
-            label="City / area"
-            value={area}
-            maxLength={200}
-            required
-            disabled={busy}
-            onChange={(event) => setArea(event.target.value)}
-          />
-          <AdminField
-            id="venue-country"
-            label="Country ISO code"
-            value={countryCode}
-            maxLength={2}
-            required
-            pattern="[A-Z]{2}"
-            disabled={busy}
-            onChange={(event) => setCountryCode(event.target.value.toUpperCase())}
-          />
-        </div>
-
         <fieldset className="flex flex-col gap-2">
-          <legend className="text-sm font-semibold">Map location</legend>
-          <CoordinatePicker
-            longitude={longitude}
-            latitude={latitude}
-            onPick={(nextLongitude, nextLatitude) => {
-              setLongitude(nextLongitude);
-              setLatitude(nextLatitude);
-            }}
+          <legend className="text-sm font-semibold">Location details</legend>
+          <AdminField
+            id="venue-address"
+            label="Street address"
+            value={address}
+            maxLength={1000}
+            required
+            disabled={busy}
+            onChange={(event) => setAddress(event.target.value)}
           />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <AdminField
+              id="venue-area"
+              label="City / area"
+              value={area}
+              maxLength={200}
+              required
+              disabled={busy}
+              onChange={(event) => setArea(event.target.value)}
+            />
+            <AdminField
+              id="venue-country"
+              label="Country ISO code"
+              value={countryCode}
+              maxLength={2}
+              required
+              pattern="[A-Z]{2}"
+              disabled={busy}
+              onChange={(event) => setCountryCode(event.target.value.toUpperCase())}
+            />
+          </div>
         </fieldset>
+
+        <CoordinatePicker
+          marker={committed}
+          latitudeText={latitudeText}
+          longitudeText={longitudeText}
+          latitudeError={latitudeError}
+          longitudeError={longitudeError}
+          areaWarning={areaWarning}
+          disabled={busy}
+          frame={frame}
+          onLatitudeText={handleLatitudeText}
+          onLongitudeText={handleLongitudeText}
+          onPairPaste={handlePairPaste}
+          onMapPick={handleMapPick}
+        />
 
         <fieldset className="flex flex-col gap-2">
           <legend className="text-sm font-semibold">
@@ -530,18 +947,19 @@ export function RestaurantEditor({
           </AdminGhostButton>
           <AdminSecondaryButton
             type="button"
-            disabled={busy}
+            disabled={busy || !coordsValid}
             onClick={() => save("draft")}
             aria-busy={busy}
+            title={coordsValid ? undefined : "Enter valid coordinates before saving"}
           >
             {editing ? "Save as draft" : "Save draft"}
           </AdminSecondaryButton>
           <AdminPrimaryButton
             type="button"
-            disabled={busy}
+            disabled={busy || !coordsValid}
             onClick={() => save(status)}
             aria-busy={busy}
-            title={statusLabel(status)}
+            title={coordsValid ? statusLabel(status) : "Enter valid coordinates before saving"}
           >
             {editing
               ? `Save (${statusLabel(status).toLowerCase()})`
