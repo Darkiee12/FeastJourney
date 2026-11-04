@@ -8,6 +8,8 @@ import {
 import { useMemo } from "react";
 import { z } from "zod";
 
+import { toCarouselPublishedImage } from "@/components/dish/dish-carousel";
+import { DishMedia } from "@/components/dish/dish-media";
 import { getDishFn } from "@/modules/food-discovery/food.functions";
 import type { DishProfile } from "@/modules/food-discovery/server/domain/dish";
 import { DishPriceActions } from "@/modules/restaurant-discovery/components/dish-price-actions";
@@ -56,7 +58,7 @@ export const Route = createFileRoute("/dishes/$dishId")({
 function DishShell({ children }: { readonly children: React.ReactNode }) {
   return (
     <div
-      className="mx-auto w-full max-w-2xl px-5 pt-10"
+      className="dish-page mx-auto w-full max-w-5xl px-5 pt-8"
       style={{ paddingBottom: "max(4rem, env(safe-area-inset-bottom))" }}
     >
       {children}
@@ -180,197 +182,188 @@ function DishDetail() {
 
   const detailFavorites = useFavoriteStatus([dish.id], detailUserId);
 
+  const originPlace = dish.places.find((entry) => entry.kind === "country") ?? dish.places[0];
+  const region = originPlace?.name ?? originPlace?.iso3166 ?? null;
+  const photo = toCarouselPublishedImage(dish.image, dish.id);
+
   return (
     <DishShell>
       <BackLink />
-      <h1 className="font-display text-[clamp(2.25rem,7vw,3.5rem)] leading-none tracking-wide text-balance">
-        {title}
-      </h1>
-      {showEnglish ? (
-        <p className="mt-2 text-lg font-semibold text-food-orange-strong">{dish.englishName}</p>
-      ) : null}
-      {nativeNames.length > 0 ? (
-        <ul className="mt-3 flex flex-wrap gap-2" lang="mul">
-          {nativeNames.map((entry) => (
-            <li
-              key={`${entry.languageTag}:${entry.name}`}
-              lang={entry.languageTag}
-              className="rounded-full border border-border-soft bg-cream px-3 py-1 text-xs font-bold text-muted"
-            >
-              {entry.name}
-            </li>
-          ))}
-        </ul>
-      ) : null}
+      <article className="dish-passport">
+        <div className="dish-passport-photo">
+          {photo === null ? (
+            <span aria-hidden="true" className="dish-passport-initial">
+              {Array.from(title)[0] ?? ""}
+            </span>
+          ) : (
+            <DishMedia
+              image={photo}
+              eager
+              sizes="(max-width: 768px) 100vw, 45vw"
+              unavailableLabel={copy.carouselPhotoSoon}
+              loadingLabel={copy.discoverLocalLoading}
+              className="absolute inset-0 h-full w-full"
+            />
+          )}
+          {region !== null ? <p className="dish-stamp">{region}</p> : null}
+        </div>
+        <div className="dish-passport-body">
+          <h1 className="dish-passport-title font-display">{title}</h1>
+          {showEnglish ? <p className="dish-passport-english">{dish.englishName}</p> : null}
+          {nativeNames.length > 0 ? (
+            <ul className="dish-passport-native" lang="mul">
+              {nativeNames.map((entry) => (
+                <li key={`${entry.languageTag}:${entry.name}`} lang={entry.languageTag}>
+                  {entry.name}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="dish-passport-actions">
+            <DishPriceActions
+              dishId={dish.id}
+              dishSlug={dish.slug}
+              lang={lang}
+              restaurantsLabel={lang === "vi" ? "Nhà hàng" : "Restaurants"}
+              compareLabel={lang === "vi" ? "So sánh giá" : "Compare prices"}
+            />
+            <SaveDishButton
+              dishId={dish.id}
+              lang={lang}
+              returnTo={`/dishes/${dish.slug}`}
+              session={session}
+              status={statusForDish(detailFavorites, dish.id)}
+            />
+          </div>
+          <p className="dish-passport-updated">
+            {copy.dishUpdated}:{" "}
+            <time dateTime={new Date(dish.lastUpdate * 1000).toISOString()}>{updatedLabel}</time>
+          </p>
+        </div>
+      </article>
 
-      <p className="mt-3 text-xs font-semibold text-muted">
-        {copy.dishUpdated}:{" "}
-        <time dateTime={new Date(dish.lastUpdate * 1000).toISOString()}>{updatedLabel}</time>
-      </p>
+      <div className="dish-sheet">
+        <div className="dish-sheet-main">
+          {dish.description !== null ? (
+            <section aria-labelledby="dish-about" className="dish-panel">
+              <h2 id="dish-about" className="dish-panel-title font-display">
+                {copy.dishAbout}
+              </h2>
+              <p lang={dish.descriptionLanguage ?? undefined} className="dish-about-text">
+                {dish.description}
+              </p>
+            </section>
+          ) : null}
 
-      <DishPriceActions
-        dishId={dish.id}
-        dishSlug={dish.slug}
-        lang={lang}
-        restaurantsLabel={lang === "vi" ? "Nhà hàng" : "Restaurants"}
-        compareLabel={lang === "vi" ? "So sánh giá" : "Compare prices"}
-      />
-      <div className="mt-5">
-        <SaveDishButton
-          dishId={dish.id}
-          lang={lang}
-          returnTo={`/dishes/${dish.slug}`}
-          session={session}
-          status={statusForDish(detailFavorites, dish.id)}
-        />
+          <section aria-labelledby="dish-ingredients" className="dish-panel">
+            <h2 id="dish-ingredients" className="dish-panel-title font-display">
+              {copy.dishIngredients}
+            </h2>
+            {dish.ingredients.length === 0 ? (
+              <p className="dish-panel-empty">
+                No ingredient information is available for this dish yet — always confirm with the
+                people making your food.
+              </p>
+            ) : (
+              <ul className="dish-ingredients">
+                {dish.ingredients.map((entry) => (
+                  <li key={entry.id} data-role={entry.role}>
+                    {entry.name ?? "Unnamed ingredient"}
+                    <span>{entry.role}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+
+        <aside className="dish-sheet-side">
+          {dish.places.length > 0 ? (
+            <section aria-labelledby="dish-places" className="dish-panel">
+              <h2 id="dish-places" className="dish-panel-title font-display">
+                {copy.dishPlaces}
+              </h2>
+              <ul className="dish-place-stamps">
+                {dish.places.map((entry) => (
+                  <li key={entry.id}>
+                    <span className="dish-place-name">
+                      {entry.name ?? entry.iso3166 ?? entry.id}
+                    </span>
+                    <span className="dish-place-meta">
+                      {entry.association}
+                      {entry.isDisputed ? " · disputed" : null}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          {dish.cuisines.length > 0 || dish.categories.length > 0 ? (
+            <section aria-labelledby="dish-taxonomy" className="dish-panel">
+              <h2 id="dish-taxonomy" className="sr-only">
+                {copy.dishCuisines} · {copy.dishCategories}
+              </h2>
+              {dish.cuisines.length > 0 ? (
+                <>
+                  <h3 className="dish-panel-label">{copy.dishCuisines}</h3>
+                  <ul className="dish-chips">
+                    {dish.cuisines.map((entry) => (
+                      <li key={entry.id}>{entry.name ?? entry.slug}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+              {dish.categories.length > 0 ? (
+                <>
+                  <h3 className="dish-panel-label">{copy.dishCategories}</h3>
+                  <ul className="dish-chips">
+                    {dish.categories.map((entry) => (
+                      <li key={entry.id}>{entry.name ?? entry.slug}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+            </section>
+          ) : null}
+
+          <details className="dish-panel dish-sources">
+            <summary id="dish-sources">{copy.dishSources}</summary>
+            {dish.sources.length === 0 ? (
+              <p className="dish-panel-empty">No sources are listed for this dish yet.</p>
+            ) : (
+              <ul>
+                {dish.sources.map((entry) => (
+                  <li key={entry.recordId}>
+                    <p className="font-bold text-ink">
+                      {entry.provider}
+                      {entry.externalId.length > 0 ? ` · ${entry.externalId}` : null}
+                    </p>
+                    {entry.attribution !== null ? (
+                      <p className="mt-1 text-muted">{entry.attribution}</p>
+                    ) : null}
+                    {entry.license !== null ? (
+                      <p className="mt-1 text-xs font-bold text-muted">License: {entry.license}</p>
+                    ) : null}
+                    {entry.canonicalUrl !== null ? (
+                      <p className="mt-1">
+                        <a
+                          href={entry.canonicalUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-bold text-brand-blue-hover underline underline-offset-4"
+                        >
+                          Source link
+                        </a>
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </details>
+        </aside>
       </div>
-
-      {dish.description !== null ? (
-        <section aria-labelledby="dish-about" className="mt-6">
-          <h2 id="dish-about" className="font-display text-2xl tracking-wide">
-            {copy.dishAbout}
-          </h2>
-          <p
-            lang={dish.descriptionLanguage ?? undefined}
-            className="mt-2 max-w-[60ch] text-base leading-relaxed text-ink"
-          >
-            {dish.description}
-          </p>
-        </section>
-      ) : null}
-
-      <section aria-labelledby="dish-ingredients" className="mt-6">
-        <h2 id="dish-ingredients" className="font-display text-2xl tracking-wide">
-          {copy.dishIngredients}
-        </h2>
-        {dish.ingredients.length === 0 ? (
-          <p className="mt-2 max-w-[60ch] text-base text-muted">
-            No ingredient information is available for this dish yet — always confirm with the
-            people making your food.
-          </p>
-        ) : (
-          <ul className="mt-3 grid gap-2">
-            {dish.ingredients.map((entry) => (
-              <li
-                key={entry.id}
-                className="flex flex-wrap items-center gap-2 rounded-2xl border border-border-soft bg-white px-4 py-2 text-sm"
-              >
-                <span className="font-bold text-ink">{entry.name ?? "Unnamed ingredient"}</span>
-                <span className="rounded-full border border-border-soft bg-cream px-3 py-1 text-xs font-bold text-muted">
-                  {entry.role}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {dish.cuisines.length > 0 || dish.categories.length > 0 ? (
-        <section aria-labelledby="dish-taxonomy" className="mt-6">
-          <h2 id="dish-taxonomy" className="sr-only">
-            {copy.dishCuisines} · {copy.dishCategories}
-          </h2>
-          {dish.cuisines.length > 0 ? (
-            <div className="mt-2">
-              <h3 className="text-sm font-bold text-ink">{copy.dishCuisines}</h3>
-              <ul className="mt-2 flex flex-wrap gap-2">
-                {dish.cuisines.map((entry) => (
-                  <li
-                    key={entry.id}
-                    className="rounded-full border border-border-soft bg-cream px-3 py-1 text-xs font-bold text-muted"
-                  >
-                    {entry.name ?? entry.slug}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {dish.categories.length > 0 ? (
-            <div className="mt-4">
-              <h3 className="text-sm font-bold text-ink">{copy.dishCategories}</h3>
-              <ul className="mt-2 flex flex-wrap gap-2">
-                {dish.categories.map((entry) => (
-                  <li
-                    key={entry.id}
-                    className="rounded-full border border-border-soft bg-cream px-3 py-1 text-xs font-bold text-muted"
-                  >
-                    {entry.name ?? entry.slug}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      {dish.places.length > 0 ? (
-        <section aria-labelledby="dish-places" className="mt-6">
-          <h2 id="dish-places" className="font-display text-2xl tracking-wide">
-            {copy.dishPlaces}
-          </h2>
-          <ul className="mt-3 grid gap-3">
-            {dish.places.map((entry) => (
-              <li
-                key={entry.id}
-                className="rounded-2xl border border-border-soft bg-white px-4 py-3 text-sm"
-              >
-                <p className="font-bold text-ink">{entry.name ?? entry.iso3166 ?? entry.id}</p>
-                {entry.iso3166 !== null && entry.name !== undefined ? (
-                  <p className="mt-1 text-muted">{entry.iso3166}</p>
-                ) : null}
-                <p className="mt-1 text-xs font-semibold text-muted">
-                  {entry.association}
-                  {entry.kind.length > 0 ? ` · ${entry.kind}` : null}
-                  {entry.isDisputed ? " · disputed" : null}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      <section aria-labelledby="dish-sources" className="mt-6">
-        <h2 id="dish-sources" className="font-display text-2xl tracking-wide">
-          {copy.dishSources}
-        </h2>
-        {dish.sources.length === 0 ? (
-          <p className="mt-2 max-w-[60ch] text-base text-muted">
-            No sources are listed for this dish yet.
-          </p>
-        ) : (
-          <ul className="mt-3 grid gap-3">
-            {dish.sources.map((entry) => (
-              <li
-                key={entry.recordId}
-                className="rounded-2xl border border-border-soft bg-white px-4 py-3 text-sm"
-              >
-                <p className="font-bold text-ink">
-                  {entry.provider}
-                  {entry.externalId.length > 0 ? ` · ${entry.externalId}` : null}
-                </p>
-                {entry.attribution !== null ? (
-                  <p className="mt-1 text-muted">{entry.attribution}</p>
-                ) : null}
-                {entry.license !== null ? (
-                  <p className="mt-1 text-xs font-bold text-muted">License: {entry.license}</p>
-                ) : null}
-                {entry.canonicalUrl !== null ? (
-                  <p className="mt-1">
-                    <a
-                      href={entry.canonicalUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-bold text-brand-blue-hover underline underline-offset-4"
-                    >
-                      Source link
-                    </a>
-                  </p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
     </DishShell>
   );
 }

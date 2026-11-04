@@ -120,4 +120,6 @@ export interface DishProfile {
   readonly categories: ReadonlyArray<DishCategory>;
   readonly sources: ReadonlyArray<DishSource>;
   readonly lastUpdate: number;
+  /** Primary published photo; only the public dish page requests it. */
+  readonly image?: DishCardImage | null | undefined;
 }

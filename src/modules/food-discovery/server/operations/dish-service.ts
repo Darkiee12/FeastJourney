@@ -708,8 +708,17 @@ export const DishServiceLive = Layer.effect(
       Effect.gen(function* () {
         const checkedLocale = yield* checkLocale(locale);
         const record = yield* resolveRecord(idOrSlug);
+        const profile = yield* assembleProfile(record, checkedLocale, true);
+        const mediaRow = (yield* relations.publishedMediaByDishIds([record.id]))[0];
+        const projected = mediaRow === undefined ? null : toPublishedImage(mediaRow);
 
-        return yield* assembleProfile(record, checkedLocale, true);
+        return {
+          ...profile,
+          image:
+            projected === null
+              ? null
+              : { ...projected, alt: projected.alt ?? profile.name ?? record.slug },
+        };
       });
 
     const getDishForCuration = (

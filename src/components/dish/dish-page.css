@@ -1,0 +1,354 @@
+/* Dish page — a passport page for one dish, in the language of
+ * home-overhaul.css: the hero pairs the photo and its entry stamp with a navy
+ * panel, and the sheet below keeps the story on the left and origin stamps on
+ * the right. Unlayered, so it beats utilities and the shared action styles.
+ */
+
+.app-shell:has(.dish-page) {
+  background:
+    radial-gradient(rgb(23 32 51 / 0.09) 1px, transparent 1.4px) 0 0 / 16px 16px,
+    var(--color-cream);
+}
+
+/* Back reads as the same mango pill as the restaurant panels. */
+.dish-page > p:first-child {
+  margin-block-end: 1rem;
+}
+
+.dish-page > p:first-child :is(a, button) {
+  min-height: 2.5rem;
+  padding: 0.25rem 1rem;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  background: var(--fj-mango-soft);
+  color: var(--fj-ink);
+  box-shadow: 2px 2px 0 var(--fj-ink);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* ------------------------------------------------------------- hero --- */
+
+.dish-passport {
+  display: grid;
+  grid-template-columns: minmax(0, 45fr) minmax(0, 55fr);
+  min-height: 24rem;
+  border: var(--fj-line);
+  border-radius: 1.5rem;
+  background: var(--color-space-deep);
+  box-shadow: 6px 6px 0 var(--color-mango);
+  overflow: hidden;
+}
+
+.dish-passport-photo {
+  position: relative;
+  display: grid;
+  place-content: center;
+  min-height: 15rem;
+  border-right: var(--fj-line);
+  background:
+    radial-gradient(
+        color-mix(in srgb, var(--color-food-orange) 22%, transparent) 2px,
+        transparent 2.5px
+      )
+      0 0 / 18px 18px,
+    var(--fj-mango-soft);
+  overflow: hidden;
+}
+
+/* No published photo: an oversized initial instead of an empty frame. */
+.dish-passport-initial {
+  font-family: var(--font-display);
+  font-size: clamp(7rem, 16vw, 11rem);
+  line-height: 1;
+  color: var(--color-food-orange-strong);
+  text-shadow: 0.05em 0.05em 0 var(--fj-ink);
+  rotate: -6deg;
+}
+
+.dish-passport-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: clamp(1.5rem, 3.5vw, 2.5rem);
+  color: white;
+}
+
+.dish-passport-title {
+  font-size: clamp(2.5rem, 6vw, 4rem);
+  line-height: 1;
+  letter-spacing: 0.015em;
+  overflow-wrap: anywhere;
+  text-shadow: 0.05em 0.05em 0 var(--color-food-orange-strong);
+}
+
+.dish-passport-english {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--color-mango);
+}
+
+.dish-passport-native {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dish-passport-native li {
+  padding: 0.15rem 0.75rem;
+  border: 2px solid var(--fj-night);
+  border-radius: 9999px;
+  background: var(--color-mango);
+  color: var(--fj-ink);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.dish-passport-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-block-start: auto;
+  padding-block-start: 1rem;
+}
+
+.dish-passport-actions .dish-price-actions {
+  margin: 0;
+  gap: 0.6rem;
+}
+
+.dish-passport-actions :is(a, button) {
+  min-height: 2.75rem;
+  border: 2px solid var(--fj-night);
+  border-radius: 9999px;
+  background: white;
+  color: var(--fj-ink);
+  box-shadow: 3px 3px 0 var(--fj-night);
+  font-size: 0.9rem;
+  font-weight: 700;
+  transition:
+    translate 100ms ease-out,
+    box-shadow 100ms ease-out;
+}
+
+/* Finding a place to eat it is the page's main job. */
+.dish-passport-actions .dish-price-action:first-child {
+  background: var(--color-food-orange-strong);
+  color: white;
+}
+
+.dish-passport-actions :is(a, button):hover {
+  background: white;
+  color: var(--fj-ink);
+  translate: -1px -1px;
+  box-shadow: 4px 4px 0 var(--fj-night);
+}
+
+.dish-passport-actions .dish-price-action:first-child:hover {
+  background: var(--color-food-orange-strong);
+  color: white;
+}
+
+.dish-passport-actions :is(a, button):active {
+  translate: 2px 2px;
+  box-shadow: none;
+}
+
+.dish-passport-updated {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-muted-on-dark);
+}
+
+/* ------------------------------------------------------------ sheet --- */
+
+.dish-sheet {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 1.25rem;
+  margin-block-start: 1.75rem;
+}
+
+.dish-sheet-main,
+.dish-sheet-side {
+  display: grid;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
+.dish-panel {
+  padding: 1.25rem 1.35rem;
+  border: var(--fj-line);
+  border-radius: 1.1rem;
+  background: white;
+  box-shadow: 4px 4px 0 var(--fj-ink);
+}
+
+.dish-panel-title {
+  width: fit-content;
+  margin-block-end: 0.75rem;
+  padding: 0 0.15em;
+  font-size: 1.75rem;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+  background: linear-gradient(
+    transparent 54%,
+    var(--fj-highlight) 54%,
+    var(--fj-highlight) 90%,
+    transparent 90%
+  );
+}
+
+.dish-panel-label {
+  margin-block: 0.9rem 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.dish-panel-label:first-of-type {
+  margin-block-start: 0;
+}
+
+.dish-about-text {
+  max-width: 60ch;
+  font-size: 1.08rem;
+  line-height: 1.65;
+}
+
+.dish-panel-empty {
+  color: var(--color-muted);
+}
+
+.dish-ingredients,
+.dish-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dish-ingredients li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.85rem;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  background: white;
+  box-shadow: 2px 2px 0 var(--fj-ink);
+  font-weight: 700;
+}
+
+.dish-ingredients li[data-role="core"] {
+  background: var(--color-mango);
+}
+
+.dish-ingredients li span {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--fj-ink) 65%, transparent);
+}
+
+.dish-chips li {
+  padding: 0.2rem 0.75rem;
+  border-radius: 9999px;
+  background: var(--color-space-deep);
+  color: white;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+/* Origin places as entry stamps, tilted alternately like a real passport. */
+.dish-place-stamps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  margin: 0;
+  padding: 0.35rem 0.25rem;
+  list-style: none;
+}
+
+.dish-place-stamps li {
+  display: grid;
+  gap: 0.05rem;
+  padding: 0.4rem 0.85rem 0.45rem;
+  border: 2.5px solid var(--color-food-orange-strong);
+  border-radius: 0.55rem;
+  box-shadow:
+    inset 0 0 0 2px white,
+    inset 0 0 0 3.5px var(--color-food-orange-strong);
+  color: var(--color-food-orange-strong);
+  text-align: center;
+  rotate: -3deg;
+}
+
+.dish-place-stamps li:nth-child(even) {
+  border-color: var(--color-brand-blue-hover);
+  box-shadow:
+    inset 0 0 0 2px white,
+    inset 0 0 0 3.5px var(--color-brand-blue-hover);
+  color: var(--color-brand-blue-hover);
+  rotate: 2.5deg;
+}
+
+.dish-place-name {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  line-height: 1.1;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.dish-place-meta {
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.dish-sources summary {
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.dish-sources ul {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  font-size: 0.875rem;
+  list-style: none;
+}
+
+.dish-sources > .dish-panel-empty {
+  margin-block-start: 0.5rem;
+}
+
+@media (max-width: 767px) {
+  .dish-passport {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .dish-passport-photo {
+    border-right: 0;
+    border-bottom: var(--fj-line);
+  }
+
+  .dish-sheet {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dish-passport-actions :is(a, button) {
+    transition: none;
+  }
+}

@@ -17,7 +17,7 @@ export function PersonalNav() {
   const copy = messagesFor(lang);
 
   return (
-    <nav aria-label={copy.authAccount} className="-mx-1 overflow-x-auto px-1 pb-1">
+    <nav aria-label={copy.authAccount} className="personal-nav -mx-1 overflow-x-auto px-1 pb-1">
       <ul className="flex items-center gap-1">
         <li className="shrink-0">
           <Link
