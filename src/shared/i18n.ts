@@ -32,6 +32,14 @@ export const displayLocales: ReadonlyArray<Locale> = [
 
 export const fallbackLocaleName = "English";
 
+/**
+ * Fully translated, reviewed UI locales. Browser-language defaulting is
+ * limited to this set so a first-time visitor never lands in a
+ * pending-review locale automatically — those stay available through the
+ * explicit language menu (`displayLocales`).
+ */
+export const fullyTranslatedLocales: ReadonlyArray<Locale> = ["en", "vi"];
+
 export const localeNames: ReadonlyMap<Locale, string> = new Map<Locale, string>([
   ["en", fallbackLocaleName],
   ["vi", "Tiếng Việt"],
@@ -5180,7 +5188,7 @@ export function detectBrowserLocale(languages?: ReadonlyArray<string>): Locale |
 
   for (const tag of tags) {
     const primary = tag.split("-")[0]?.toLowerCase();
-    const match = displayLocales.find((locale) => locale === primary);
+    const match = fullyTranslatedLocales.find((locale) => locale === primary);
 
     if (match !== undefined && match !== "en") {
       return match;

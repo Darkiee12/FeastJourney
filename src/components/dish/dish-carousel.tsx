@@ -711,34 +711,34 @@ export function DishCarousel({
 
 /**
  * Compact loading skeleton mirroring the compact thumbnail-row card: label
- * bar plus arrows, a fixed square thumbnail with title/region/description
- * lines, and three footer pills at the same padding — so content resolves
- * without layout shift. Announced once via the caller's loading region,
- * not here.
+ * bar plus arrows, a fixed square thumbnail with region/title/description
+ * lines, and the title-aligned action row as three 44px round placeholders
+ * (Explore, Save, Find via the shared DishActions row) — never footer
+ * pills — so content resolves without layout shift. Announced once via
+ * the caller's loading region, not here.
  */
 export function DishCarouselCompactSkeleton(): ReactNode {
   return (
     <div aria-hidden="true" style={DISH_CAROUSEL_GEOMETRY}>
       <div className="mb-1.5 flex items-center gap-2">
         <div className="h-2.5 min-w-0 flex-1 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
-        <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-border-soft motion-reduce:animate-none" />
-        <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-border-soft motion-reduce:animate-none" />
+        <div className="min-h-11 min-w-11 flex-none animate-pulse rounded-full bg-border-soft motion-reduce:animate-none" />
+        <div className="min-h-11 min-w-11 flex-none animate-pulse rounded-full bg-border-soft motion-reduce:animate-none" />
       </div>
       <div className="w-full overflow-hidden rounded-2xl border border-border-soft bg-white">
         <div className="flex gap-3 p-3">
           <div className="h-20 w-20 flex-none animate-pulse rounded-xl bg-border-soft motion-reduce:animate-none min-[400px]:h-24 min-[400px]:w-24 sm:h-[104px] sm:w-[104px]" />
           <div className="flex min-w-0 flex-1 flex-col gap-1.5 py-0.5">
             <div className="h-2.5 w-1/3 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
-            <div className="h-6 w-3/4 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
-            <div className="h-6 w-2/5 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
+            <div className="flex min-w-0 items-start gap-2">
+              <div className="h-6 min-w-0 flex-1 animate-pulse rounded bg-border-soft motion-reduce:animate-none" />
+              <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+              <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+              <div className="h-11 w-11 flex-none animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
+            </div>
             <div className="h-3.5 w-full animate-pulse rounded bg-cream motion-reduce:animate-none" />
             <div className="h-3.5 w-5/6 animate-pulse rounded bg-cream motion-reduce:animate-none" />
           </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 border-t border-border-soft px-3 py-2.5">
-          <div className="h-11 w-24 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
-          <div className="h-11 w-28 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
-          <div className="h-11 w-24 animate-pulse rounded-full bg-cream motion-reduce:animate-none" />
         </div>
       </div>
     </div>

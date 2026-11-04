@@ -347,9 +347,11 @@ export async function decodeScanResponse<A>(response: Response, schema: z.ZodTyp
     );
   }
 
-  // Proxy HTML error pages, login redirects, and wrong content types are a
-  // transport problem, never invalid menu-photo input.
-  if (!contentType.includes("application/json") || /^\s*</.test(text)) {
+  // Proxy HTML error pages, login redirects, and explicit wrong content
+  // types are a transport problem, never invalid menu-photo input. A missing
+  // content-type still decodes as JSON (legacy wire payloads and stripped
+  // headers); the HTML sniff below still rejects error pages in that case.
+  if ((contentType !== "" && !contentType.includes("application/json")) || /^\s*</.test(text)) {
     throw transportError(
       ScanTransport["unexpected-response"]({
         message: "The server returned an unexpected response. Please try again.",

@@ -9,7 +9,9 @@ import {
 } from "@/components/admin/places/place-contracts";
 import {
   formatPlaceContext,
+  formatPlaceRefPreview,
   isCanonicalPlaceId,
+  isVerifiedPlaceRef,
   parsePlaceRef,
 } from "@/components/admin/places/place-grammar";
 import { adminPlaceDetailFn, adminPlacesListFn } from "@/modules/food-discovery/place.functions";
@@ -18,22 +20,28 @@ import type { Locale, Messages } from "@/shared/i18n";
 /**
  * Shared searchable place picker with geographic context.
  *
- * One registry search core (`useRegistrySearch` + `RegistrySearchBox`)
- * with thin adapters for the two value shapes in the admin:
- * - Canonical-id mode (`variant="parentFilter"`, the default for new
- *   flows): `value` is a decimal registry id or `""`. Picking from search
- *   is the normal path; no raw id is ever shown without its context.
- * - Grammar-reference mode (default variant): `value` is the legacy
- *   `place:<id>` reference string (kept for the place-parent editor).
- *   Search is still the normal path — picking fills the canonical
- *   `place:<id>` reference and free grammar is rejected as invalid.
+ * Two modes, never decorative:
+ * - Reference mode (default): a grammar input (`VN`, `place:45:popular`,
+ *   `Hanoi@VN`) with a live geographic preview (`Hanoi, VN · associated`)
+ *   and inline validation. Syntactically valid city/ISO refs render a
+ *   preview plus the unverified note (only canonical `place:<id>` refs
+ *   picked through registry search are verified); malformed shapes render
+ *   an error and block the owning save. No raw id is ever shown without
+ *   its context. Typing also queries the registry and picking a hit fills
+ *   the canonical `place:<id>` reference.
+ * - Parent-filter mode (`variant="parentFilter"`): the toolbar variant
+ *   built on the shared registry search core (`useRegistrySearch` +
+ *   `RegistrySearchBox`). `value` is a decimal registry id or `""`.
+ *   Search is the normal path; the selected parent renders as geographic
+ *   context (`Hanoi, Vietnam`), never a raw id. The canonical id still
+ *   flows out through `onChange`, so filtering semantics are unchanged.
  *
- * Search quality contract (both modes): debounced queries, a bounded
- * result cache, stale-response cancellation, loading/empty/error rows,
- * full keyboard navigation, correct focus handling, a clear affordance,
- * human-readable selected labels, and contextual errors. Existing links
- * keep an explicit `Place #id` fallback so a missing display name never
- * loses the association.
+ * Search quality contract (parent-filter mode): debounced queries, a
+ * bounded result cache, stale-response cancellation, loading/empty/error
+ * rows, full keyboard navigation, correct focus handling, a clear
+ * affordance, human-readable selected labels, and contextual errors.
+ * Existing links keep an explicit `Place #id` fallback so a missing
+ * display name never loses the association.
  */
 
 const SEARCH_CACHE_LIMIT = 50;
@@ -730,14 +738,87 @@ function ParentFilterSelector({
   );
 }
 
-const PLACE_REF_PATTERN = /^place:([0-9]+)$/;
+/** Grammar preview for the reference input: parseable refs render geographic context. */
+interface PlaceRefPreview {
+  readonly invalid: boolean;
+  readonly text: string | null;
+}
+
+const previewFor = (raw: string, lang: Locale): PlaceRefPreview => {
+  const trimmed = raw.trim();
+
+  if (trimmed === "") {
+    return { invalid: false, text: null };
+  }
+
+  const parsed = parsePlaceRef(trimmed);
+
+  if (!parsed.ok) {
+    return { invalid: true, text: null };
+  }
+
+  return { invalid: false, text: formatPlaceRefPreview(parsed.value, lang) };
+};
+
+function SearchHits({
+  copy,
+  hits,
+  lang,
+  onPick,
+  searching,
+}: {
+  readonly copy: Messages;
+  readonly hits: ReadonlyArray<PlaceSearchHit>;
+  readonly lang: Locale;
+  readonly onPick: (placeId: string) => void;
+  readonly searching: boolean;
+}): ReactNode {
+  if (searching) {
+    return <li className="px-3 py-2 text-sm text-muted">{copy.settingsSaving}</li>;
+  }
+
+  if (hits.length === 0) {
+    return <li className="px-3 py-2 text-sm text-muted">{copy.adminNoResults}</li>;
+  }
+
+  return (
+    <>
+      {hits.map((hit) => (
+        <li key={hit.id}>
+          <button
+            type="button"
+            onClick={() => {
+              onPick(hit.id);
+            }}
+            className="flex min-h-11 w-full min-w-0 cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-cream"
+          >
+            <span className="min-w-0 truncate font-semibold">
+              {formatPlaceContext({
+                name: hit.name,
+                parentName: hit.parentName,
+                iso: hit.iso,
+                placeId: hit.id,
+                lang,
+              })}
+            </span>
+            <span className="shrink-0 text-xs text-muted">{hit.kind}</span>
+          </button>
+        </li>
+      ))}
+    </>
+  );
+}
 
 /**
  * Grammar-reference adapter for the place-parent editor. The value stays
- * the canonical `place:<id>` string that editor parses, but selection
- * happens through registry search — never raw grammar typing. A pasted
- * canonical `place:<id>` is still accepted; anything else is invalid and
- * blocks the owning save exactly as before.
+ * the grammar reference string the editor parses (`VN`, `place:45`,
+ * `Hanoi@VN`, with optional `:association` suffixes). Typing also queries
+ * the registry and picking a hit fills the canonical `place:<id>`
+ * reference — but free grammar is never rejected as invalid here:
+ * syntactically valid city/ISO refs render a geographic preview plus the
+ * unverified note (only canonical `place:<id>` refs are verified), and
+ * only malformed shapes render an error. The owning editor still gates
+ * saving on a canonical `place:<id>` via `parentIdFor`.
  */
 function ReferencePlaceSelector({
   copy,
@@ -754,112 +835,111 @@ function ReferencePlaceSelector({
   readonly onChange: (value: string) => void;
   readonly value: string;
 }): ReactNode {
-  const searchAvailable = placeFnAvailable("adminPlacesListFn");
-  const [draft, setDraft] = useState("");
-  const [focused, setFocused] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [hits, setHits] = useState<ReadonlyArray<PlaceSearchHit>>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
-  const parsed = parsePlaceRef(value.trim());
-  const selectedId = parsed.ok && "placeId" in parsed.value.ref ? parsed.value.ref.placeId : null;
-  const invalid = value.trim() !== "" && selectedId === null;
+  const preview = previewFor(value, lang);
+  const unverified = preview.text !== null && !isVerifiedPlaceRef(value);
+  const unverifiedHintId = `${id}-unverified-hint`;
 
-  const fallbackLabel =
-    value.trim() === ""
-      ? ""
-      : formatPlaceContext({ name: null, parentName: null, iso: null, placeId: value, lang });
+  let describedBy = `${id}-hint`;
 
-  const displayName = usePlaceDisplayName(selectedId, selectedId ?? fallbackLabel, lang);
-
-  const { hits, searching, failed, retry } = useRegistrySearch(
-    focused ? draft : "",
-    searchAvailable,
-  );
-
-  let text = value;
-
-  if (focused) {
-    text = draft;
-  } else if (selectedId !== null) {
-    text = displayName;
+  if (preview.invalid) {
+    describedBy += ` ${id}-error`;
   }
 
-  const pick = (hit: PlaceSearchHit): void => {
-    rememberLabel(
-      hit.id,
-      formatPlaceContext({
-        name: hit.name,
-        parentName: hit.parentName,
-        iso: hit.iso,
-        placeId: hit.id,
-        lang,
-      }),
-      lang,
-    );
-    onChange(`place:${hit.id}`);
-    setDraft("");
-    setOpen(false);
-  };
+  if (unverified) {
+    describedBy += ` ${unverifiedHintId}`;
+  }
 
-  const handleTextChange = (next: string): void => {
-    setDraft(next);
-    setOpen(true);
+  const searchAvailable = placeFnAvailable("adminPlacesListFn");
 
-    const match = PLACE_REF_PATTERN.exec(next.trim());
-
-    if (next.trim() === "") {
-      onChange("");
-    } else if (match?.[1] !== undefined) {
-      onChange(`place:${match[1]}`);
+  const search = (query: string): void => {
+    if (!searchAvailable) {
+      return;
     }
-  };
 
-  const handleFocus = (): void => {
-    setFocused(true);
-    setDraft("");
-    setOpen(true);
-  };
+    const trimmed = query.trim();
 
-  const handleBlur = (): void => {
-    setFocused(false);
-    setDraft("");
-    setOpen(false);
-  };
+    if (trimmed.length < 2) {
+      setSearchOpen(false);
 
-  const clear = (): void => {
-    onChange("");
-    setDraft("");
-    setOpen(false);
+      return;
+    }
+
+    setSearching(true);
+    setSearchOpen(true);
+
+    void adminPlacesListFn({ data: { query: trimmed, page: 0 } }).then(
+      (page) => {
+        setHits(parseSearchHits(page));
+        setSearching(false);
+      },
+      () => {
+        setHits([]);
+        setSearching(false);
+      },
+    );
   };
 
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <RegistrySearchBox
-        activeIndex={activeIndex}
-        copy={copy}
-        error={failed}
-        hasSelection={value.trim() !== ""}
-        hits={hits}
+      <label htmlFor={id} className="text-sm font-semibold">
+        {label}
+      </label>
+      <p id={`${id}-hint`} className="text-sm text-muted">
+        {copy.adminPlaceRefHint}
+      </p>
+      <input
         id={id}
-        label={label}
-        lang={lang}
-        listLabel={copy.adminSelectPlace}
-        onActiveIndexChange={setActiveIndex}
-        onBlur={handleBlur}
-        onClear={clear}
-        onFocus={handleFocus}
-        onPick={pick}
-        onRetry={retry}
-        onTextChange={handleTextChange}
-        open={open && searchAvailable}
-        placeholder={copy.adminSearchPlacesPlaceholder}
-        searching={searching}
-        text={text}
+        value={value}
+        autoComplete="off"
+        aria-describedby={describedBy}
+        aria-invalid={preview.invalid}
+        onChange={(event) => {
+          onChange(event.target.value);
+
+          if (searchAvailable) {
+            search(event.target.value);
+          } else {
+            setSearchOpen(false);
+          }
+        }}
+        placeholder="Hanoi@VN:associated"
+        className="min-h-11 w-full rounded-lg border border-border-soft bg-white px-3 py-2 font-mono text-sm text-ink outline-none focus-visible:border-brand-blue focus-visible:ring-2 focus-visible:ring-brand-blue/40"
       />
-      {invalid ? (
+      {preview.text !== null ? (
+        <p aria-live="polite" className="text-sm font-semibold text-food-orange-dark">
+          {preview.text}
+        </p>
+      ) : null}
+      {unverified ? (
+        <p id={unverifiedHintId} className="text-sm text-muted">
+          {copy.adminPlaceRefUnverified}
+        </p>
+      ) : null}
+      {preview.invalid ? (
         <p id={`${id}-error`} role="alert" className="text-sm font-semibold text-red-800">
           {copy.adminSaveFailed}
         </p>
+      ) : null}
+      {searchAvailable && searchOpen ? (
+        <ul
+          aria-label={copy.adminSelectPlace}
+          className="z-10 max-h-56 min-w-0 overflow-y-auto rounded-lg border border-border-soft bg-white shadow-lg"
+        >
+          <SearchHits
+            copy={copy}
+            hits={hits}
+            lang={lang}
+            onPick={(placeId) => {
+              onChange(`place:${placeId}`);
+              setSearchOpen(false);
+            }}
+            searching={searching}
+          />
+        </ul>
       ) : null}
     </div>
   );
