@@ -112,14 +112,18 @@ export function ScanLocationPicker({
   const useMyLocation = (): void => {
     if (disabled) return;
 
-    if (!("geolocation" in navigator)) {
+    // SSR guard: this handler only runs in the browser, but the reference
+    // must not evaluate during server render.
+    const geolocation = typeof navigator === "undefined" ? undefined : navigator.geolocation;
+
+    if (geolocation === undefined) {
       setGeo(GeoState.GeoFailed({ message: copy.unavailable }));
 
       return;
     }
 
     setGeo(GeoState.GeoLocating());
-    navigator.geolocation.getCurrentPosition(
+    geolocation.getCurrentPosition(
       (position) => {
         // Coarsen to ~1km before the lookup; the fix itself never persists.
         const latitude = Math.round(position.coords.latitude * 100) / 100;
