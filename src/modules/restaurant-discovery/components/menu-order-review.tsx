@@ -249,7 +249,6 @@ export function MenuOrderReview({
                     type="button"
                     id={actionId}
                     className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full border border-ink bg-food-orange-strong px-5 py-3 text-sm font-extrabold text-white shadow-[0_3px_0_var(--color-ink)] hover:bg-food-orange-dark disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={needsReview}
                     onClick={onShowWaiter}
                   >
                     {ui.viewOrder}
