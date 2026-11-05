@@ -1,12 +1,53 @@
 # FeastJourney
 
-Mobile-first food discovery for travellers: culturally relevant dishes, verified places that serve them, menu understanding, and bilingual orders. Built as a TanStack Start + Effect modular monolith with PostgreSQL 18/PostGIS, Reylo typed SQL, Flyway migrations, and Better Auth sessions.
+Mobile-first food discovery for travellers: find **what to eat**, find a **verified place** that serves it, and **read the menu + order** without speaking the language.
 
-Start with `AGENTS.md`, then `docs/README.md`.
+> **Live preview:** https://feastjourney.world
+
+![FeastJourney home — globe hero with dish spotlight](docs/screenshots/homepage.png)
+
+## What it does
+
+A traveller landing in an unfamiliar food culture hits three walls: choosing a dish, trusting a place serves it, and decoding the menu at the table. FeastJourney answers each one, and says so honestly when it cannot verify something.
+
+**1. Discover what to eat** — a short quiz (region → meal/mood → exclusions) picks from a curated public catalog, or browse the discovery carousel. Muse optionally re-ranks the already-eligible matches; without a model key the deterministic baseline is served and labeled as such.
+
+![Dish quiz, step 1](docs/screenshots/quiz.png)
+
+![AI-ranked recommendations](docs/screenshots/quiz_result_ai.png)
+
+![Discovery carousel](docs/screenshots/discovery.png)
+
+**2. Find a verified place** — map-first restaurant search (PostGIS + MapLibre) over venues with approved serving evidence. Dish pages link to places that serve them; venue pages link back to menus, reviews, scan, and directions. A translated name is never presented as proof a dish is served.
+
+![Dish detail with ingredients and places](docs/screenshots/dish_detail.png)
+
+![Restaurant map search](docs/screenshots/map.png)
+
+![Venue menu highlights with prices](docs/screenshots/price_display.png)
+
+**3. Understand the menu and order** — photograph a menu and Muse extracts items, variants, prices, and translations with per-field uncertainty (uncertain fields stay null, never invented). Correct the draft, build quantities, and show a bilingual waiter card with an estimated subtotal — an estimate to show staff, nothing is ever submitted.
+
+![Menu scan with Muse](docs/screenshots/menu_scan2.png)
+
+Reviews are summarized the same honest way — what travelers highlight, what is frequently praised, and what is worth knowing:
+
+![AI review summary on mobile](docs/screenshots/mobile_ai_review_summary.png)
+
+**Mobile-first** — the home page ships a dedicated mobile shell (stage + bottom sheet + persistent globe), and recommendations work the same in a pocket viewport:
+
+| Mobile home | Mobile recommendations |
+|---|---|
+| ![Mobile home](docs/screenshots/mobile_homepage.png) | ![Mobile recommendations](docs/screenshots/mobile_food_recommendation.png) |
+
+## Try it
+
+- **Preview deployment:** https://feastjourney.world
+- Routes worth clicking: `/` (quiz + discovery), `/dishes/$dishId` (dish detail), `/restaurants` (map search), `/scan` (menu scanner), `/muse` (dining copilot), `/saved` (members).
 
 ## Run locally
 
-Prerequisites: Bun 1.4.4 (verified), Docker, `openssl` for secret generation.
+Prerequisites: [Bun](https://bun.sh/) 1.4.4 (verified), Docker + Compose plugin, `openssl` for secret generation.
 
 ### 1. Configure the environment
 
@@ -16,10 +57,7 @@ cp .env.example .env
 # openssl rand -base64 32  # -> BETTER_AUTH_SECRET
 ```
 
-Startup validates configuration and fails fast on missing values (see
-`src/server/env.ts`); the full variable contract is in
-`docs/infra/environment.md`. The landing page needs no database, but
-catalog, auth, and admin flows need PostgreSQL with all migrations applied.
+Startup validates configuration and fails fast on missing values (see `src/server/env.ts`); the full variable contract is in `docs/infra/environment.md`. The landing page needs no database, but catalog, auth, and admin flows need PostgreSQL with all migrations applied.
 
 ### 2. Start infrastructure and migrate
 
@@ -30,31 +68,25 @@ docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.port
 docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.ports.yaml run --rm migrator validate
 ```
 
-The `compose.ports.yaml` overlay publishes PostgreSQL on loopback-only
-`127.0.0.1:5433` so host-side tooling (Reylo type analysis, tests,
-production build) can reach the migrated database. The base Compose file
-alone intentionally exposes no database port.
+The `compose.ports.yaml` overlay publishes PostgreSQL on loopback-only `127.0.0.1:5433` so host-side tooling (Reylo type analysis, tests, production build) can reach the migrated database. The base Compose file alone intentionally exposes no database port.
 
-Email-dependent flows (sign-up verification, password reset) need an SMTP
-server. For local development, point the `SMTP_*` values at Mailpit:
+Email-dependent flows (sign-up verification, password reset) need an SMTP server. For local development, point the `SMTP_*` values at Mailpit:
 
 ```sh
-docker run -p 1025:1025 -p 8025:8025 axllent/mailpit
+docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit
+# read captured mail at http://localhost:8025
 ```
 
-Without a reachable SMTP server the app still starts and public discovery
-works, but verification and reset emails fail at send time. Inspect
-captured mail at `http://localhost:8025`.
+Without a reachable SMTP server the app still starts and public discovery works, but verification and reset emails fail at send time.
 
 ### 3. Install, develop, verify
 
 ```sh
 bun install --frozen-lockfile
-export DATABASE_URL="postgres://feastjourney:fj-local-dev-pw@127.0.0.1:5433/feastjourney"
+export DATABASE_URL="postgres://feastjourney:fj-local-dev-pw@127.0.0.1:5433/feastjourney"  # must match infra/.env
 bun run dev
+# → http://localhost:3000
 ```
-
-Open `http://localhost:3000`.
 
 ```sh
 bun run check        # format + lint + Reylo-aware typecheck (needs DATABASE_URL)
@@ -63,11 +95,9 @@ bun run build
 bun run start
 ```
 
-The default production build targets Bun. For Node, rebuild with `bun run build:node` and then run `bun run start:node`. Both outputs use `.output/`, so rebuilding replaces the previous target. Configure the listening address with `HOST` and `PORT`.
+The default production build targets Bun. For Node, rebuild with `bun run build:node` and run `bun run start:node`. Both outputs use `.output/`, so rebuilding replaces the previous target. Configure the listening address with `HOST` and `PORT`.
 
-Create the first administrator directly (shell + DB access required; not
-reachable over HTTP — the account is created verified and granted the
-protected owner role):
+Create the first administrator directly (shell + DB access required; not reachable over HTTP — the account is created verified and granted the protected owner role):
 
 ```sh
 bun scripts/create-admin.ts admin@example.com 'strong-password-min-12-chars'
@@ -75,55 +105,39 @@ bun scripts/create-admin.ts admin@example.com 'strong-password-min-12-chars'
 
 ### Fully containerized dev loop (optional)
 
-`bun run dev:docker` starts the whole stack from one command — Vite dev
-server with hot reload (bind-mounted source), PostgreSQL, the one-shot
-Flyway migrator (the app waits for its successful exit), and Garage:
+`bun run dev:docker` starts the whole stack from one command — Vite dev server with hot reload (bind-mounted source), PostgreSQL, the one-shot Flyway migrator (the app waits for its successful exit), and Garage:
 
 ```sh
 bun run dev:docker
 # → app on http://localhost:3000
 ```
 
-Only the application port is published, bound to loopback
-(`127.0.0.1:3000`). PostgreSQL, Garage, and the migrator stay on the
-internal Compose network; host tooling keeps using `infra/compose.ports.yaml`
-as before. If port 3000 is occupied, set `APP_DEV_PORT=3001` in `infra/.env`
-and set `BETTER_AUTH_URL=http://localhost:3001` in the root `.env`, then open
-`http://localhost:3001`. OAuth callback URLs must match the chosen base URL.
-The container entrypoint pre-warms Vite's cold module graph, so
-the first browser load is fast (without the warmup, a cold dev server can
-exceed Bun.serve's default 10 s request timeout once and answer 500 — just
-retry). Stop with `Ctrl+C`, or
-`docker compose --env-file infra/.env -f infra/compose.yaml -f infra/compose.dev.yaml stop`
-(`down` also works; named volumes keep the database).
+Only the application port is published, bound to loopback (`127.0.0.1:3000`). If port 3000 is occupied, set `APP_DEV_PORT=3001` in `infra/.env` and `BETTER_AUTH_URL=http://localhost:3001` in the root `.env`.
 
-## Routes
+## Tech stack
 
-- `/` — public landing page: dish discovery plus an in-place food chooser (one-click quick find or Surprise with windowed pool variety, constraints preserved, provider bypassed; 5-step refinement with auto-advance on answer and a Back button; server-filtered country select; deterministic fallback labeled honestly; opt-in device-local preference memory). English default, `?lang=` switch; the globe menu offers fully translated English and Vietnamese, other locales fall back to English; validated by Zod; no cookie persistence.
-- `/dishes/$dishId` — public canonical dish detail (names, ingredients with uncertainty wording, cuisines/categories, associated places, sources, freshness), linkable by slug or decimal id.
-- `/saved` — member saved dishes (server-verified session; paged list with batch-loaded details).
-- `/sign-in`, `/sign-up`, `/forgot-password`, `/reset-password`, `/verify-email` — Better Auth email + Google/Facebook OAuth (email delivery required for verification and reset; see Mailpit setup above).
-- `/settings/account`, `/settings/security` — profile, linked accounts, sessions, password change.
-- `/admin`, `/admin/dishes`, `/admin/dishes/$dishId`, `/admin/imports`, `/admin/imports/new`, `/admin/imports/$jobId`, `/admin/reviews`, `/admin/users`, `/admin/roles` — administration shell (session + `admin:access`/`food:import`/`moderation:read` surface gate; every operation re-checks its own grant).
-- `/api/v1/*` — public discovery reads (`dishes`, `ingredients`, `categories`, `cuisines`, `places`) and session-authorized admin endpoints (`admin.dishes.*`, `admin.imports.validate|apply`, `admin.review-queue`). No API keys: all admin access resolves the Better Auth session against database RBAC grants. Public recommendations (`recommendDishesFn`) return up to 10 published dishes with explicit `ai`/`deterministic`/`uncertain`/`empty` modes; see `docs/architecture/recommendations.md`.
+| Layer | Choice |
+|---|---|
+| App | TanStack Start (React) + Effect v4 operations, modular monolith — no separate HTTP backend |
+| Data | PostgreSQL 18 + PostGIS 3.6 (relational truth), Flyway one-shot migrations, Reylo typed SQL |
+| Objects | S3-compatible store (Garage locally); Postgres owns metadata and permissions, never the reverse |
+| Auth | Better Auth (email + Google/Facebook OAuth), DB-backed RBAC, member-owned data gated per operation |
+| Map | Browser-only MapLibre GL JS + `react-map-gl/maplibre`; tiles are a basemap, not a place source |
+| AI | Muse (`muse-spark-1.3`): dish re-ranking, menu extraction, review summarization — each bounded, labeled, with deterministic fallbacks |
 
-See `docs/architecture/access-control.md` (permission vocabulary, system roles, owner safeguards) and `docs/architecture/admin-dashboard.md` (dashboard routes, contracts, import lifecycle).
+## Trust and safety
 
-## Catalog data and imports
+AI-generated food, allergy, ingredient, and price claims are **unverified unless backed by evidence**: eligibility runs in SQL before any model sees it, uncertain scan fields stay null with an explicit uncertainty entry, private scans expire after 24 hours, and reviewer approval is a separate audited step. See `docs/architecture/restaurant-discovery.md`.
 
-Canonical dishes live in `feastjourney.dishes` plus names/descriptions/ingredients/cuisines/categories/places link tables (`db/migrations/V20261028_001`–`V004`). The import studio (`/admin/imports`) stages JSON/CSV datasets into `catalog_import_jobs`/`catalog_import_records`, validates against canonical taxonomy, requires explicit license + editorial-review acknowledgment plus per-duplicate decisions, and applies records as `review` status — never published. Applied records carry `source_records`/`dish_sources` provenance links. Publication is a separate `food:publish`-gated editorial action.
+## Docs
 
-## Testing
+Start with `AGENTS.md`, then `docs/README.md` (index). Key entries:
 
-```sh
-bun test tests/
-```
-
-Integration tests run against a disposable PostgreSQL database (refusing non-loopback targets), migrate it with Flyway, then exercise auth, RBAC, catalog, curation, favorites, and import journeys end to end. Test environment defaults are preloaded before any test module evaluates (`bunfig.toml` `[test] preload`), so file order cannot affect initialization. SQL typechecking (`bun run typecheck`) requires the migrated development database via `DATABASE_URL` (Reylo content mapper); `bun run check` covers format, lint, and types.
-
-## Infrastructure
-
-- One-shot Flyway migrator (`infra/compose.yaml`) applies reviewed `db/migrations/*.sql` before app startup; migrations are immutable once applied — add forward files only.
-- Garage provides private S3-compatible object storage for local development; Postgres owns metadata and access policy.
+- `docs/architecture/overview.md` — request flow, module boundaries
+- `docs/infra/operations.md` — local runbook and smoke checks
+- `docs/infra/environment.md` — configuration contract
+- `docs/architecture/recommendations.md` — quiz pipeline and Muse ranking rules
+- `docs/hackathon/project-summary.md` — problem framing and demo narrative
+- `docs/development/quality-gates.md` — checks required before calling work ready
 
 Source references are collected in `docs/references.md`.
