@@ -1,6 +1,15 @@
 import { useId, useState } from "react";
 
-import { menuCopy, orderIntroductions } from "@/modules/restaurant-discovery/components/menu-copy";
+import {
+  menuResultsCopy,
+  menuCopy,
+  menuScanResultsCopy,
+  orderIntroductions,
+} from "@/modules/restaurant-discovery/components/menu-copy";
+import {
+  MenuPrice,
+  PriceConfidenceNote,
+} from "@/modules/restaurant-discovery/components/menu-item-row";
 import {
   menuBcp47TagFor,
   MenuSubtotal,
@@ -48,6 +57,7 @@ function WaiterOrderLine({
   instructionReviewed,
   onQuantity,
   onVariant,
+  onEditLine,
 }: {
   readonly line: OrderLine;
   readonly copy: MenuOrderCopy;
@@ -58,7 +68,10 @@ function WaiterOrderLine({
   readonly instructionReviewed: boolean;
   readonly onQuantity?: ((variantId: string, quantity: number) => void) | undefined;
   readonly onVariant?: ((previousVariantId: string, nextVariantId: string) => void) | undefined;
+  readonly onEditLine?: ((itemId: string) => void) | undefined;
 }) {
+  const ui = menuResultsCopy(locale);
+  const resultsCopy = menuScanResultsCopy(locale);
   const price = line.variant.price;
 
   const bothEntered =
@@ -112,8 +125,13 @@ function WaiterOrderLine({
           {formatMoney(line.lineAmount, price.currency, locale)} <span>{price.currency}</span>
         </p>
       ) : (
-        <p className="mt-1 text-sm font-semibold">⚠ {copy.unknownPrice}</p>
+        <MenuPrice price={price} locale={locale} />
       )}
+      <PriceConfidenceNote
+        price={price}
+        inferredNote={ui.currencyInferred}
+        possibleNote={resultsCopy.pricePossibleNote}
+      />
       {onVariant !== undefined && line.item.variants.length > 1 && (
         <div className="mt-2">
           <label
@@ -139,6 +157,15 @@ function WaiterOrderLine({
             ))}
           </select>
         </div>
+      )}
+      {onEditLine !== undefined && (
+        <button
+          type="button"
+          className="menu-results-edit"
+          onClick={() => onEditLine(line.item.id)}
+        >
+          {ui.specialRequests}
+        </button>
       )}
       {onQuantity !== undefined && (
         <fieldset
@@ -197,6 +224,10 @@ export function WaiterOrderCard({
   onClose,
   onQuantity,
   onVariant,
+  onEditLine,
+  initialShowTranslations = false,
+  preview = false,
+  showTranslations: controlledTranslations,
 }: {
   readonly menu: InteractiveMenu;
   readonly selections: ReadonlyArray<MenuSelection>;
@@ -206,11 +237,17 @@ export function WaiterOrderCard({
   readonly onClose?: (() => void) | undefined;
   readonly onQuantity?: ((variantId: string, quantity: number) => void) | undefined;
   readonly onVariant?: ((previousVariantId: string, nextVariantId: string) => void) | undefined;
+  readonly onEditLine?: ((itemId: string) => void) | undefined;
+  readonly initialShowTranslations?: boolean | undefined;
+  readonly preview?: boolean;
+  readonly showTranslations?: boolean;
 }) {
+  const ui = menuResultsCopy(locale);
   const titleId = useId();
   // Waiter-facing mode hides translations by default: staff match the
   // printed originals. The toggle stays one tap away for the traveler.
-  const [showTranslations, setShowTranslations] = useState(false);
+  const [localTranslations, setShowTranslations] = useState(initialShowTranslations);
+  const showTranslations = controlledTranslations ?? localTranslations;
   const copy = menuCopy(locale);
   const toggleLabels = translationToggleLabels ?? translationToggleFallback(copy);
   const sourceLanguage = menu.sourceLanguage ?? "und";
@@ -238,8 +275,16 @@ export function WaiterOrderCard({
   const uncertainties = [...new Set(lines.flatMap((line) => line.item.uncertainties))];
 
   const subtotalText = MenuSubtotal.$match(subtotal, {
-    Empty: () => copy.empty,
-    Unavailable: () => copy.priceCheck,
+    Empty: () => {
+      if (menu.items.length === 0) return copy.empty;
+
+      return ui.noSelection;
+    },
+    Unavailable: () => {
+      if (preview) return ui.totalToConfirm;
+
+      return copy.priceCheck;
+    },
     Calculable: ({ amount, currency }) =>
       `${copy.subtotal}: ${formatMoney(amount, currency, locale)} ${currency}`,
   });
@@ -248,20 +293,44 @@ export function WaiterOrderCard({
     <section
       aria-labelledby={titleId}
       lang={menuBcp47TagFor(locale)}
-      className="min-w-0 break-words text-ink"
+      className={
+        preview
+          ? "min-w-0 rounded-3xl border-2 border-ink bg-cream/60 p-4 text-ink shadow-[0_4px_0_var(--color-ink)] break-words sm:p-5"
+          : "min-w-0 break-words text-ink"
+      }
     >
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border-soft bg-white/95 py-2 backdrop-blur">
-        <h2 id={titleId} className="min-w-0 flex-1 truncate text-base font-extrabold">
+      {preview && (
+        <p className="m-0 pb-3 text-center font-display text-4xl italic tracking-wide text-ink">
+          FeastJourney
+        </p>
+      )}
+      <div
+        className={
+          preview
+            ? "flex items-center gap-2 border-b border-border-soft py-3"
+            : "sticky top-0 z-10 flex items-center gap-2 border-b border-border-soft bg-white/95 py-2 backdrop-blur"
+        }
+      >
+        <h2
+          id={titleId}
+          className={
+            preview
+              ? "min-w-0 flex-1 text-center text-xl leading-snug font-extrabold"
+              : "min-w-0 flex-1 truncate text-base font-extrabold"
+          }
+        >
           {copy.orderTitle} · {quantity}
         </h2>
-        <button
-          type="button"
-          aria-pressed={showTranslations}
-          onClick={() => setShowTranslations((visible) => !visible)}
-          className="min-h-11 shrink-0 cursor-pointer rounded-full border border-ink px-3 text-xs font-bold whitespace-nowrap"
-        >
-          {showTranslations ? toggleLabels.hide : toggleLabels.show}
-        </button>
+        {!preview && (
+          <button
+            type="button"
+            aria-pressed={showTranslations}
+            onClick={() => setShowTranslations((visible) => !visible)}
+            className="min-h-11 shrink-0 cursor-pointer rounded-full border border-ink px-3 text-xs font-bold whitespace-nowrap"
+          >
+            {showTranslations ? toggleLabels.hide : toggleLabels.show}
+          </button>
+        )}
         {onClose !== undefined && (
           <button
             type="button"
@@ -299,6 +368,7 @@ export function WaiterOrderCard({
             instructionReviewed={reviewedVariantIds?.has(line.variant.id) ?? false}
             onQuantity={onQuantity}
             onVariant={onVariant}
+            onEditLine={onEditLine}
           />
         ))}
       </ol>
@@ -328,7 +398,14 @@ export function WaiterOrderCard({
             {menu.provenance === "draft" && <p className="mt-1">{copy.draftOrder}</p>}
           </details>
         )}
-        <p role="note" className="mt-3 rounded-xl border-2 border-ink p-3 text-sm font-bold">
+        <p
+          role="note"
+          className={
+            preview
+              ? "mt-3 border-t border-border-soft pt-3 text-xs leading-relaxed text-muted"
+              : "mt-3 rounded-xl border-2 border-ink p-3 text-sm font-bold"
+          }
+        >
           ⚠ {copy.notSubmitted} {copy.fees}
         </p>
       </footer>

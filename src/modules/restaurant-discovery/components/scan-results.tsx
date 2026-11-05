@@ -1,18 +1,28 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { InteractiveMenuView } from "@/modules/restaurant-discovery/components/interactive-menu";
 import {
-  menuLanguageNames,
+  menuResultsCopy,
   menuScanResultsCopy,
 } from "@/modules/restaurant-discovery/components/menu-copy";
-import { MenuPhotoViewer } from "@/modules/restaurant-discovery/components/menu-item-detail";
 import type { ScanMenuLocation } from "@/modules/restaurant-discovery/components/scan-capture";
 import {
   ScanCurrencyControl,
   useScanCurrency,
 } from "@/modules/restaurant-discovery/components/scan-currency-control";
 import { ScanEditor } from "@/modules/restaurant-discovery/components/scan-editor";
-import { menuBcp47TagFor, presentScan } from "@/modules/restaurant-discovery/menu-presentation";
+import {
+  ScanResultsHeading,
+  ScanResultsSummary,
+} from "@/modules/restaurant-discovery/components/scan-results-summary";
+import { SearchableCurrencyPicker } from "@/modules/restaurant-discovery/components/searchable-currency-picker";
+import {
+  menuBcp47TagFor,
+  presentScan,
+  priceTrustOf,
+} from "@/modules/restaurant-discovery/menu-presentation";
+import { normalizeCurrencyContext } from "@/modules/restaurant-discovery/menu-price-evidence";
+import { interpretPrintedPrice } from "@/modules/restaurant-discovery/menu-price-interpretation";
 import {
   MenuScanClientError,
   menuScanClient,
@@ -23,114 +33,43 @@ import {
   scanIdSchema,
 } from "@/modules/restaurant-discovery/menu-scan.schema";
 import type { MenuScanDocument } from "@/modules/restaurant-discovery/menu-scan.schema";
-import { isAmount, isCurrency } from "@/shared/money";
+import { currencyMinorUnits } from "@/shared/currencies";
 
-type ResultsCopy = ReturnType<typeof menuScanResultsCopy>;
+const sourceCurrenciesOf = (
+  document: MenuScanDocument,
+  menuCountry: string | null,
+): ReadonlyArray<string | null> =>
+  document.items.flatMap((item) =>
+    item.variants.flatMap((variant) => {
+      if (variant.price === null) return [];
+      const price = interpretPrintedPrice(variant.price, menuCountry);
 
-const startOfDay = (date: Date): number =>
-  new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-
-/**
- * "Expires tomorrow" only when the stored expiry lands on the next local
- * calendar day. Any other day renders the full date; an unreadable timestamp
- * renders nothing rather than inventing urgency.
- */
-const expiryText = (expiresAt: string, locale: string, copy: ResultsCopy): string | null => {
-  const expiry = new Date(expiresAt);
-
-  if (Number.isNaN(expiry.getTime())) return null;
-
-  const diffDays = Math.round((startOfDay(expiry) - startOfDay(new Date())) / 86_400_000);
-
-  if (diffDays === 1) return copy.expiresTomorrow;
-
-  return `${copy.expiresLabel}: ${expiry.toLocaleString(locale)}`;
-};
-
-const priceUnclear = (document: MenuScanDocument): boolean =>
-  document.items.some((item) =>
-    item.variants.some(
-      (variant) =>
-        variant.price === null ||
-        variant.price.amount === null ||
-        variant.price.currency === null ||
-        !isAmount(variant.price.amount) ||
-        !isCurrency(variant.price.currency),
-    ),
+      return price.amount !== null &&
+        price.currency !== null &&
+        price.association !== "ambiguous" &&
+        price.association !== "unavailable" &&
+        priceTrustOf(price) !== "unknown"
+        ? [price.currency]
+        : [];
+    }),
   );
 
-const sourceCurrenciesOf = (document: MenuScanDocument): ReadonlyArray<string | null> =>
-  document.items.flatMap((item) => item.variants.map((variant) => variant.price?.currency ?? null));
-
-/** Two-step delete confirmation inside the overflow disclosure. */
-function ScanDeleteAction({
-  label,
-  confirm,
-  yes,
-  no,
-  busy,
-  onDelete,
-}: {
-  readonly label: string;
-  readonly confirm: string;
-  readonly yes: string;
-  readonly no: string;
-  readonly busy: boolean;
-  readonly onDelete: () => void;
-}) {
-  const [confirming, setConfirming] = useState(false);
-
-  if (!confirming)
-    return (
-      <button type="button" className="scan-delete" onClick={() => setConfirming(true)}>
-        {label}
-      </button>
-    );
-
-  return (
-    <span className="scan-delete-confirm">
-      <span role="alert">{confirm}</span>
-      <button type="button" className="scan-delete" disabled={busy} onClick={onDelete}>
-        {yes}
-      </button>
-      <button type="button" disabled={busy} onClick={() => setConfirming(false)}>
-        {no}
-      </button>
-    </span>
-  );
-}
-
-/**
- * Post-analysis results shell. Visible success heading ("Your menu is ready"
- * + "Choose what you'd like to order"), then one compact context summary
- * (venue / menu location / source → target language / dish count / currency
- * status) with a quiet expiry line, the single compact menu-wide currency
- * control, and one concise scan-wide notice (allergy/dietary always, price
- * clarity only when unclear). Dishes are the dominant element: the shared
- * InteractiveMenuView/MenuItemRow board renders immediately after the
- * notice, with MenuItemDetail on demand. Supporting groups follow —
- * Menu tools (photo thumbnails via MenuPhotoViewer, corrections), then
- * More (overflow: scan another / reload / delete with confirmation;
- * collapsed scan details). IDs, model, revision, provenance, and expiry
- * detail stay collapsed; the visible UI keeps only concise lines.
- *
- * Price research is intentionally NOT rendered here: the single research
- * trigger per screen stays with S1's ScanPriceResearch, mounted as a sibling
- * directly below this component with the same locale + items (see mount
- * note in the coordinator report). Printed prices are never replaced.
- */
+/** Private menu browsing with separate correction and currency-confirmation dialogs. */
 export function ScanResults({
+  locale: interfaceLocale,
   scanId,
   menuLocation,
   onEditDish,
-  onScanAnother,
-  onDeleteScan,
+  onRevisionSaved,
+  toolsTrigger,
 }: {
+  readonly locale?: string | undefined;
   readonly scanId: string;
   readonly menuLocation?: ScanMenuLocation | null | undefined;
   readonly onEditDish?: ((itemKey: string) => void) | undefined;
-  readonly onScanAnother?: (() => void) | undefined;
-  readonly onDeleteScan?: (() => void) | undefined;
+  readonly onRevisionSaved?: ((view: ScanView) => void) | undefined;
+  /** Secondary-workspace trigger rendered in the results header row. */
+  readonly toolsTrigger?: ReactNode | undefined;
 }) {
   const [view, setView] = useState<ScanView | null>(null);
   const [document, setDocument] = useState<MenuScanDocument | null>(null);
@@ -140,9 +79,11 @@ export function ScanResults({
   const [failure, setFailure] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
-  const [correctionsOpen, setCorrectionsOpen] = useState(false);
   const [loadedId, setLoadedId] = useState<string | null>(null);
-  const correctionsRef = useRef<HTMLDetailsElement | null>(null);
+  const correctionsRef = useRef<HTMLDialogElement | null>(null);
+  const currencyDialog = useRef<HTMLDialogElement | null>(null);
+  const [editItemId, setEditItemId] = useState<string | null>(null);
+  const [confirmedCurrency, setConfirmedCurrency] = useState("");
 
   const idValid = scanIdSchema.safeParse({ scanId }).success;
 
@@ -158,7 +99,6 @@ export function ScanResults({
     setSaveNotice(null);
     setFailure(null);
     setLoading(true);
-    setCorrectionsOpen(false);
   }
 
   useEffect(() => {
@@ -185,9 +125,21 @@ export function ScanResults({
     return () => abort.abort();
   }, [scanId, loadedId, idValid]);
 
-  const locale = view?.scan.target_language ?? "en";
+  const locale = interfaceLocale ?? view?.scan.target_language ?? "en";
+  const ui = menuResultsCopy(locale);
   const copy = menuScanResultsCopy(locale);
-  const currency = useScanCurrency(document === null ? [] : sourceCurrenciesOf(document));
+
+  // Weak visitor-indicated menu country (server-resolved place evidence
+  // lives server-side only). Threaded identically through presentation,
+  // currency sources, and the correction editor so display, summary, and
+  // repair never disagree about what the printed text means.
+  const menuCountry = normalizeCurrencyContext({
+    menuCountry: menuLocation?.country ?? null,
+  }).menuCountry;
+
+  const currency = useScanCurrency(
+    document === null ? [] : sourceCurrenciesOf(document, menuCountry),
+  );
 
   const reload = (): void => {
     setLoading(true);
@@ -212,14 +164,14 @@ export function ScanResults({
       return;
     }
 
-    setCorrectionsOpen(true);
-    correctionsRef.current?.scrollIntoView();
+    setEditItemId(itemKey);
+    correctionsRef.current?.showModal();
   };
 
-  const saveRevision = (): void => {
+  const saveRevision = (nextDocument: MenuScanDocument | null = document): void => {
     if (document === null || view === null || view.scan.current_revision === null) return;
 
-    const parsed = menuScanDocumentSchema.safeParse(document);
+    const parsed = menuScanDocumentSchema.safeParse(nextDocument);
 
     if (!parsed.success) {
       setSaveNotice(null);
@@ -240,7 +192,10 @@ export function ScanResults({
           setView(next);
           setDocument(next.document);
           setDirty(false);
+          onRevisionSaved?.(next);
           setSaveNotice(copy.saved);
+          correctionsRef.current?.close();
+          currencyDialog.current?.close();
         },
         (error) => {
           setSaveError(error instanceof Error ? error.message : copy.failed);
@@ -272,92 +227,197 @@ export function ScanResults({
 
   const venueName = view.scan.venue_name;
 
-  const expiry = expiryText(view.scan.expires_at, locale, copy);
-
   const assets = [...view.assets].toSorted((a, b) => a.page_number - b.page_number);
-
-  const revisionModelText = view.revision?.model ?? "";
-  const revisionModel = revisionModelText.trim() !== "" ? revisionModelText : null;
-
-  const revisionNumber = view.revision?.number ?? view.scan.current_revision;
 
   const documentSource = document.sourceLanguage;
 
+  const languageNames = new Intl.DisplayNames(locale, { type: "language" });
+
   const sourceName =
-    documentSource === null ? null : (menuLanguageNames.get(documentSource) ?? documentSource);
+    documentSource === null ? null : (languageNames.of(documentSource) ?? documentSource);
 
-  const targetName = menuLanguageNames.get(document.targetLanguage) ?? document.targetLanguage;
+  const targetName = languageNames.of(document.targetLanguage) ?? document.targetLanguage;
 
-  const contextLine = [
-    venueName === null ? null : copy.atVenue.replace("{name}", venueName),
-    menuLocation?.label ?? null,
-    sourceName === null
-      ? null
-      : copy.contextLanguages.replace("{source}", sourceName).replace("{target}", targetName),
-    document.items.length.toLocaleString(locale),
-    currency.enabled && currency.target !== ""
-      ? copy.currencyConverted.replace("{target}", currency.target)
-      : copy.currencyOriginalOnly,
-  ]
-    .flatMap((part) => (part === null ? [] : [part]))
-    .join(" · ");
+  const menu = presentScan(document, venueName, menuCountry);
 
-  // One concise scan-wide notice: allergy/dietary wording is always
-  // visible but quiet; the unclear-price sentence joins it only when at
-  // least one variant lacks a usable price.
-  const noticeText = priceUnclear(document)
-    ? `${copy.dietNote} ${copy.priceUnclear}`
-    : copy.dietNote;
+  const noticeText = copy.dietNote;
+
+  const unresolved = document.items
+    .flatMap((item) => item.variants)
+    .filter((variant) => {
+      const price = variant.price === null ? null : interpretPrintedPrice(variant.price);
+
+      return (
+        price !== null &&
+        price.rawText.trim() !== "" &&
+        ((price.currency === null &&
+          /^[\d.,\s]+[kK]?(?:\s*\/[^/]+)?$/.test(price.rawText.trim())) ||
+          price.currencyProvenance === "inferred") &&
+        price.association !== "ambiguous" &&
+        price.association !== "unavailable"
+      );
+    });
+
+  const observedCurrencies = [
+    ...new Set(
+      unresolved.flatMap((variant) => (variant.price?.currency ? [variant.price.currency] : [])),
+    ),
+  ];
+
+  let suggestedCurrency = "";
+
+  if (observedCurrencies.length === 1) suggestedCurrency = observedCurrencies[0] ?? "";
+  else if (menuLocation?.country === "VN") suggestedCurrency = "VND";
+  const menuCurrency = confirmedCurrency || suggestedCurrency;
+
+  const confirmCurrency = (): void => {
+    if (menuCurrency === "") return;
+
+    const eligible = new Set(
+      unresolved
+        .filter(
+          (variant) => variant.price?.currency === null || variant.price?.currency === menuCurrency,
+        )
+        .map((variant) => variant.id),
+    );
+
+    const next = {
+      ...document,
+      items: document.items.map((item) => ({
+        ...item,
+        variants: item.variants.map((variant) => {
+          if (!eligible.has(variant.id) || variant.price === null) return variant;
+
+          return {
+            ...variant,
+            price: {
+              ...interpretPrintedPrice(variant.price, menuCountry),
+              currency: menuCurrency,
+              currencyProvenance: "user-confirmed" as const,
+            },
+          };
+        }),
+      })),
+    };
+
+    saveRevision(next);
+  };
 
   return (
-    <article className="scan-results" lang={menuBcp47TagFor(locale)}>
-      <header className="scan-results-head">
-        <h1 id="scan-results-title" tabIndex={-1} className="font-display">
-          {copy.ready}
-        </h1>
-        <p>{copy.subtitle}</p>
-        <p className="scan-results-context">{contextLine}</p>
+    <article className="grid min-w-0 gap-5 break-words text-ink" lang={menuBcp47TagFor(locale)}>
+      <ScanResultsHeading
+        locale={locale}
+        itemCount={document.items.length}
+        onEditMenu={() => handleEditDish(document.items[0]?.id ?? "")}
+        toolsTrigger={toolsTrigger}
+      />
+      <ScanResultsSummary
+        menu={menu}
+        photos={assets.map((asset) => ({ assetId: asset.id, page: asset.page_number }))}
+        photoUrl={(assetId) => `/api/menu-scans?scanId=${view.scan.id}&assetId=${assetId}`}
+        sourceName={sourceName}
+        targetName={targetName}
+        locale={locale}
+        location={menuLocation?.label ?? venueName}
+      />
+      {sourceCurrenciesOf(document, menuCountry).length > 0 && (
         <ScanCurrencyControl
-          sources={sourceCurrenciesOf(document)}
+          sources={sourceCurrenciesOf(document, menuCountry)}
           locale={locale}
           state={currency}
         />
-        {expiry !== null && <p className="scan-results-expiry">{expiry}</p>}
-      </header>
-      <p className="scan-results-diet">{noticeText}</p>
+      )}
+      <p className="m-0 text-xs leading-relaxed text-muted">{noticeText}</p>
+      {unresolved.length > 0 && (
+        <>
+          <button
+            type="button"
+            className="menu-results-edit"
+            onClick={() => currencyDialog.current?.showModal()}
+          >
+            {ui.confirmCurrency}
+          </button>
+          <dialog
+            ref={currencyDialog}
+            className="menu-waiter-dialog"
+            aria-label={ui.confirmCurrency}
+          >
+            <form method="dialog">
+              <button className="menu-order-back">{ui.close}</button>
+            </form>
+            <section
+              className="grid gap-3 py-4 [&_p]:m-0 [&_p]:text-sm [&_p]:leading-relaxed"
+              aria-label={ui.confirmCurrency}
+            >
+              <p>{ui.confirmExplanation}</p>
+              {suggestedCurrency !== "" && (
+                <p>
+                  {ui.suggestion}: {suggestedCurrency}. {ui.confirmSuggestion}
+                </p>
+              )}
+              <SearchableCurrencyPicker
+                value={menuCurrency}
+                codes={[...currencyMinorUnits.keys()]}
+                locale={locale}
+                label={ui.currency}
+                placeholder={ui.currency}
+                onChange={setConfirmedCurrency}
+              />
+              <button
+                type="button"
+                className="menu-order-back"
+                disabled={saving || menuCurrency === ""}
+                onClick={confirmCurrency}
+              >
+                {ui.confirmCurrency}
+              </button>
+            </section>
+          </dialog>
+        </>
+      )}
+      {saveNotice !== null && <output aria-live="polite">{saveNotice}</output>}
+      {saveError !== null && <p role="alert">{saveError}</p>}
       <InteractiveMenuView
-        key={`${view.scan.id}:${view.scan.current_revision ?? "draft"}`}
-        menu={presentScan(document, venueName)}
+        key={view.scan.id}
+        menu={menu}
         locale={locale}
         photoUrl={(assetId) => `/api/menu-scans?scanId=${view.scan.id}&assetId=${assetId}`}
         rates={currency.rates}
         onEditDish={handleEditDish}
       />
-      {/* Price-research mount point (S1): render ScanPriceResearch as a
-          page-level sibling of ScanResults (aside column of the results
-          grid) with locale + items. ScanResults renders no research
-          trigger so the screen keeps exactly one (single-trigger rule). */}
-      {assets.length > 0 && (
-        <section className="scan-results-photos" aria-label={copy.photosTitle}>
-          <h2>{copy.photosTitle}</h2>
-          <p>{copy.photosHelp}</p>
-          <MenuPhotoViewer
-            photos={assets.map((asset) => ({ assetId: asset.id, page: asset.page_number }))}
-            photoUrl={(assetId) => `/api/menu-scans?scanId=${view.scan.id}&assetId=${assetId}`}
-            locale={locale}
-          />
-        </section>
-      )}
-      <details
+      <dialog
         ref={correctionsRef}
-        className="scan-results-corrections"
-        open={correctionsOpen}
-        onToggle={(event) => setCorrectionsOpen(event.currentTarget.open)}
+        className="menu-waiter-dialog"
+        aria-label={copy.corrections}
+        onCancel={(event) => {
+          if (saving) {
+            event.preventDefault();
+
+            return;
+          }
+
+          setDocument(view.document);
+          setDirty(false);
+        }}
       >
-        <summary>{copy.corrections}</summary>
-        <p>{copy.correctionsHelp}</p>
+        <button
+          type="button"
+          className="menu-order-back"
+          disabled={saving}
+          onClick={() => {
+            setDocument(view.document);
+            setDirty(false);
+            correctionsRef.current?.close();
+          }}
+        >
+          {ui.cancel}
+        </button>
         <ScanEditor
+          locale={locale}
+          key={editItemId}
+          initialItemId={editItemId}
           document={document}
+          menuCountry={menuCountry}
           onChange={(next) => {
             setDocument(next);
             setDirty(true);
@@ -365,85 +425,16 @@ export function ScanResults({
           }}
         />
         {dirty && <output>{copy.unsavedChanges}</output>}
-        {saveNotice !== null && <output aria-live="polite">{saveNotice}</output>}
         {saveError !== null && <p role="alert">{saveError}</p>}
         <button
           type="button"
           className="menu-order-primary"
           disabled={saving || !dirty}
-          onClick={saveRevision}
+          onClick={() => saveRevision()}
         >
           {copy.saveFixes}
         </button>
-      </details>
-      <details className="scan-results-overflow">
-        <summary>{copy.overflowLabel}</summary>
-        <div className="scan-results-overflow-actions">
-          {onScanAnother !== undefined && (
-            <button type="button" onClick={onScanAnother}>
-              {copy.scanAnother}
-            </button>
-          )}
-          <button type="button" onClick={reload}>
-            {copy.reloadAction}
-          </button>
-          {onDeleteScan !== undefined && (
-            <ScanDeleteAction
-              label={copy.deleteAction}
-              confirm={copy.deleteConfirm}
-              yes={copy.deleteYes}
-              no={copy.deleteNo}
-              busy={loading}
-              onDelete={onDeleteScan}
-            />
-          )}
-        </div>
-      </details>
-      <details className="scan-results-meta">
-        <summary>{copy.techDetails}</summary>
-        <dl>
-          <div>
-            <dt>{copy.metaScan}</dt>
-            <dd>{view.scan.id}</dd>
-          </div>
-          {revisionNumber !== null && (
-            <div>
-              <dt>{copy.metaRevision}</dt>
-              <dd>{revisionNumber}</dd>
-            </div>
-          )}
-          {revisionModel !== null && (
-            <div>
-              <dt>{copy.metaModel}</dt>
-              <dd>{revisionModel}</dd>
-            </div>
-          )}
-          <div>
-            <dt>{copy.detailsProvenance}</dt>
-            <dd>{view.revision?.origin ?? copy.notReady}</dd>
-          </div>
-          <div>
-            <dt>{copy.detailsExpiry}</dt>
-            <dd>
-              <time dateTime={view.scan.expires_at}>
-                {new Date(view.scan.expires_at).toLocaleString(locale)}
-              </time>
-            </dd>
-          </div>
-          {assets.length > 0 && (
-            <div>
-              <dt>{copy.metaPhotos}</dt>
-              <dd>
-                <ul>
-                  {assets.map((asset) => (
-                    <li key={asset.id}>{asset.id}</li>
-                  ))}
-                </ul>
-              </dd>
-            </div>
-          )}
-        </dl>
-      </details>
+      </dialog>
     </article>
   );
 }

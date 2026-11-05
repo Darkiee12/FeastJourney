@@ -28,6 +28,25 @@ export const restaurantSearchSchema = z
     longitude: z.coerce.number().min(-180).max(180).optional(),
     latitude: z.coerce.number().min(-90).max(90).optional(),
     radius: z.coerce.number().int().min(100).max(50000).default(5000),
+    /**
+     * Map-handoff scope from a priced Food Journey recommendation link.
+     * URL-only: consumed once by the restaurant map on mount, never sent
+     * as a server geographic filter (the server keeps its explicit
+     * area/center/bounds contract). Radius steps elsewhere stay 10/25/50.
+     */
+    scope: z.enum(["radius", "city"]).optional(),
+    /** Handoff radius in km. Contract values: 10, 20, 40. */
+    radiusKm: z.coerce.number().int().min(10).max(40).optional(),
+    /** City preset id; never exact coordinates (privacy). */
+    cityPlaceId: z.string().min(1).max(200).optional(),
+    /**
+     * Canonical city display label for preset resolution. The data layer
+     * emits place-registry decimal ids + labels while the map owns string
+     * preset ids; matching by normalized label bridges the two namespaces
+     * without inventing boundaries. Unmatched labels fall through to the
+     * explicit location flow.
+     */
+    cityLabel: z.string().trim().max(200).optional(),
     west: z.coerce.number().min(-180).max(180).optional(),
     south: z.coerce.number().min(-90).max(90).optional(),
     east: z.coerce.number().min(-180).max(180).optional(),

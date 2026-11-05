@@ -11,15 +11,14 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { SharedSelect } from "@/components/ui/select";
-import { ObservedPrice } from "@/modules/restaurant-discovery/components/currency-tools";
 import { menuScanResultsCopy } from "@/modules/restaurant-discovery/components/menu-copy";
 import {
   canonicalDishHrefFor,
+  MenuPrice,
   PriceConfidenceNote,
   type MenuRowItem,
 } from "@/modules/restaurant-discovery/components/menu-item-row";
 import type { MenuSelection } from "@/modules/restaurant-discovery/menu-presentation";
-import { conversionRateFor } from "@/modules/restaurant-discovery/menu-presentation";
 import { isAmount, isCurrency, type ExchangeRate } from "@/shared/money";
 
 /**
@@ -76,10 +75,12 @@ export function MenuPhotoViewer({
   photos,
   photoUrl,
   locale,
+  presentation = "compact",
 }: {
   readonly photos: ReadonlyArray<{ readonly assetId: string; readonly page: number }>;
   readonly photoUrl: (assetId: string) => string;
   readonly locale: string;
+  readonly presentation?: "compact" | "overview";
 }): ReactNode {
   const copy = menuScanResultsCopy(locale);
   const dialogRef = useRef<HTMLDialogElement | null>(null);
@@ -113,12 +114,22 @@ export function MenuPhotoViewer({
   if (photos.length === 0) return null;
 
   return (
-    <span className="menu-detail-photos">
+    <span
+      className={
+        presentation === "overview"
+          ? "flex min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto rounded-2xl"
+          : "menu-detail-photos"
+      }
+    >
       {photos.map((photo) => (
         <button
           key={photo.assetId}
           type="button"
-          className="menu-detail-photo-open"
+          className={
+            presentation === "overview"
+              ? "relative block min-w-0 shrink-0 basis-full snap-start overflow-hidden rounded-2xl border-0 bg-cream p-0 text-left text-sm text-ink focus-visible:outline-2 focus-visible:outline-brand-blue"
+              : "menu-detail-photo-open"
+          }
           onClick={() => inspect(photo.assetId)}
           aria-label={copy.photoOpen.replace("{n}", String(photo.page))}
         >
@@ -128,15 +139,21 @@ export function MenuPhotoViewer({
             loading="lazy"
             width={72}
             height={72}
-            style={{
-              width: "4.5rem",
-              height: "4.5rem",
-              flex: "none",
-              objectFit: "cover",
-              borderRadius: "0.375rem",
-            }}
+            className={
+              presentation === "overview"
+                ? "block h-44 w-full object-cover md:h-72"
+                : "menu-photo-thumb"
+            }
           />
-          {copy.photoOpen.replace("{n}", String(photo.page))}
+          <span
+            className={
+              presentation === "overview"
+                ? "absolute bottom-3 left-3 rounded-lg bg-ink/90 px-2 py-1 text-xs font-semibold text-white"
+                : undefined
+            }
+          >
+            {copy.photoOpen.replace("{n}", String(photo.page))}
+          </span>
         </button>
       ))}
       {open === null ? null : (
@@ -318,24 +335,13 @@ export function MenuItemDetail({
           />
         </span>
       ) : null}
-      {price !== null && price.amount !== null && price.currency !== null && knownPrice ? (
-        <>
-          <ObservedPrice
-            amount={price.amount}
-            currency={price.currency}
-            locale={locale}
-            rate={conversionRateFor(price, rates)}
-          />
-          <PriceConfidenceNote
-            price={price}
-            inferredNote={labels.inferredNote}
-            possibleNote={labels.possibleNote}
-            associationNote={price.associationNote}
-          />
-        </>
-      ) : (
-        <p className="menu-order-price">{labels.unknownPrice}</p>
-      )}
+      <MenuPrice price={price} locale={locale} rates={rates} />
+      <PriceConfidenceNote
+        price={price}
+        inferredNote={labels.inferredNote}
+        possibleNote={labels.possibleNote}
+        associationNote={price?.associationNote}
+      />
       {!knownPrice && price !== null && price.rawText !== "" ? (
         <p>
           {price.rawText} · {labels.unknownCurrency}

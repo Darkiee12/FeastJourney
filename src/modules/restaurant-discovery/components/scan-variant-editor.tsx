@@ -14,12 +14,16 @@ export type ScanVariant = MenuScanDocument["items"][number]["variants"][number];
 export function VariantEditor({
   variant,
   locale,
+  translationLanguage = locale,
   sourceLanguage,
+  menuCountry,
   onChange,
 }: {
   readonly variant: ScanVariant;
   readonly locale: string;
+  readonly translationLanguage?: string;
   readonly sourceLanguage: string;
+  readonly menuCountry?: string | null | undefined;
   readonly onChange: (variant: ScanVariant) => void;
 }) {
   const copy = menuCopy(locale);
@@ -40,7 +44,7 @@ export function VariantEditor({
       <label htmlFor={`edit-variant-translation-${variant.id}`}>{copy.translatedVariant}</label>
       <input
         id={`edit-variant-translation-${variant.id}`}
-        lang={locale}
+        lang={translationLanguage}
         maxLength={300}
         value={variant.translatedLabel ?? ""}
         onChange={(event) =>
@@ -72,6 +76,7 @@ export function VariantEditor({
             variantId={variant.id}
             price={price}
             priceValid={priceValid}
+            menuCountry={menuCountry}
             onChange={(next) => onChange({ ...variant, price: next })}
           />
           <button type="button" onClick={() => onChange({ ...variant, price: null })}>

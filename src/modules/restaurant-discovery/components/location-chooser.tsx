@@ -27,6 +27,8 @@ export function LocationChooser({
 
     if (id === "bangalore") return "Bengaluru (Bangalore)";
 
+    if (id === "los-angeles") return "Los Angeles";
+
     return id;
   };
 

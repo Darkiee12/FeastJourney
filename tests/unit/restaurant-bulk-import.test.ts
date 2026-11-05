@@ -211,7 +211,7 @@ describe("validateStagedRow", () => {
     expect(check.externalRef).toBe("ov-1");
   });
 
-  test("rejects rows outside coverage and non-VN countries", () => {
+  test("rejects rows outside coverage and non-covered countries", () => {
     const hanoi = validateStagedRow(
       {
         businessName: "Cha Ca",
@@ -239,7 +239,7 @@ describe("validateStagedRow", () => {
         name: "N",
         address: "A",
         area: "Area",
-        countryCode: "US",
+        countryCode: "JP",
         longitude: "106.7",
         latitude: "10.77",
         cuisineSlugs: undefined,

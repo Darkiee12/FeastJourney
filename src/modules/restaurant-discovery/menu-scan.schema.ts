@@ -33,6 +33,7 @@ const description = menuText.trim().min(1).max(3000).nullable();
  */
 export const scanPriceSchema = z.strictObject({
   rawText: menuText.max(200),
+  unit: menuText.max(200).nullable().optional(),
   amount: amountSchema.nullable(),
   currency: currencySchema.nullable(),
   currencyProvenance: currencyProvenanceSchema.optional(),
@@ -48,6 +49,7 @@ const extractedVariant = z.strictObject({
 });
 
 const extractedItem = z.strictObject({
+  section: text.nullable().optional(),
   originalName: text,
   translatedName: text.nullable(),
   originalDescription: description,
@@ -102,6 +104,7 @@ export type MenuExtraction = z.infer<typeof menuExtractionSchema>;
  */
 const strictPriceSchema = z.strictObject({
   ...scanPriceSchema.shape,
+  unit: menuText.max(200).nullable(),
   currencyProvenance: currencyProvenanceSchema,
   association: priceAssociationSchema,
   associationNote: associationNoteSchema.nullable(),
@@ -114,6 +117,7 @@ const strictVariantSchema = z.strictObject({
 
 const strictItemSchema = z.strictObject({
   ...extractedItem.shape,
+  section: text.nullable(),
   variants: z.array(strictVariantSchema).min(1).max(20),
 });
 

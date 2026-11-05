@@ -13,8 +13,12 @@ import {
   type DishCarouselItem,
 } from "@/components/dish/dish-carousel";
 import { DishMedia } from "@/components/dish/dish-media";
-import { previewDescription } from "@/components/home/dish-recommendation-card";
+import { previewDescription, NearbyPriceLine } from "@/components/home/dish-recommendation-card";
 import { usePrefersReducedMotion } from "@/components/home/globe/use-prefers-reduced-motion";
+import {
+  useNearbyPrices,
+  type NearbyPriceRequest,
+} from "@/components/home/recommend/use-nearby-prices";
 import type { Locale, Messages } from "@/shared/i18n";
 
 /**
@@ -43,6 +47,14 @@ export interface RecommendationRailProps {
    * the lead's wiring, not this component.
    */
   readonly label: string;
+  /**
+   * Optional post-ranking enrichment for precise ("Near me") runs. When
+   * present the rail fires the nearby-price lookup keyed by `runId` and
+   * renders a price line under each priced dish. Null/omitted keeps the
+   * rail exactly as before — no fetch, no placeholders. Ranking order and
+   * selection never wait on prices.
+   */
+  readonly priceRequest?: NearbyPriceRequest | null | undefined;
 }
 
 /**
@@ -65,10 +77,12 @@ export function RecommendationRail({
   label,
   lang,
   onSelect,
+  priceRequest,
 }: RecommendationRailProps) {
   const total = items.length;
   const headingId = useId();
   const reducedMotion = usePrefersReducedMotion();
+  const nearby = useNearbyPrices(priceRequest ?? null);
   const thumbRefs = useRef(new Map<number, HTMLButtonElement>());
   const scrollerRef = useRef<HTMLUListElement | null>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -223,6 +237,11 @@ export function RecommendationRail({
               ? null
               : previewDescription(dish.description);
 
+          // Priced dishes gain a glanceable line; every other state
+          // (loading, failed, unpriced outcome) renders nothing so the
+          // thumbnail keeps its current geometry.
+          const nearbyPrice = nearby.prices.get(dish.id) ?? null;
+
           const descriptionLanguage =
             dish.descriptionLanguage !== null &&
             dish.descriptionLanguage !== undefined &&
@@ -293,6 +312,14 @@ export function RecommendationRail({
                   >
                     {preview ?? ""}
                   </span>
+                  {nearbyPrice === null ? null : (
+                    <NearbyPriceLine
+                      dishId={dish.id}
+                      dishSlug={dish.slug}
+                      lang={lang}
+                      price={nearbyPrice}
+                    />
+                  )}
                 </span>
               </button>
             </li>

@@ -1,14 +1,5 @@
 /* Menu scan page: mobile-first, scoped to .menu-scan-page. Centered 560-680px desktop. */
 
-.menu-scan-page {
-  max-width: 42.5rem;
-  margin-inline: auto;
-  padding-inline: 1rem;
-  padding-block-end: 4rem;
-  color: var(--color-ink);
-  overflow-wrap: anywhere;
-}
-
 /* Results variant: wider column once a scanned document exists. Applied as
    an explicit page class by the scan page, never via :has sniffing of
    result content. Stays inside the app shell's centered main column. */
@@ -17,31 +8,6 @@
 }
 
 /* Compact Muse-branded heading: eyebrow + title + one-line subtitle. */
-.scan-hero {
-  margin-block: 1rem 0.75rem;
-}
-
-.scan-eyebrow {
-  margin-block: 0 0.25rem;
-  font-size: 0.75rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--color-food-orange-strong);
-}
-
-.scan-hero h1 {
-  margin-block: 0 0.25rem;
-  font-size: 1.75rem;
-  line-height: 1.15;
-}
-
-.scan-subtitle {
-  margin-block: 0;
-  font-size: 0.9375rem;
-  line-height: 1.5;
-  color: var(--color-muted);
-}
 
 .scan-return {
   margin-block: 0 0.5rem;
@@ -65,44 +31,12 @@
 }
 
 /* Cohesive capture surface. */
-.scan-capture {
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.75rem;
-  background: white;
-  padding: 1rem;
-}
 
 .scan-capture-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
   margin-block-end: 0.25rem;
-}
-
-.scan-capture-primary,
-.scan-capture-secondary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  min-height: 2.75rem;
-  border-radius: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
-  font-weight: 700;
-  cursor: pointer;
-  text-align: center;
-}
-
-.scan-capture-primary {
-  background: var(--color-ink);
-  color: white;
-}
-
-.scan-capture-secondary {
-  border: 1px solid var(--color-ink);
-  background: white;
-  color: var(--color-ink);
 }
 
 .scan-file-input {
@@ -185,18 +119,6 @@
   gap: 0.25rem;
 }
 
-.scan-photo-cell-actions button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 2.75rem;
-  min-height: 2.75rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.25rem;
-  background: white;
-  color: var(--color-ink);
-}
-
 .scan-photo-dialog {
   border: 1px solid var(--color-border-soft);
   border-radius: 0.75rem;
@@ -228,22 +150,6 @@
   padding: 0.5rem 1rem;
 }
 
-.scan-add-pages {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-height: 2.75rem;
-  margin-block-end: 0.75rem;
-  border: 1px dashed var(--color-muted);
-  border-radius: 0.5rem;
-  background: white;
-  color: var(--color-ink);
-  font-size: 0.875rem;
-  font-weight: 650;
-  padding: 0.5rem 0.75rem;
-  cursor: pointer;
-}
-
 /* Single inline primary action. */
 .scan-submit {
   width: 100%;
@@ -259,21 +165,6 @@
 }
 
 /* Tagged processing state. */
-.scan-processing {
-  margin-block: 0.75rem 0;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.5rem;
-  padding: 0.75rem;
-  background: white;
-}
-
-.scan-processing-line {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  line-height: 1.5;
-  font-weight: 650;
-}
 
 .scan-spin {
   animation: scan-rotate 1s linear infinite;
@@ -285,13 +176,6 @@
   margin-block-start: 0.5rem;
 }
 
-.scan-processing-note {
-  margin-block: 0.5rem 0;
-  font-size: 0.8125rem;
-  line-height: 1.5;
-  color: var(--color-muted);
-}
-
 @keyframes scan-rotate {
   to {
     transform: rotate(360deg);
@@ -299,15 +183,6 @@
 }
 
 /* Compact contextual error near the action. */
-.scan-error {
-  margin-block: 0.75rem 0;
-  border-inline-start: 0.25rem solid var(--color-food-orange-strong);
-  border-block: 1px solid var(--color-border-soft);
-  border-inline-end: 1px solid var(--color-border-soft);
-  border-radius: 0.25rem;
-  padding: 0.625rem 0.75rem;
-  background: white;
-}
 
 .scan-error-message {
   display: flex;
@@ -596,41 +471,113 @@
   color: var(--color-muted);
 }
 
-/* Compact overflow actions: scan another / reload / delete. */
-.scan-results-overflow {
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.5rem;
-  padding: 0.25rem 1rem 1rem;
-  background: white;
+/* Scan tools dialog: one workspace for compare, contribute, info, management.
+   Flat sections with dividers (never nested bordered cards); dialog chrome
+   itself reuses the review-dialog pattern (bottom-sheet mobile, centered
+   desktop) via inline classes. Body text never drops below 0.875rem.
+   (The old `.scan-results-overflow*` card rules were deleted with the
+   disclosure they styled; no markup references them anymore.) */
+.scan-tools-body {
+  display: grid;
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 
-.scan-results-overflow > summary {
+.scan-tools-body > section {
+  min-width: 0;
+  padding-block: 1rem;
+}
+
+.scan-tools-body > section + section {
+  border-block-start: 1px solid var(--color-border-soft);
+}
+
+.scan-tools-title {
+  margin-block: 0 0.5rem;
+  font-size: 1.125rem;
+  line-height: 1.3;
+}
+
+.scan-tools-section > p {
+  margin-block: 0 0.5rem;
+}
+
+/* Research renders its own section: keep its controls, drop the card. */
+.scan-tools-body .scan-price-research {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.scan-tools-info {
+  display: grid;
+  gap: 0.375rem;
+  margin-block: 0.5rem;
+}
+
+.scan-tools-info > div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 10rem) 1fr;
+  gap: 0.5rem;
+}
+
+.scan-tools-info dt {
+  font-weight: 700;
+}
+
+.scan-tools-info dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.scan-tools-diagnostics {
+  margin-block-start: 0.5rem;
+}
+
+.scan-tools-diagnostics summary {
   min-height: 2.75rem;
-  padding-block: 0.75rem;
+  padding-block: 0.5rem;
   cursor: pointer;
   font-weight: 650;
 }
 
-.scan-results-overflow-actions {
+.scan-tools-diagnostics ul {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scan-tools-diagnostics li {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
   align-items: center;
+  gap: 0.5rem;
 }
 
-.scan-results-overflow-actions button {
-  min-height: 2.75rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.25rem;
-  background: white;
-  color: var(--color-ink);
-  font-weight: 650;
-  padding: 0.5rem 1rem;
-  cursor: pointer;
+.scan-tools-diagnostics code {
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+}
+
+.scan-tools-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .scan-delete {
   border-color: var(--color-food-orange-strong);
+  color: var(--color-food-orange-strong);
+}
+
+/* Tentative dish→venue matches stay visibly uncertain. */
+.price-compare-tentative {
+  font-weight: 650;
   color: var(--color-food-orange-strong);
 }
 
@@ -641,12 +588,6 @@
   gap: 0.5rem;
   font-size: 0.875rem;
   font-weight: 650;
-}
-
-/* Tentative dish→venue matches stay visibly uncertain. */
-.price-compare-tentative {
-  font-weight: 650;
-  color: var(--color-food-orange-strong);
 }
 
 @media (min-width: 28rem) {
@@ -667,6 +608,344 @@
   .menu-scan-page *::before,
   .menu-scan-page *::after {
     animation: none;
+    transition: none;
+  }
+}
+
+/* Capture chrome shares home tokens; results are owned by menu-order.css. */
+
+.app-shell:has(.menu-scan-page) {
+  background:
+    radial-gradient(rgb(23 32 51 / 0.09) 1px, transparent 1.4px) 0 0 / 16px 16px,
+    var(--color-cream);
+}
+
+.menu-scan-page {
+  max-width: 42.5rem;
+  margin-inline: auto;
+  padding-inline: 1rem;
+  padding-block-end: 4rem;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+  padding-block-start: 1rem;
+}
+
+/* --------------------------------------------------------------- hero --- */
+
+.scan-hero {
+  margin-block: 1rem 0.75rem;
+  display: grid;
+  justify-items: start;
+  gap: 0.5rem;
+  margin-block-end: 1.25rem;
+}
+
+.scan-eyebrow {
+  margin-block: 0 0.25rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.7rem;
+  border-radius: 9999px;
+  background: var(--color-space-deep);
+  color: var(--color-mango);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+}
+
+.scan-hero h1 {
+  margin-block: 0 0.25rem;
+  display: inline;
+  padding: 0 0.15em;
+  font-size: clamp(2.5rem, 7vw, 3.5rem);
+  line-height: 1.05;
+  color: var(--fj-ink);
+  background: linear-gradient(
+    transparent 54%,
+    var(--fj-highlight) 54%,
+    var(--fj-highlight) 90%,
+    transparent 90%
+  );
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.scan-subtitle {
+  margin-block: 0;
+  line-height: 1.5;
+  color: var(--color-muted);
+  font-size: 1.05rem;
+}
+
+.scan-branch-unknown,
+.scan-branch-chip {
+  font-size: 0.85rem;
+}
+
+/* ----------------------------------------------------------- capture --- */
+
+.scan-capture {
+  gap: 1rem;
+  padding: 1.25rem;
+  border: var(--fj-line);
+  border-radius: 1.25rem;
+  background: white;
+  box-shadow: 5px 5px 0 var(--fj-ink);
+}
+
+/* `.menu-scan-page label` sets display: block, which stacked icon over text. */
+.menu-scan-page label.scan-capture-primary,
+.menu-scan-page label.scan-capture-secondary {
+  display: inline-flex;
+}
+
+.menu-scan-page label.scan-consent {
+  display: flex;
+}
+
+.scan-capture-primary svg,
+.scan-capture-secondary svg {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.scan-capture-primary,
+.scan-capture-secondary {
+  display: inline-flex;
+  font-size: 0.875rem;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  min-height: 3.25rem;
+  padding: 0.6rem 1rem;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  box-shadow: 2px 2px 0 var(--fj-ink);
+  font-weight: 800;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    translate 100ms ease-out,
+    box-shadow 100ms ease-out;
+}
+
+.scan-capture-primary {
+  background: var(--color-food-orange-strong);
+  color: white;
+}
+
+.scan-capture-secondary {
+  border: 1px solid var(--color-ink);
+  background: white;
+  color: var(--fj-ink);
+}
+
+.scan-capture-primary:hover,
+.scan-capture-secondary:hover {
+  translate: -1px -1px;
+  box-shadow: var(--fj-hard);
+}
+
+.scan-capture-primary:active,
+.scan-capture-secondary:active {
+  translate: 2px 2px;
+  box-shadow: none;
+}
+
+.menu-scan-page button[role="combobox"],
+.menu-scan-page select,
+.menu-scan-page input[type="text"],
+.menu-scan-page input:not([type]) {
+  border: var(--fj-line);
+  border-radius: 0.75rem;
+  background-color: white;
+}
+
+.scan-photo-cell,
+.scan-add-pages {
+  border: var(--fj-line);
+  border-radius: 0.9rem;
+}
+
+.scan-add-pages {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  margin-block-end: 0.75rem;
+  border: 1px dashed var(--color-muted);
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 650;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  border-style: dashed;
+  background: var(--fj-mango-soft);
+  color: var(--fj-ink);
+}
+
+.scan-photo-cell-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.75rem;
+  background: white;
+  color: var(--color-ink);
+  width: 2.5rem;
+  height: 2.5rem;
+  min-height: 0;
+  padding: 0;
+  border: var(--fj-line);
+  border-radius: 9999px;
+}
+
+/* Primary action across the scanner and the waiter card. */
+.menu-scan-page .menu-order-primary {
+  min-height: 3.25rem;
+  border: var(--fj-line);
+  border-radius: 9999px;
+  background: var(--color-food-orange-strong);
+  color: white;
+  box-shadow: var(--fj-hard);
+  font-weight: 800;
+}
+
+.menu-scan-page .menu-order-primary:hover:not(:disabled) {
+  translate: -1px -1px;
+  box-shadow: 4px 4px 0 var(--fj-ink);
+}
+
+.menu-scan-page .menu-order-primary:active:not(:disabled) {
+  translate: 2px 2px;
+  box-shadow: none;
+}
+
+.menu-scan-page .menu-order-primary:disabled {
+  border-color: color-mix(in srgb, var(--fj-ink) 22%, transparent);
+  background: var(--color-cream);
+  color: var(--color-muted);
+  box-shadow: none;
+  opacity: 1;
+}
+
+/* ------------------------------------------------- reading the menu --- */
+
+.scan-processing {
+  margin-block: 0.75rem 0;
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem 1.25rem;
+  border: var(--fj-line);
+  border-radius: 1.25rem;
+  background: var(--fj-mango-soft);
+  box-shadow: 5px 5px 0 var(--fj-ink);
+  text-align: center;
+}
+
+.scan-processing-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  line-height: 1.5;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.scan-processing-note {
+  margin-block: 0.5rem 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  margin: 0;
+  color: color-mix(in srgb, var(--fj-ink) 72%, transparent);
+}
+
+.scan-reading {
+  position: relative;
+  display: grid;
+  gap: 0.5rem;
+  width: 8.5rem;
+  padding: 1rem 0.9rem;
+  border: var(--fj-line);
+  border-radius: 0.6rem;
+  background: white;
+  box-shadow: var(--fj-hard);
+  overflow: hidden;
+  rotate: -3deg;
+}
+
+.scan-reading-title,
+.scan-reading-line {
+  display: block;
+  height: 0.4rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--fj-ink) 16%, transparent);
+}
+
+.scan-reading-title {
+  width: 55%;
+  height: 0.6rem;
+  background: var(--color-food-orange-strong);
+}
+
+.scan-reading-line:nth-of-type(3n) {
+  width: 72%;
+}
+
+.scan-reading-beam {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 1.5rem;
+  border-bottom: 3px solid var(--color-food-orange);
+  background: linear-gradient(transparent, color-mix(in srgb, var(--color-mango) 60%, transparent));
+  animation: scan-beam 2.4s ease-in-out infinite alternate;
+}
+
+@keyframes scan-beam {
+  from {
+    translate: 0 -1.5rem;
+  }
+
+  to {
+    translate: 0 9rem;
+  }
+}
+
+/* Upload steps are short and report real counts; only reading gets the card. */
+.scan-processing:not([data-phase="reading"]) .scan-reading {
+  display: none;
+}
+
+.scan-error {
+  margin-block: 0.75rem 0;
+  border-inline-start: 0.25rem solid var(--color-food-orange-strong);
+  border-block: 1px solid var(--color-border-soft);
+  border-inline-end: 1px solid var(--color-border-soft);
+  padding: 0.625rem 0.75rem;
+  background: white;
+  border: var(--fj-line);
+  border-left-width: 0.5rem;
+  border-left-color: var(--color-food-orange-strong);
+  border-radius: 1rem;
+  box-shadow: var(--fj-hard);
+}
+
+@media (max-width: 640px) {
+  .scan-capture-actions {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scan-reading-beam {
+    animation: none;
+    translate: 0 4rem;
+  }
+  .scan-capture-primary,
+  .scan-capture-secondary {
     transition: none;
   }
 }

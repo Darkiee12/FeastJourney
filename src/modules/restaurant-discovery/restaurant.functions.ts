@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 
 import {
   menuImportSchema,
@@ -177,5 +178,45 @@ export const getVenueChannelsFn = createServerFn({ method: "GET" })
         ),
         (rows) => rows.map((row) => row.sales_channel),
       ),
+    );
+  });
+
+/**
+ * Batched nearby dish prices for "Near me" cards: up to twelve dishes at one
+ * origin, results in input order. Coordinates are optional here so a missing
+ * fix yields per-dish `unsupported-location` outcomes instead of a rejection;
+ * out-of-range numbers are rejected at this boundary. Public read: no actor.
+ */
+const nearbyDishPriceRequestSchema = z.object({
+  dishIds: z
+    .array(z.string().regex(/^[1-9][0-9]{0,18}$/))
+    .min(1)
+    .max(12),
+  latitude: z.number().min(-90).max(90).nullish(),
+  longitude: z.number().min(-180).max(180).nullish(),
+  channel: channelSchema.default("dine_in"),
+  cityPlaceId: z
+    .string()
+    .regex(/^[1-9][0-9]{0,18}$/)
+    .nullish(),
+});
+
+export const lookupNearbyDishPricesFn = createServerFn({ method: "GET" })
+  .validator(nearbyDishPriceRequestSchema)
+  .handler(async ({ data }) => {
+    const { lookupNearbyDishPrices } =
+      await import("@/modules/restaurant-discovery/server/operations/discovery");
+
+    const { runClientOperation } = await import("@/server/http/run-client-operation");
+
+    return runClientOperation(
+      lookupNearbyDishPrices({
+        dishIds: data.dishIds,
+        latitude: data.latitude ?? null,
+        longitude: data.longitude ?? null,
+        channel: data.channel,
+        cityPlaceId: data.cityPlaceId ?? null,
+      }),
+      "search",
     );
   });

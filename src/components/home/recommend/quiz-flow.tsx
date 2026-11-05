@@ -60,6 +60,7 @@ import {
   AvoidStep,
   CravingStep,
   WhereStep,
+  preciseLookupOriginFor,
   type CountryOption,
 } from "@/components/home/recommend/quiz-stages";
 import {
@@ -83,6 +84,7 @@ import {
   useAgentRecommendationStream,
   type AgentStreamRequest,
 } from "@/components/home/recommend/use-agent-progress";
+import type { NearbyPriceRequest } from "@/components/home/recommend/use-nearby-prices";
 import { usePreciseLocation } from "@/components/home/recommend/use-precise-location";
 import { listCountriesFn, recommendDishesFn } from "@/modules/food-discovery/food.functions";
 import { getQuizRegionFn } from "@/modules/food-discovery/quiz.functions";
@@ -1057,6 +1059,30 @@ export function RecommendSection() {
   const [railIndex, setRailIndex] = useState(journey?.railIndex ?? 0);
   const [railKey, setRailKey] = useState(outcomeKey);
 
+  // Nearby-price enrichment runs only for precise ("Near me") runs: the
+  // gate returns coordinates exclusively for precise fixes, so every other
+  // location mode yields null and keeps today's behavior untouched. The
+  // runId is the canonical outcome key, so retry/surprise/navigation can
+  // never attach stale prices to a new dish list.
+  const nearbyPriceRequest: NearbyPriceRequest | null = useMemo(() => {
+    if (submitted === null || carouselItems.length === 0) {
+      return null;
+    }
+
+    const origin = preciseLookupOriginFor(submitted.location);
+
+    if (origin === null) {
+      return null;
+    }
+
+    return {
+      runId: outcomeKey,
+      dishIds: carouselItems.map((dish) => dish.id).slice(0, 12),
+      latitude: origin.latitude,
+      longitude: origin.longitude,
+    };
+  }, [carouselItems, outcomeKey, submitted]);
+
   if (railKey !== outcomeKey) {
     setRailKey(outcomeKey);
     setRailIndex(0);
@@ -1860,6 +1886,7 @@ export function RecommendSection() {
             label={copyMessages.recRailHeading}
             lang={lang}
             onSelect={setRailIndex}
+            priceRequest={nearbyPriceRequest}
           />
         </div>
       </div>

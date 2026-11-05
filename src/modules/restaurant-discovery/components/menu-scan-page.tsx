@@ -10,6 +10,7 @@ import type { ResearchFinding } from "@/components/research/research-findings";
 import { SharedSelectField } from "@/components/ui/select";
 import {
   menuCopy,
+  menuResultsCopy,
   menuScanPageCopy,
   menuScanResultsCopy,
 } from "@/modules/restaurant-discovery/components/menu-copy";
@@ -26,9 +27,13 @@ import {
   ScanProcessing,
   type ScanPhase,
 } from "@/modules/restaurant-discovery/components/scan-processing";
+import { ScanResearchLocation } from "@/modules/restaurant-discovery/components/scan-research-location";
 import { ScanResults } from "@/modules/restaurant-discovery/components/scan-results";
+import { SearchableCurrencyPicker } from "@/modules/restaurant-discovery/components/searchable-currency-picker";
 import { CITY_PRESETS } from "@/modules/restaurant-discovery/map-bounds";
 import { menuBcp47TagFor } from "@/modules/restaurant-discovery/menu-presentation";
+import { normalizeCurrencyContext } from "@/modules/restaurant-discovery/menu-price-evidence";
+import { interpretPrintedPrice } from "@/modules/restaurant-discovery/menu-price-interpretation";
 import {
   MenuScanClientError,
   menuScanClient,
@@ -39,6 +44,7 @@ import { menuLanguageSchema } from "@/modules/restaurant-discovery/menu-scan.sch
 import type { MenuScanDocument } from "@/modules/restaurant-discovery/menu-scan.schema";
 import { getRestaurantFn } from "@/modules/restaurant-discovery/restaurant.functions";
 import { researchPricesFn } from "@/server/web-research/research-functions";
+import { currencyMinorUnits } from "@/shared/currencies";
 import { localeSearchSchema, type Locale } from "@/shared/i18n";
 import { isCurrency } from "@/shared/money";
 
@@ -198,7 +204,15 @@ const cityIdSchema = z
     return placeLocationPattern.test(cityId);
   });
 
-const storedLocationSchema = z.object({ cityId: cityIdSchema, label: z.string().min(1).max(200) });
+const storedLocationSchema = z.object({
+  cityId: cityIdSchema,
+  label: z.string().min(1).max(200),
+  country: z
+    .string()
+    .regex(/^[A-Z]{2}$/)
+    .nullable()
+    .optional(),
+});
 
 const readStoredMenuLocation = (): ScanMenuLocation | null => {
   try {
@@ -222,7 +236,11 @@ const rememberMenuLocation = (location: ScanMenuLocation | null): void => {
     else
       sessionStorage.setItem(
         storageMenuLocation,
-        JSON.stringify({ cityId: location.cityId, label: location.label }),
+        JSON.stringify({
+          cityId: location.cityId,
+          label: location.label,
+          country: location.country,
+        }),
       );
   } catch {
     return;
@@ -259,10 +277,14 @@ function ScanPriceResearch({
   locale,
   items,
   menuLocation,
+  menuCountry = null,
+  onMenuLocation,
 }: {
   readonly locale: string;
   readonly items: MenuScanDocument["items"];
   readonly menuLocation?: ScanMenuLocation | null | undefined;
+  readonly menuCountry?: string | null | undefined;
+  readonly onMenuLocation: (location: ScanMenuLocation | null) => void;
 }) {
   const language = locale === "vi" ? "vi" : "en";
   const strings = researchCopyFor(language);
@@ -274,7 +296,9 @@ function ScanPriceResearch({
 
   const selectedCurrency =
     selected?.variants
-      .map((variant) => variant.price?.currency ?? null)
+      .map((variant) =>
+        variant.price === null ? null : interpretPrintedPrice(variant.price, menuCountry).currency,
+      )
       .find((currency): currency is string => currency !== null && isCurrency(currency)) ?? "";
 
   const [currency, setCurrency] = useState(selectedCurrency);
@@ -285,7 +309,7 @@ function ScanPriceResearch({
   // so the country field stays empty rather than inventing one.
   // Currency still defaults from the dish.
   const [city, setCity] = useState(menuLocation?.label ?? "");
-  const [country, setCountry] = useState("");
+  const [country, setCountry] = useState(menuLocation?.country ?? "");
   const [state, setState] = useState<ResearchStatusState>("idle");
   const [contextLine, setContextLine] = useState("");
   const [findings, setFindings] = useState<ReadonlyArray<ResearchFinding>>([]);
@@ -299,7 +323,9 @@ function ScanPriceResearch({
     setDishId(id);
 
     const priced = next.variants
-      .map((variant) => variant.price?.currency ?? null)
+      .map((variant) =>
+        variant.price === null ? null : interpretPrintedPrice(variant.price, menuCountry).currency,
+      )
       .find((code): code is string => code !== null && isCurrency(code));
 
     if (priced !== undefined) setCurrency(priced);
@@ -426,48 +452,27 @@ function ScanPriceResearch({
         }))}
         size="regular"
       />
-      {/* Single column: the research group lives in the narrow results
-          aside on desktop, where the stylesheet's three-column place grid
-          would crush the inputs. Inline style wins over that unlayered
-          rule; stacked inputs stay readable at every width. */}
-      <div className="scan-research-place" style={{ gridTemplateColumns: "1fr" }}>
-        <div>
-          <label htmlFor="scan-research-city">{copy.researchCity}</label>
-          <input
-            id="scan-research-city"
-            type="text"
-            autoComplete="address-level2"
-            maxLength={100}
-            placeholder={copy.researchCityPlaceholder}
-            value={city}
-            onChange={(event) => setCity(event.target.value)}
-          />
-        </div>
-        <div>
-          <label htmlFor="scan-research-country">{copy.researchCountry}</label>
-          <input
-            id="scan-research-country"
-            type="text"
-            autoComplete="country-name"
-            maxLength={100}
-            placeholder={copy.researchCountryPlaceholder}
-            value={country}
-            onChange={(event) => setCountry(event.target.value)}
-          />
-        </div>
-        <div>
-          <label htmlFor="scan-research-currency">{copy.researchCurrency}</label>
-          <input
-            id="scan-research-currency"
-            type="text"
-            autoComplete="off"
-            maxLength={3}
-            placeholder="VND"
-            value={currency}
-            onChange={(event) => setCurrency(event.target.value.trim().toUpperCase())}
-          />
-        </div>
-      </div>
+      <ScanResearchLocation
+        locale={language}
+        city={city}
+        country={country}
+        onChange={(nextCity, nextCountry, cityId) => {
+          setCity(nextCity);
+          setCountry(nextCountry);
+
+          if (cityId !== undefined)
+            onMenuLocation({ cityId, label: nextCity, country: nextCountry });
+          else onMenuLocation(null);
+        }}
+      />
+      <SearchableCurrencyPicker
+        value={currency}
+        codes={[...currencyMinorUnits.keys()]}
+        locale={locale}
+        label={copy.researchCurrency}
+        placeholder={copy.researchCurrency}
+        onChange={setCurrency}
+      />
       <button
         type="button"
         className="menu-order-primary scan-research-trigger"
@@ -507,11 +512,289 @@ function ScanPriceResearch({
 // main column. `onEditDish` is intentionally omitted so dish edits open
 // S2's internal corrections. Corrections saving therefore lives inside S2;
 // this page keeps the surrounding chrome the peer does not render:
-// transient status/failure above the grid, then a 70/30 desktop grid
-// (single readable column on mobile) with S2's dishes dominant, the S1
-// price-research sibling (single-trigger rule) and the contribution group
-// stacked in the aside. Consent wording, confirmations, and all scan
-// transport/polling/retry logic below are untouched.
+// transient status/failure, the results column, and the "More tools" dialog
+// below (compare prices, contribution, scan information, scan management)
+// triggered from S2's header via `toolsTrigger`. Consent wording,
+// confirmations, and all scan transport/polling/retry logic below are
+// untouched.
+
+type ToolsCopy = ReturnType<typeof menuScanResultsCopy>;
+
+const toolsStartOfDay = (date: Date): number =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+
+/**
+ * Expiry value for the scan-information section: the "tomorrow" wording only
+ * when the stored expiry lands on the next local calendar day, otherwise the
+ * full local date. An unreadable timestamp renders nothing rather than
+ * inventing urgency. Same rule the results overflow used before its removal.
+ */
+const toolsExpiryValue = (expiresAt: string, locale: string, copy: ToolsCopy): string | null => {
+  const expiry = new Date(expiresAt);
+
+  if (Number.isNaN(expiry.getTime())) return null;
+
+  const diffDays = Math.round((toolsStartOfDay(expiry) - toolsStartOfDay(new Date())) / 86_400_000);
+
+  if (diffDays === 1) return copy.expiresTomorrow;
+
+  return expiry.toLocaleString(locale);
+};
+
+/** Best-effort copy for technical IDs: clipboard API, silent when unavailable. */
+const copyDiagnosticId = (text: string): void => {
+  void (async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      return;
+    }
+  })();
+};
+
+/**
+ * Single "More tools" workspace for a private scan result. Native dialog,
+ * bottom-sheet on mobile and centered on desktop (same pattern as the order
+ * review dialog): the menu behind stays mounted, the dialog only overlays.
+ * Compare-prices research and the contribution form move here unchanged;
+ * scan information shows human-readable rows with UUIDs collapsed into a
+ * diagnostics block; scan management is the only home for scan-another,
+ * reload-status, and delete-with-confirm.
+ */
+function ScanToolsDialog({
+  locale,
+  dialogRef,
+  triggerRef,
+  view,
+  items,
+  menuLocation,
+  menuCountry,
+  onMenuLocation,
+  consent,
+  onConsentChange,
+  busy,
+  onSubmitContribution,
+  onScanAnother,
+  onReloadStatus,
+  onDeleteScan,
+}: {
+  readonly locale: string;
+  readonly dialogRef: { readonly current: HTMLDialogElement | null };
+  readonly triggerRef: { readonly current: HTMLButtonElement | null };
+  readonly view: ScanView;
+  readonly items: MenuScanDocument["items"];
+  readonly menuLocation: ScanMenuLocation | null;
+  readonly menuCountry: string | null;
+  readonly onMenuLocation: (location: ScanMenuLocation | null) => void;
+  readonly consent: boolean;
+  readonly onConsentChange: (consent: boolean) => void;
+  readonly busy: boolean;
+  readonly onSubmitContribution: () => void;
+  readonly onScanAnother: () => void;
+  readonly onReloadStatus: () => void;
+  readonly onDeleteScan: () => void;
+}) {
+  const copy = locale === "vi" ? vietnamese : english;
+  const resultsCopy = menuScanResultsCopy(locale);
+  const ui = menuResultsCopy(locale);
+  const [contributeOpen, setContributeOpen] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const closeTools = (): void => {
+    dialogRef.current?.close();
+  };
+
+  const canContribute =
+    view.contribution === null ||
+    (view.contribution.status === "rejected" &&
+      view.scan.current_revision !== null &&
+      view.scan.current_revision > view.contribution.revision);
+
+  const assets = [...view.assets].toSorted((a, b) => a.page_number - b.page_number);
+  const pageCount = assets.reduce((max, asset) => Math.max(max, asset.page_number), 0);
+  const revisionNumber = view.revision?.number ?? view.scan.current_revision;
+  const modelText = (view.revision?.model ?? "").trim();
+  const model = modelText === "" ? null : modelText;
+  const origin = view.revision === null ? null : view.revision.origin;
+  const expiry = toolsExpiryValue(view.scan.expires_at, locale, resultsCopy);
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="scan-tools fixed inset-x-0 bottom-0 m-0 max-h-[90dvh] w-full max-w-none overflow-y-auto overscroll-contain rounded-t-3xl border border-border-soft bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-ink shadow-xl backdrop:bg-ink/60 sm:inset-0 sm:m-auto sm:w-[calc(100%-2rem)] sm:max-w-2xl sm:rounded-3xl sm:p-6"
+      aria-label={resultsCopy.overflowLabel}
+      onClose={() => {
+        triggerRef.current?.focus({ preventScroll: true });
+      }}
+    >
+      <form method="dialog">
+        <button className="mb-4 min-h-11 rounded-lg border border-ink bg-white px-4 text-sm font-semibold">
+          {ui.close}
+        </button>
+      </form>
+      <h2 className="font-display m-0 text-2xl leading-tight">{resultsCopy.overflowLabel}</h2>
+      <div className="scan-tools-body">
+        {items.length > 0 && (
+          <ScanPriceResearch
+            locale={locale}
+            items={items}
+            menuLocation={menuLocation}
+            menuCountry={menuCountry}
+            onMenuLocation={onMenuLocation}
+          />
+        )}
+        <section className="scan-tools-section" aria-label={copy.contributeTitle}>
+          <h3 className="scan-tools-title">{copy.contributeTitle}</h3>
+          {view.contribution !== null && (
+            <p>
+              {copy.contributed}: {view.contribution.status} · {copy.revision}{" "}
+              {view.contribution.revision}
+            </p>
+          )}
+          {view.contribution?.status === "rejected" && (
+            <p>
+              {locale === "vi"
+                ? "Bạn có thể sửa thực đơn, lưu phiên bản mới rồi tự chọn đóng góp lại."
+                : "You can correct the menu, save a new revision, then choose whether to contribute again."}
+            </p>
+          )}
+          {canContribute && !contributeOpen && (
+            <>
+              <p>{copy.contributeHelp}</p>
+              <button type="button" onClick={() => setContributeOpen(true)}>
+                {copy.contribute}
+              </button>
+            </>
+          )}
+          {canContribute && contributeOpen && (
+            <>
+              <p>{copy.contributeHelp}</p>
+              <label className="scan-consent">
+                <input
+                  type="checkbox"
+                  checked={consent}
+                  disabled={busy}
+                  onChange={(event) => onConsentChange(event.target.checked)}
+                />
+                {copy.consent}
+              </label>
+              <button type="button" disabled={busy || !consent} onClick={onSubmitContribution}>
+                {copy.contribute}
+              </button>
+            </>
+          )}
+        </section>
+        <section className="scan-tools-section" aria-label={resultsCopy.techDetails}>
+          <h3 className="scan-tools-title">{resultsCopy.techDetails}</h3>
+          <dl className="scan-tools-info">
+            {expiry !== null && (
+              <div>
+                <dt>{resultsCopy.detailsExpiry}</dt>
+                <dd>{expiry}</dd>
+              </div>
+            )}
+            {revisionNumber !== null && (
+              <div>
+                <dt>{resultsCopy.metaRevision}</dt>
+                <dd>{revisionNumber}</dd>
+              </div>
+            )}
+            {model !== null && (
+              <div>
+                <dt>{resultsCopy.metaModel}</dt>
+                <dd>{model}</dd>
+              </div>
+            )}
+            {origin !== null && (
+              <div>
+                <dt>{resultsCopy.detailsProvenance}</dt>
+                <dd>{origin}</dd>
+              </div>
+            )}
+            {pageCount > 0 && (
+              <div>
+                <dt>{locale === "vi" ? "Trang" : "Pages"}</dt>
+                <dd>{pageCount}</dd>
+              </div>
+            )}
+            <div>
+              <dt>{resultsCopy.metaPhotos}</dt>
+              <dd>{assets.length}</dd>
+            </div>
+          </dl>
+          <details className="scan-tools-diagnostics">
+            <summary>{locale === "vi" ? "Mã kỹ thuật" : "Technical IDs"}</summary>
+            <ul>
+              <li>
+                <code>{view.scan.id}</code>
+                <button type="button" onClick={() => copyDiagnosticId(view.scan.id)}>
+                  {locale === "vi" ? "Sao chép" : "Copy"}
+                </button>
+              </li>
+              {assets.map((asset) => (
+                <li key={asset.id}>
+                  <code>{asset.id}</code>
+                  <button type="button" onClick={() => copyDiagnosticId(asset.id)}>
+                    {locale === "vi" ? "Sao chép" : "Copy"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </section>
+        <section
+          className="scan-tools-section"
+          aria-label={locale === "vi" ? "Quản lý bản quét" : "Scan management"}
+        >
+          <h3 className="scan-tools-title">
+            {locale === "vi" ? "Quản lý bản quét" : "Scan management"}
+          </h3>
+          <div className="scan-tools-actions">
+            <button
+              type="button"
+              onClick={() => {
+                closeTools();
+                onScanAnother();
+              }}
+            >
+              {resultsCopy.scanAnother}
+            </button>
+            <button type="button" disabled={busy} onClick={onReloadStatus}>
+              {resultsCopy.reloadAction}
+            </button>
+            {confirmingDelete ? (
+              <span className="scan-delete-confirm" role="alert">
+                <span>{resultsCopy.deleteConfirm}</span>
+                <button
+                  type="button"
+                  className="scan-delete"
+                  disabled={busy}
+                  onClick={() => {
+                    closeTools();
+                    onDeleteScan();
+                  }}
+                >
+                  {resultsCopy.deleteYes}
+                </button>
+                <button type="button" disabled={busy} onClick={() => setConfirmingDelete(false)}>
+                  {resultsCopy.deleteNo}
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="scan-delete"
+                onClick={() => setConfirmingDelete(true)}
+              >
+                {resultsCopy.deleteAction}
+              </button>
+            )}
+          </div>
+        </section>
+      </div>
+    </dialog>
+  );
+}
 
 function prefersReducedMotion(): boolean {
   try {
@@ -631,6 +914,8 @@ export function MenuScanPage({
   const [uploadTotal, setUploadTotal] = useState(0);
   const controller = useRef<AbortController | null>(null);
   const previewUrls = useRef(new Set<string>());
+  const toolsDialogRef = useRef<HTMLDialogElement | null>(null);
+  const toolsTriggerRef = useRef<HTMLButtonElement | null>(null);
   const submitGuard = useRef(false);
   const busy = status !== null;
   const uploading = uploadTotal > 0 && uploaded < uploadTotal;
@@ -1065,11 +1350,35 @@ export function MenuScanPage({
     );
   };
 
+  const reloadStatus = (id: string): void => {
+    void runTask(
+      copy.refresh,
+      async (signal) => {
+        adoptView(await menuScanClient.get(id, signal));
+      },
+      null,
+    );
+  };
+
+  const openTools = (): void => {
+    toolsDialogRef.current?.showModal();
+  };
+
+  const menuCountry = normalizeCurrencyContext({
+    menuCountry: menuLocation?.country ?? null,
+  }).menuCountry;
+
+  const resultsCopy = menuScanResultsCopy(locale);
+
   const submitHint = photos.length > 0 && !busy && scanId !== null ? copy.uploadRetry : null;
 
   return (
     <article
-      className={document !== null ? "menu-scan-page menu-scan-page--results" : "menu-scan-page"}
+      className={
+        document !== null
+          ? "mx-auto max-w-6xl px-3 pb-[calc(7rem+env(safe-area-inset-bottom))] text-ink break-words sm:px-4 lg:pb-12"
+          : "menu-scan-page"
+      }
       lang={menuBcp47TagFor(locale)}
     >
       {document === null && (
@@ -1195,7 +1504,7 @@ export function MenuScanPage({
       )}
       {view?.scan.status === "processing" && <p>{copy.processing}</p>}
       {document !== null && view !== null && (
-        <section className="scan-results scan-enter">
+        <section className="scan-result-screen scan-enter">
           {status === null && notice !== null && (
             <output className="scan-status" aria-live="polite">
               {notice}
@@ -1210,65 +1519,46 @@ export function MenuScanPage({
               transportKind={failure.transportKind}
             />
           )}
-          {/* Results grid: dishes dominant in the main column (70/30 on
-              desktop, one readable column on mobile). No sticky aside —
-              the order bar inside S2 is already sticky and the site
-              header must keep working. min-w-0 on both columns prevents
-              grid blowout at 320px. */}
-          <div className="scan-results-layout lg:grid lg:grid-cols-3 lg:items-start lg:gap-6">
-            <div className="min-w-0 lg:col-span-2">
-              <ScanResults
-                scanId={view.scan.id}
-                menuLocation={menuLocation}
-                onScanAnother={scanAnother}
-                onDeleteScan={() => deleteScan(view.scan.id)}
-              />
-            </div>
-            <aside className="scan-results-side min-w-0" aria-label={copy.resultsTitle}>
-              {document.items.length > 0 && (
-                <ScanPriceResearch
-                  locale={locale}
-                  items={document.items}
-                  menuLocation={menuLocation}
-                />
-              )}
-              <section className="scan-contribution">
-                <h2 className="font-display text-3xl">{copy.contributeTitle}</h2>
-                {view.contribution !== null && (
-                  <p>
-                    {copy.contributed}: {view.contribution.status} · {copy.revision}{" "}
-                    {view.contribution.revision}
-                  </p>
-                )}
-                {view.contribution?.status === "rejected" && (
-                  <p>
-                    {locale === "vi"
-                      ? "Bạn có thể sửa thực đơn, lưu phiên bản mới rồi tự chọn đóng góp lại."
-                      : "You can correct the menu, save a new revision, then choose whether to contribute again."}
-                  </p>
-                )}
-                {(view.contribution === null ||
-                  (view.contribution.status === "rejected" &&
-                    view.scan.current_revision !== null &&
-                    view.scan.current_revision > view.contribution.revision)) && (
-                  <>
-                    <p>{copy.contributeHelp}</p>
-                    <label className="scan-consent">
-                      <input
-                        type="checkbox"
-                        checked={consent}
-                        disabled={busy}
-                        onChange={(event) => setConsent(event.target.checked)}
-                      />
-                      {copy.consent}
-                    </label>
-                    <button type="button" disabled={busy || !consent} onClick={submitContribution}>
-                      {copy.contribute}
-                    </button>
-                  </>
-                )}
-              </section>
-            </aside>
+          {/* Results column: dishes stay dominant; the old stacked
+              price-research/contribution aside is gone. Research, contribution,
+              scan information, and scan management live in the "More tools"
+              dialog below, triggered from S2's header. min-w-0 prevents grid
+              blowout at 320px. */}
+          <div className="min-w-0">
+            <ScanResults
+              locale={locale}
+              scanId={view.scan.id}
+              menuLocation={menuLocation}
+              onRevisionSaved={adoptView}
+              toolsTrigger={
+                <button
+                  ref={toolsTriggerRef}
+                  type="button"
+                  className="inline-flex min-h-11 items-center gap-2 rounded-full border border-ink bg-white px-4 text-sm font-bold shadow-[0_2px_0_var(--color-ink)]"
+                  onClick={openTools}
+                >
+                  {resultsCopy.overflowLabel}
+                </button>
+              }
+            />
+            <ScanToolsDialog
+              key={view.scan.id}
+              locale={locale}
+              dialogRef={toolsDialogRef}
+              triggerRef={toolsTriggerRef}
+              view={view}
+              items={document.items}
+              menuLocation={menuLocation}
+              menuCountry={menuCountry}
+              onMenuLocation={changeMenuLocation}
+              consent={consent}
+              onConsentChange={setConsent}
+              busy={busy}
+              onSubmitContribution={submitContribution}
+              onScanAnother={scanAnother}
+              onReloadStatus={() => reloadStatus(view.scan.id)}
+              onDeleteScan={() => deleteScan(view.scan.id)}
+            />
           </div>
         </section>
       )}
