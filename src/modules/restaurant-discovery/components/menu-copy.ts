@@ -1,3 +1,8 @@
+export {
+  menuResultsCopy,
+  menuResultsCount,
+} from "@/modules/restaurant-discovery/components/menu-results-copy";
+
 const english = {
   menu: "Choose your dishes",
   empty: "No readable menu items yet. Try a clearer photo or another menu page.",

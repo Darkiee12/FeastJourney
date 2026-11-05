@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-import { menuCopy } from "@/modules/restaurant-discovery/components/menu-copy";
+import { menuCopy, menuResultsCopy } from "@/modules/restaurant-discovery/components/menu-copy";
 import { SearchableCurrencyPicker } from "@/modules/restaurant-discovery/components/searchable-currency-picker";
 import type { MenuDraftVariantPrice } from "@/modules/restaurant-discovery/menu-presentation";
 import { scanPriceSchema } from "@/modules/restaurant-discovery/menu-scan.schema";
@@ -62,7 +62,7 @@ export function ScanPriceFields({
         type="button"
         onClick={() => onChange({ ...price, currency: null, currencyProvenance: "unknown" })}
       >
-        {locale === "vi" ? "Chưa xác nhận tiền tệ" : "Currency not confirmed"}
+        {menuResultsCopy(locale).currencyUnconfirmed}
       </button>
       <details>
         <summary>{copy.taxes}</summary>

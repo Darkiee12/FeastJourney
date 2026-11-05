@@ -75,10 +75,12 @@ export function MenuPhotoViewer({
   photos,
   photoUrl,
   locale,
+  presentation = "compact",
 }: {
   readonly photos: ReadonlyArray<{ readonly assetId: string; readonly page: number }>;
   readonly photoUrl: (assetId: string) => string;
   readonly locale: string;
+  readonly presentation?: "compact" | "overview";
 }): ReactNode {
   const copy = menuScanResultsCopy(locale);
   const dialogRef = useRef<HTMLDialogElement | null>(null);
@@ -112,12 +114,22 @@ export function MenuPhotoViewer({
   if (photos.length === 0) return null;
 
   return (
-    <span className="menu-detail-photos">
+    <span
+      className={
+        presentation === "overview"
+          ? "flex min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto rounded-2xl"
+          : "menu-detail-photos"
+      }
+    >
       {photos.map((photo) => (
         <button
           key={photo.assetId}
           type="button"
-          className="menu-detail-photo-open"
+          className={
+            presentation === "overview"
+              ? "relative block min-w-0 shrink-0 basis-full snap-start overflow-hidden rounded-2xl border-0 bg-cream p-0 text-left text-sm text-ink focus-visible:outline-2 focus-visible:outline-brand-blue"
+              : "menu-detail-photo-open"
+          }
           onClick={() => inspect(photo.assetId)}
           aria-label={copy.photoOpen.replace("{n}", String(photo.page))}
         >
@@ -127,9 +139,21 @@ export function MenuPhotoViewer({
             loading="lazy"
             width={72}
             height={72}
-            className="menu-photo-thumb"
+            className={
+              presentation === "overview"
+                ? "block h-44 w-full object-cover md:h-72"
+                : "menu-photo-thumb"
+            }
           />
-          {copy.photoOpen.replace("{n}", String(photo.page))}
+          <span
+            className={
+              presentation === "overview"
+                ? "absolute bottom-3 left-3 rounded-lg bg-ink/90 px-2 py-1 text-xs font-semibold text-white"
+                : undefined
+            }
+          >
+            {copy.photoOpen.replace("{n}", String(photo.page))}
+          </span>
         </button>
       ))}
       {open === null ? null : (

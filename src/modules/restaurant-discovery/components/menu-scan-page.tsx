@@ -1065,7 +1065,11 @@ export function MenuScanPage({
 
   return (
     <article
-      className={document !== null ? "menu-scan-page menu-scan-page--results" : "menu-scan-page"}
+      className={
+        document !== null
+          ? "mx-auto max-w-6xl px-3 pb-[calc(7rem+env(safe-area-inset-bottom))] text-ink break-words sm:px-4 lg:pb-12"
+          : "menu-scan-page"
+      }
       lang={menuBcp47TagFor(locale)}
     >
       {document === null && (
@@ -1191,7 +1195,7 @@ export function MenuScanPage({
       )}
       {view?.scan.status === "processing" && <p>{copy.processing}</p>}
       {document !== null && view !== null && (
-        <section className="scan-results scan-enter">
+        <section className="scan-result-screen scan-enter">
           {status === null && notice !== null && (
             <output className="scan-status" aria-live="polite">
               {notice}
@@ -1214,6 +1218,7 @@ export function MenuScanPage({
           <div className="scan-results-layout">
             <div className="min-w-0">
               <ScanResults
+                locale={locale}
                 scanId={view.scan.id}
                 menuLocation={menuLocation}
                 onScanAnother={scanAnother}
@@ -1221,7 +1226,7 @@ export function MenuScanPage({
                 onDeleteScan={() => deleteScan(view.scan.id)}
               />
             </div>
-            <details className="scan-results-side min-w-0">
+            <details className="mt-6 min-w-0 border-t border-border-soft [&>summary]:min-h-11 [&>summary]:cursor-pointer [&>summary]:py-3 [&>summary]:text-sm [&>summary]:font-semibold">
               <summary>
                 {locale === "vi" ? "Nghiên cứu giá và đóng góp" : "Price research and contribution"}
               </summary>

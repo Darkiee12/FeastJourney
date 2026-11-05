@@ -2,18 +2,25 @@ import { useEffect, useRef, useState } from "react";
 
 import { InteractiveMenuView } from "@/modules/restaurant-discovery/components/interactive-menu";
 import {
-  menuLanguageNames,
+  menuResultsCopy,
   menuScanResultsCopy,
 } from "@/modules/restaurant-discovery/components/menu-copy";
-import { MenuPhotoViewer } from "@/modules/restaurant-discovery/components/menu-item-detail";
 import type { ScanMenuLocation } from "@/modules/restaurant-discovery/components/scan-capture";
 import {
   ScanCurrencyControl,
   useScanCurrency,
 } from "@/modules/restaurant-discovery/components/scan-currency-control";
 import { ScanEditor } from "@/modules/restaurant-discovery/components/scan-editor";
+import {
+  ScanResultsHeading,
+  ScanResultsSummary,
+} from "@/modules/restaurant-discovery/components/scan-results-summary";
 import { SearchableCurrencyPicker } from "@/modules/restaurant-discovery/components/searchable-currency-picker";
-import { menuBcp47TagFor, presentScan } from "@/modules/restaurant-discovery/menu-presentation";
+import {
+  menuBcp47TagFor,
+  presentScan,
+  priceTrustOf,
+} from "@/modules/restaurant-discovery/menu-presentation";
 import { interpretPrintedPrice } from "@/modules/restaurant-discovery/menu-price-interpretation";
 import {
   MenuScanClientError,
@@ -58,7 +65,8 @@ const sourceCurrenciesOf = (document: MenuScanDocument): ReadonlyArray<string | 
       return price.amount !== null &&
         price.currency !== null &&
         price.association !== "ambiguous" &&
-        price.association !== "unavailable"
+        price.association !== "unavailable" &&
+        priceTrustOf(price) !== "unknown"
         ? [price.currency]
         : [];
     }),
@@ -104,6 +112,7 @@ function ScanDeleteAction({
 
 /** Private menu browsing with separate correction and currency-confirmation dialogs. */
 export function ScanResults({
+  locale: interfaceLocale,
   scanId,
   menuLocation,
   onEditDish,
@@ -111,6 +120,7 @@ export function ScanResults({
   onDeleteScan,
   onRevisionSaved,
 }: {
+  readonly locale?: string | undefined;
   readonly scanId: string;
   readonly menuLocation?: ScanMenuLocation | null | undefined;
   readonly onEditDish?: ((itemKey: string) => void) | undefined;
@@ -172,7 +182,8 @@ export function ScanResults({
     return () => abort.abort();
   }, [scanId, loadedId, idValid]);
 
-  const locale = view?.scan.target_language ?? "en";
+  const locale = interfaceLocale ?? view?.scan.target_language ?? "en";
+  const ui = menuResultsCopy(locale);
   const copy = menuScanResultsCopy(locale);
   const currency = useScanCurrency(document === null ? [] : sourceCurrenciesOf(document));
 
@@ -273,22 +284,14 @@ export function ScanResults({
 
   const documentSource = document.sourceLanguage;
 
+  const languageNames = new Intl.DisplayNames(locale, { type: "language" });
+
   const sourceName =
-    documentSource === null ? null : (menuLanguageNames.get(documentSource) ?? documentSource);
+    documentSource === null ? null : (languageNames.of(documentSource) ?? documentSource);
 
-  const targetName = menuLanguageNames.get(document.targetLanguage) ?? document.targetLanguage;
+  const targetName = languageNames.of(document.targetLanguage) ?? document.targetLanguage;
 
-  const contextLine = [
-    venueName === null ? null : copy.atVenue.replace("{name}", venueName),
-    menuLocation?.label ?? null,
-    sourceName === null
-      ? null
-      : copy.contextLanguages.replace("{source}", sourceName).replace("{target}", targetName),
-    `${document.items.length.toLocaleString(locale)} ${locale === "vi" ? "món" : "dishes"}`,
-    [...new Set(sourceCurrenciesOf(document))].join(" / "),
-  ]
-    .flatMap((part) => (part === null ? [] : [part]))
-    .join(" · ");
+  const menu = presentScan(document, venueName);
 
   const noticeText = copy.dietNote;
 
@@ -354,48 +357,23 @@ export function ScanResults({
   };
 
   return (
-    <article className="scan-results" lang={menuBcp47TagFor(locale)}>
-      <header className="scan-results-head">
-        <h1 id="scan-results-title" tabIndex={-1} className="font-display">
-          {copy.ready}
-        </h1>
-        <p>{copy.subtitle}</p>
-        <p className="scan-results-context">{contextLine}</p>
-        <div className="scan-results-actions">
-          <button
-            type="button"
-            className="menu-order-back"
-            onClick={() => handleEditDish(document.items[0]?.id ?? "")}
-          >
-            {copy.corrections}
-          </button>
-          {onScanAnother && (
-            <button type="button" className="menu-order-back" onClick={onScanAnother}>
-              {copy.scanAnother}
-            </button>
-          )}
-        </div>
-        {assets.length > 0 && (
-          <section className="scan-results-photos" aria-label={copy.photosTitle}>
-            <h2>{copy.photosTitle}</h2>
-            <p>{copy.photosHelp}</p>
-            <MenuPhotoViewer
-              photos={assets.map((asset) => ({ assetId: asset.id, page: asset.page_number }))}
-              photoUrl={(assetId) => `/api/menu-scans?scanId=${view.scan.id}&assetId=${assetId}`}
-              locale={locale}
-            />
-          </section>
-        )}
-        {sourceCurrenciesOf(document).length > 0 && (
-          <ScanCurrencyControl
-            sources={sourceCurrenciesOf(document)}
-            locale={locale}
-            state={currency}
-          />
-        )}
-        {expiry !== null && <p className="scan-results-expiry">{expiry}</p>}
-      </header>
-      <p className="scan-results-diet">{noticeText}</p>
+    <article className="grid min-w-0 gap-5 break-words text-ink" lang={menuBcp47TagFor(locale)}>
+      <ScanResultsHeading
+        locale={locale}
+        itemCount={document.items.length}
+        onEditMenu={() => handleEditDish(document.items[0]?.id ?? "")}
+        onScanAnother={onScanAnother}
+      />
+      <ScanResultsSummary
+        menu={menu}
+        photos={assets.map((asset) => ({ assetId: asset.id, page: asset.page_number }))}
+        photoUrl={(assetId) => `/api/menu-scans?scanId=${view.scan.id}&assetId=${assetId}`}
+        sourceName={sourceName}
+        targetName={targetName}
+        locale={locale}
+        location={menuLocation?.label ?? venueName}
+      />
+      <p className="m-0 text-xs leading-relaxed text-muted">{noticeText}</p>
       {unresolved.length > 0 && (
         <>
           <button
@@ -403,40 +381,32 @@ export function ScanResults({
             className="menu-results-edit"
             onClick={() => currencyDialog.current?.showModal()}
           >
-            {locale === "vi" ? "Xác nhận tiền tệ thực đơn" : "Confirm menu currency"}
+            {ui.confirmCurrency}
           </button>
           <dialog
             ref={currencyDialog}
             className="menu-waiter-dialog"
-            aria-label={locale === "vi" ? "Xác nhận tiền tệ" : "Confirm menu currency"}
+            aria-label={ui.confirmCurrency}
           >
             <form method="dialog">
-              <button className="menu-order-back">{locale === "vi" ? "Đóng" : "Close"}</button>
+              <button className="menu-order-back">{ui.close}</button>
             </form>
             <section
-              className="scan-confirm-currency"
-              aria-label={locale === "vi" ? "Xác nhận tiền tệ" : "Confirm menu currency"}
+              className="grid gap-3 py-4 [&_p]:m-0 [&_p]:text-sm [&_p]:leading-relaxed"
+              aria-label={ui.confirmCurrency}
             >
-              <p>
-                {locale === "vi"
-                  ? "Xác nhận tiền tệ cho các giá rõ ràng. Giá mơ hồ được giữ nguyên."
-                  : "Confirm menu currency for readable prices. Ambiguous and printed currency observations stay unchanged."}
-              </p>
+              <p>{ui.confirmExplanation}</p>
               {suggestedCurrency !== "" && (
                 <p>
-                  {locale === "vi" ? "Gợi ý từ ngữ cảnh thực đơn" : "Suggestion from menu context"}:{" "}
-                  {suggestedCurrency}.{" "}
-                  {locale === "vi"
-                    ? "Vui lòng xác nhận hoặc chọn tiền tệ khác."
-                    : "Please confirm or choose another currency."}
+                  {ui.suggestion}: {suggestedCurrency}. {ui.confirmSuggestion}
                 </p>
               )}
               <SearchableCurrencyPicker
                 value={menuCurrency}
                 codes={[...currencyMinorUnits.keys()]}
                 locale={locale}
-                label={locale === "vi" ? "Tiền tệ thực đơn" : "Menu currency"}
-                placeholder={locale === "vi" ? "Chọn tiền tệ" : "Choose currency"}
+                label={ui.currency}
+                placeholder={ui.currency}
                 onChange={setConfirmedCurrency}
               />
               <button
@@ -445,7 +415,7 @@ export function ScanResults({
                 disabled={saving || menuCurrency === ""}
                 onClick={confirmCurrency}
               >
-                {locale === "vi" ? "Xác nhận" : "Confirm menu currency"}
+                {ui.confirmCurrency}
               </button>
             </section>
           </dialog>
@@ -455,7 +425,7 @@ export function ScanResults({
       {saveError !== null && <p role="alert">{saveError}</p>}
       <InteractiveMenuView
         key={view.scan.id}
-        menu={presentScan(document, venueName)}
+        menu={menu}
         locale={locale}
         photoUrl={(assetId) => `/api/menu-scans?scanId=${view.scan.id}&assetId=${assetId}`}
         rates={currency.rates}
@@ -486,9 +456,10 @@ export function ScanResults({
             correctionsRef.current?.close();
           }}
         >
-          {locale === "vi" ? "Hủy" : "Cancel"}
+          {ui.cancel}
         </button>
         <ScanEditor
+          locale={locale}
           key={editItemId}
           initialItemId={editItemId}
           document={document}
@@ -511,6 +482,14 @@ export function ScanResults({
       </dialog>
       <details className="scan-results-overflow">
         <summary>{copy.overflowLabel}</summary>
+        {sourceCurrenciesOf(document).length > 0 && (
+          <ScanCurrencyControl
+            sources={sourceCurrenciesOf(document)}
+            locale={locale}
+            state={currency}
+          />
+        )}
+        {expiry !== null && <p className="text-xs text-muted">{expiry}</p>}
         <div className="scan-results-overflow-actions">
           {onScanAnother !== undefined && (
             <button type="button" onClick={onScanAnother}>
@@ -532,7 +511,7 @@ export function ScanResults({
           )}
         </div>
       </details>
-      <details className="scan-results-meta">
+      <details className="border-t border-border-soft text-xs [&>summary]:min-h-11 [&>summary]:cursor-pointer [&>summary]:py-3 [&>summary]:text-muted [&_dl]:grid [&_dl]:gap-2 [&_dt]:font-bold [&_dd]:m-0 [&_dd]:break-words">
         <summary>{copy.techDetails}</summary>
         <dl>
           <div>

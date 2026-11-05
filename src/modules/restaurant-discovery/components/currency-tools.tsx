@@ -257,11 +257,13 @@ export function ObservedPrice({
   currency,
   locale,
   rate,
+  compact = false,
 }: {
   amount: string;
   currency: string;
   locale: string;
   rate?: ExchangeRate;
+  compact?: boolean;
 }) {
   let converted: string | null = null;
 
@@ -270,17 +272,27 @@ export function ObservedPrice({
 
   return (
     <div className="observed-price">
-      <p className="text-xl font-semibold tabular-nums">
+      <p
+        className={
+          compact
+            ? "m-0 text-base leading-snug font-extrabold tabular-nums"
+            : "text-xl font-semibold tabular-nums"
+        }
+      >
         {formatMoney(amount, currency, locale)}{" "}
-        <span className="text-xs font-normal">{currency}</span>
+        {!compact && <span className="text-xs font-normal">{currency}</span>}
       </p>
       {converted !== null && rate !== undefined && (
         <p
-          className="text-sm text-muted italic tabular-nums"
+          className={
+            compact
+              ? "m-0 text-sm font-normal text-muted tabular-nums"
+              : "text-sm text-muted italic tabular-nums"
+          }
           title={`Reference rate ${rate.effectiveDate} · ${rate.provider}`}
         >
           ≈ {formatMoney(converted, rate.quote, locale)} {rate.quote}
-          <span className="block text-xs">Rate dated {rate.effectiveDate}</span>
+          {!compact && <span className="block text-xs">Rate dated {rate.effectiveDate}</span>}
         </p>
       )}
     </div>

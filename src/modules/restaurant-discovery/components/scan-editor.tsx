@@ -24,13 +24,15 @@ export function ScanEditor({
   document,
   onChange,
   initialItemId,
+  locale = document.targetLanguage,
 }: {
   readonly initialItemId?: string | null | undefined;
+  readonly locale?: string;
   readonly document: MenuScanDocument;
   readonly onChange: (document: MenuScanDocument) => void;
 }) {
   const [selectedId, setSelectedId] = useState(initialItemId ?? document.items[0]?.id ?? "");
-  const copy = menuCopy(document.targetLanguage);
+  const copy = menuCopy(locale);
   const valid = menuScanDocumentSchema.safeParse(document).success;
 
   const updateItem = (next: ScanItem): void =>
@@ -40,11 +42,7 @@ export function ScanEditor({
     });
 
   return (
-    <section
-      className="scan-editor"
-      aria-label={copy.edit}
-      lang={menuBcp47TagFor(document.targetLanguage)}
-    >
+    <section className="scan-editor" aria-label={copy.edit} lang={menuBcp47TagFor(locale)}>
       <h2 className="font-display text-3xl">{copy.edit}</h2>
       <p>{copy.editHelp}</p>
       <output>{valid ? copy.valid : copy.invalid}</output>
@@ -63,7 +61,8 @@ export function ScanEditor({
           <ScanItemEditor
             key={item.id}
             item={item}
-            locale={document.targetLanguage}
+            locale={locale}
+            translationLanguage={document.targetLanguage}
             sourceLanguage={document.sourceLanguage ?? "und"}
             onUpdate={updateItem}
             onRemove={() =>

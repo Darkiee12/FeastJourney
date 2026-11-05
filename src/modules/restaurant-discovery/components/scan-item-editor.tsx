@@ -27,12 +27,14 @@ export type ScanItem = MenuScanDocument["items"][number];
 export function ScanItemEditor({
   item,
   locale,
+  translationLanguage = locale,
   sourceLanguage,
   onUpdate,
   onRemove,
 }: {
   readonly item: ScanItem;
   readonly locale: string;
+  readonly translationLanguage?: string;
   readonly sourceLanguage: string;
   readonly onUpdate: (item: ScanItem) => void;
   readonly onRemove: () => void;
@@ -55,7 +57,7 @@ export function ScanItemEditor({
       <input
         id={`edit-translation-${item.id}`}
         maxLength={300}
-        lang={locale}
+        lang={translationLanguage}
         value={item.translatedName ?? ""}
         onChange={(event) =>
           onUpdate({
@@ -65,7 +67,9 @@ export function ScanItemEditor({
         }
       />
       <details>
-        <summary>{locale === "vi" ? "Mô tả" : "Descriptions"}</summary>
+        <summary>
+          {copy.originalDescription} / {copy.translatedDescription}
+        </summary>
         <label htmlFor={`edit-description-${item.id}`}>{copy.originalDescription}</label>
         <textarea
           id={`edit-description-${item.id}`}
@@ -85,7 +89,7 @@ export function ScanItemEditor({
         <textarea
           id={`edit-description-translation-${item.id}`}
           maxLength={3000}
-          lang={locale}
+          lang={translationLanguage}
           value={item.translatedDescription ?? ""}
           onChange={(event) =>
             onUpdate({
@@ -100,6 +104,7 @@ export function ScanItemEditor({
           key={variant.id}
           variant={variant}
           locale={locale}
+          translationLanguage={translationLanguage}
           sourceLanguage={sourceLanguage}
           onChange={(next: ScanVariant) =>
             onUpdate({
