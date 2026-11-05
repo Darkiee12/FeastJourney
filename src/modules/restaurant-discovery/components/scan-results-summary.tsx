@@ -169,10 +169,14 @@ export function ScanResultsHeading({
 
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 py-2">
-      <div className="flex min-w-0 items-start gap-3 [&>svg]:size-8 [&>svg]:shrink-0 [&>svg]:text-food-orange sm:[&>svg]:size-10 [&_h1]:m-0 [&_h1]:text-2xl [&_h1]:leading-tight [&_h1]:font-extrabold [&_h1]:tracking-tight sm:[&_h1]:text-3xl [&_p]:mt-2 [&_p]:text-sm [&_p]:leading-relaxed">
+      <div className="flex min-w-0 items-start gap-3 [&>svg]:size-8 [&>svg]:shrink-0 [&>svg]:text-food-orange sm:[&>svg]:size-10 [&_p]:mt-2 [&_p]:text-sm [&_p]:leading-relaxed">
         <Sparkles aria-hidden="true" />
         <div>
-          <h1 id="scan-results-title" tabIndex={-1}>
+          <h1
+            id="scan-results-title"
+            tabIndex={-1}
+            className="font-display m-0 text-2xl leading-[1.05] tracking-[0.015em] text-balance text-ink sm:text-3xl"
+          >
             {ui.success}
           </h1>
           <p>{menuResultsCount(locale, "scanned", itemCount)}</p>
