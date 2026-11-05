@@ -1,14 +1,5 @@
-import {
-  BookOpen,
-  Coins,
-  Images,
-  Languages,
-  ScanLine,
-  Tag,
-  Camera,
-  Pencil,
-  Sparkles,
-} from "lucide-react";
+import { BookOpen, Coins, Images, Languages, ScanLine, Tag, Pencil, Sparkles } from "lucide-react";
+import type { ReactNode } from "react";
 
 import {
   menuResultsCopy,
@@ -17,11 +8,33 @@ import {
   menuScanResultsCopy,
 } from "@/modules/restaurant-discovery/components/menu-copy";
 import { MenuPhotoViewer } from "@/modules/restaurant-discovery/components/menu-item-detail";
-import {
-  priceAssociationOf,
-  priceTrustOf,
-  type InteractiveMenu,
-} from "@/modules/restaurant-discovery/menu-presentation";
+import type { InteractiveMenu } from "@/modules/restaurant-discovery/menu-presentation";
+
+/**
+ * Summary qualifier for the menu's shown currencies. "As listed" is reserved
+ * for currency actually read from the printed source (interpreted provenance
+ * "printed"). Inferred currency is labeled as inferred; reviewer-confirmed
+ * currency is labeled as confirmed; anything else (unknown, absent legacy
+ * provenance) stays explicitly unconfirmed rather than borrowing
+ * printed-source authority.
+ */
+export type ScanCurrencyNoteKind = "as-listed" | "inferred" | "confirmed" | "unconfirmed";
+
+export function scanCurrencyNoteKind(
+  provenances: ReadonlyArray<string | undefined>,
+  currencyCount: number,
+): ScanCurrencyNoteKind {
+  const known = provenances.map((code) => code ?? "unknown");
+
+  if (currencyCount > 0 && known.every((code) => code === "printed")) return "as-listed";
+
+  if (known.some((code) => code === "inferred")) return "inferred";
+
+  if (currencyCount > 0 && known.every((code) => code === "printed" || code === "user-confirmed"))
+    return "confirmed";
+
+  return "unconfirmed";
+}
 
 /** Browser-safe summary of the actual private menu; no catalog enrichment or invented statistics. */
 export function ScanResultsSummary({
@@ -61,19 +74,16 @@ export function ScanResultsSummary({
     ...new Set(prices.flatMap((price) => (price.currency === null ? [] : [price.currency]))),
   ];
 
-  const inferred = prices.some((price) => priceTrustOf(price) === "inferred");
-
-  const unresolved = prices.some(
-    (price) =>
-      price.currency === null ||
-      priceAssociationOf(price) !== "clear" ||
-      priceTrustOf(price) === "unknown",
+  const noteKind = scanCurrencyNoteKind(
+    prices.map((price) => price.currencyProvenance),
+    currencies.length,
   );
 
-  let currencyNote = ui.asListed;
+  let currencyNote = ui.currencyUnconfirmed;
 
-  if (inferred) currencyNote = resultsCopy.priceInferredNote;
-  else if (unresolved || currencies.length === 0) currencyNote = ui.currencyUnconfirmed;
+  if (noteKind === "as-listed") currencyNote = ui.asListed;
+  else if (noteKind === "inferred") currencyNote = resultsCopy.priceInferredNote;
+  else if (noteKind === "confirmed") currencyNote = resultsCopy.currencyConfirmedNote;
 
   return (
     <section
@@ -158,12 +168,13 @@ export function ScanResultsHeading({
   locale,
   itemCount,
   onEditMenu,
-  onScanAnother,
+  toolsTrigger,
 }: {
   readonly locale: string;
   readonly itemCount: number;
   readonly onEditMenu: () => void;
-  readonly onScanAnother?: (() => void) | undefined;
+  /** Compact entry point to the secondary tools workspace. */
+  readonly toolsTrigger?: ReactNode | undefined;
 }) {
   const ui = menuResultsCopy(locale);
 
@@ -183,16 +194,7 @@ export function ScanResultsHeading({
         </div>
       </div>
       <div className="flex flex-wrap gap-2">
-        {onScanAnother && (
-          <button
-            type="button"
-            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-ink bg-white px-4 text-sm font-bold shadow-[0_2px_0_var(--color-ink)] [&_svg]:size-4"
-            onClick={onScanAnother}
-          >
-            <Camera aria-hidden="true" />
-            {ui.rescan}
-          </button>
-        )}
+        {toolsTrigger}
         <button
           type="button"
           className="inline-flex min-h-11 items-center gap-2 rounded-full border border-ink bg-white px-4 text-sm font-bold shadow-[0_2px_0_var(--color-ink)] [&_svg]:size-4"

@@ -16,12 +16,14 @@ export function VariantEditor({
   locale,
   translationLanguage = locale,
   sourceLanguage,
+  menuCountry,
   onChange,
 }: {
   readonly variant: ScanVariant;
   readonly locale: string;
   readonly translationLanguage?: string;
   readonly sourceLanguage: string;
+  readonly menuCountry?: string | null | undefined;
   readonly onChange: (variant: ScanVariant) => void;
 }) {
   const copy = menuCopy(locale);
@@ -74,6 +76,7 @@ export function VariantEditor({
             variantId={variant.id}
             price={price}
             priceValid={priceValid}
+            menuCountry={menuCountry}
             onChange={(next) => onChange({ ...variant, price: next })}
           />
           <button type="button" onClick={() => onChange({ ...variant, price: null })}>

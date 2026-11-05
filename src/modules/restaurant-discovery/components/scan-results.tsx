@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { InteractiveMenuView } from "@/modules/restaurant-discovery/components/interactive-menu";
 import {
@@ -21,6 +21,7 @@ import {
   presentScan,
   priceTrustOf,
 } from "@/modules/restaurant-discovery/menu-presentation";
+import { normalizeCurrencyContext } from "@/modules/restaurant-discovery/menu-price-evidence";
 import { interpretPrintedPrice } from "@/modules/restaurant-discovery/menu-price-interpretation";
 import {
   MenuScanClientError,
@@ -34,33 +35,14 @@ import {
 import type { MenuScanDocument } from "@/modules/restaurant-discovery/menu-scan.schema";
 import { currencyMinorUnits } from "@/shared/currencies";
 
-type ResultsCopy = ReturnType<typeof menuScanResultsCopy>;
-
-const startOfDay = (date: Date): number =>
-  new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-
-/**
- * "Expires tomorrow" only when the stored expiry lands on the next local
- * calendar day. Any other day renders the full date; an unreadable timestamp
- * renders nothing rather than inventing urgency.
- */
-const expiryText = (expiresAt: string, locale: string, copy: ResultsCopy): string | null => {
-  const expiry = new Date(expiresAt);
-
-  if (Number.isNaN(expiry.getTime())) return null;
-
-  const diffDays = Math.round((startOfDay(expiry) - startOfDay(new Date())) / 86_400_000);
-
-  if (diffDays === 1) return copy.expiresTomorrow;
-
-  return `${copy.expiresLabel}: ${expiry.toLocaleString(locale)}`;
-};
-
-const sourceCurrenciesOf = (document: MenuScanDocument): ReadonlyArray<string | null> =>
+const sourceCurrenciesOf = (
+  document: MenuScanDocument,
+  menuCountry: string | null,
+): ReadonlyArray<string | null> =>
   document.items.flatMap((item) =>
     item.variants.flatMap((variant) => {
       if (variant.price === null) return [];
-      const price = interpretPrintedPrice(variant.price);
+      const price = interpretPrintedPrice(variant.price, menuCountry);
 
       return price.amount !== null &&
         price.currency !== null &&
@@ -72,61 +54,22 @@ const sourceCurrenciesOf = (document: MenuScanDocument): ReadonlyArray<string | 
     }),
   );
 
-/** Two-step delete confirmation inside the overflow disclosure. */
-function ScanDeleteAction({
-  label,
-  confirm,
-  yes,
-  no,
-  busy,
-  onDelete,
-}: {
-  readonly label: string;
-  readonly confirm: string;
-  readonly yes: string;
-  readonly no: string;
-  readonly busy: boolean;
-  readonly onDelete: () => void;
-}) {
-  const [confirming, setConfirming] = useState(false);
-
-  if (!confirming)
-    return (
-      <button type="button" className="scan-delete" onClick={() => setConfirming(true)}>
-        {label}
-      </button>
-    );
-
-  return (
-    <span className="scan-delete-confirm">
-      <span role="alert">{confirm}</span>
-      <button type="button" className="scan-delete" disabled={busy} onClick={onDelete}>
-        {yes}
-      </button>
-      <button type="button" disabled={busy} onClick={() => setConfirming(false)}>
-        {no}
-      </button>
-    </span>
-  );
-}
-
 /** Private menu browsing with separate correction and currency-confirmation dialogs. */
 export function ScanResults({
   locale: interfaceLocale,
   scanId,
   menuLocation,
   onEditDish,
-  onScanAnother,
-  onDeleteScan,
   onRevisionSaved,
+  toolsTrigger,
 }: {
   readonly locale?: string | undefined;
   readonly scanId: string;
   readonly menuLocation?: ScanMenuLocation | null | undefined;
   readonly onEditDish?: ((itemKey: string) => void) | undefined;
-  readonly onScanAnother?: (() => void) | undefined;
-  readonly onDeleteScan?: (() => void) | undefined;
   readonly onRevisionSaved?: ((view: ScanView) => void) | undefined;
+  /** Secondary-workspace trigger rendered in the results header row. */
+  readonly toolsTrigger?: ReactNode | undefined;
 }) {
   const [view, setView] = useState<ScanView | null>(null);
   const [document, setDocument] = useState<MenuScanDocument | null>(null);
@@ -185,7 +128,18 @@ export function ScanResults({
   const locale = interfaceLocale ?? view?.scan.target_language ?? "en";
   const ui = menuResultsCopy(locale);
   const copy = menuScanResultsCopy(locale);
-  const currency = useScanCurrency(document === null ? [] : sourceCurrenciesOf(document));
+
+  // Weak visitor-indicated menu country (server-resolved place evidence
+  // lives server-side only). Threaded identically through presentation,
+  // currency sources, and the correction editor so display, summary, and
+  // repair never disagree about what the printed text means.
+  const menuCountry = normalizeCurrencyContext({
+    menuCountry: menuLocation?.country ?? null,
+  }).menuCountry;
+
+  const currency = useScanCurrency(
+    document === null ? [] : sourceCurrenciesOf(document, menuCountry),
+  );
 
   const reload = (): void => {
     setLoading(true);
@@ -273,14 +227,7 @@ export function ScanResults({
 
   const venueName = view.scan.venue_name;
 
-  const expiry = expiryText(view.scan.expires_at, locale, copy);
-
   const assets = [...view.assets].toSorted((a, b) => a.page_number - b.page_number);
-
-  const revisionModelText = view.revision?.model ?? "";
-  const revisionModel = revisionModelText.trim() !== "" ? revisionModelText : null;
-
-  const revisionNumber = view.revision?.number ?? view.scan.current_revision;
 
   const documentSource = document.sourceLanguage;
 
@@ -291,7 +238,7 @@ export function ScanResults({
 
   const targetName = languageNames.of(document.targetLanguage) ?? document.targetLanguage;
 
-  const menu = presentScan(document, venueName);
+  const menu = presentScan(document, venueName, menuCountry);
 
   const noticeText = copy.dietNote;
 
@@ -344,7 +291,7 @@ export function ScanResults({
           return {
             ...variant,
             price: {
-              ...interpretPrintedPrice(variant.price),
+              ...interpretPrintedPrice(variant.price, menuCountry),
               currency: menuCurrency,
               currencyProvenance: "user-confirmed" as const,
             },
@@ -362,7 +309,7 @@ export function ScanResults({
         locale={locale}
         itemCount={document.items.length}
         onEditMenu={() => handleEditDish(document.items[0]?.id ?? "")}
-        onScanAnother={onScanAnother}
+        toolsTrigger={toolsTrigger}
       />
       <ScanResultsSummary
         menu={menu}
@@ -373,6 +320,13 @@ export function ScanResults({
         locale={locale}
         location={menuLocation?.label ?? venueName}
       />
+      {sourceCurrenciesOf(document, menuCountry).length > 0 && (
+        <ScanCurrencyControl
+          sources={sourceCurrenciesOf(document, menuCountry)}
+          locale={locale}
+          state={currency}
+        />
+      )}
       <p className="m-0 text-xs leading-relaxed text-muted">{noticeText}</p>
       {unresolved.length > 0 && (
         <>
@@ -463,6 +417,7 @@ export function ScanResults({
           key={editItemId}
           initialItemId={editItemId}
           document={document}
+          menuCountry={menuCountry}
           onChange={(next) => {
             setDocument(next);
             setDirty(true);
@@ -480,82 +435,6 @@ export function ScanResults({
           {copy.saveFixes}
         </button>
       </dialog>
-      <details className="scan-results-overflow">
-        <summary>{copy.overflowLabel}</summary>
-        {sourceCurrenciesOf(document).length > 0 && (
-          <ScanCurrencyControl
-            sources={sourceCurrenciesOf(document)}
-            locale={locale}
-            state={currency}
-          />
-        )}
-        {expiry !== null && <p className="text-xs text-muted">{expiry}</p>}
-        <div className="scan-results-overflow-actions">
-          {onScanAnother !== undefined && (
-            <button type="button" onClick={onScanAnother}>
-              {copy.scanAnother}
-            </button>
-          )}
-          <button type="button" onClick={reload}>
-            {copy.reloadAction}
-          </button>
-          {onDeleteScan !== undefined && (
-            <ScanDeleteAction
-              label={copy.deleteAction}
-              confirm={copy.deleteConfirm}
-              yes={copy.deleteYes}
-              no={copy.deleteNo}
-              busy={loading}
-              onDelete={onDeleteScan}
-            />
-          )}
-        </div>
-      </details>
-      <details className="border-t border-border-soft text-xs [&>summary]:min-h-11 [&>summary]:cursor-pointer [&>summary]:py-3 [&>summary]:text-muted [&_dl]:grid [&_dl]:gap-2 [&_dt]:font-bold [&_dd]:m-0 [&_dd]:break-words">
-        <summary>{copy.techDetails}</summary>
-        <dl>
-          <div>
-            <dt>{copy.metaScan}</dt>
-            <dd>{view.scan.id}</dd>
-          </div>
-          {revisionNumber !== null && (
-            <div>
-              <dt>{copy.metaRevision}</dt>
-              <dd>{revisionNumber}</dd>
-            </div>
-          )}
-          {revisionModel !== null && (
-            <div>
-              <dt>{copy.metaModel}</dt>
-              <dd>{revisionModel}</dd>
-            </div>
-          )}
-          <div>
-            <dt>{copy.detailsProvenance}</dt>
-            <dd>{view.revision?.origin ?? copy.notReady}</dd>
-          </div>
-          <div>
-            <dt>{copy.detailsExpiry}</dt>
-            <dd>
-              <time dateTime={view.scan.expires_at}>
-                {new Date(view.scan.expires_at).toLocaleString(locale)}
-              </time>
-            </dd>
-          </div>
-          {assets.length > 0 && (
-            <div>
-              <dt>{copy.metaPhotos}</dt>
-              <dd>
-                <ul>
-                  {assets.map((asset) => (
-                    <li key={asset.id}>{asset.id}</li>
-                  ))}
-                </ul>
-              </dd>
-            </div>
-          )}
-        </dl>
-      </details>
     </article>
   );
 }

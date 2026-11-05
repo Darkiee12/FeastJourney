@@ -29,6 +29,7 @@ export function ScanItemEditor({
   locale,
   translationLanguage = locale,
   sourceLanguage,
+  menuCountry,
   onUpdate,
   onRemove,
 }: {
@@ -36,6 +37,7 @@ export function ScanItemEditor({
   readonly locale: string;
   readonly translationLanguage?: string;
   readonly sourceLanguage: string;
+  readonly menuCountry?: string | null | undefined;
   readonly onUpdate: (item: ScanItem) => void;
   readonly onRemove: () => void;
 }) {
@@ -106,6 +108,7 @@ export function ScanItemEditor({
           locale={locale}
           translationLanguage={translationLanguage}
           sourceLanguage={sourceLanguage}
+          menuCountry={menuCountry}
           onChange={(next: ScanVariant) =>
             onUpdate({
               ...item,

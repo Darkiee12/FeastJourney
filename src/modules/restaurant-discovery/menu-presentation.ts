@@ -147,6 +147,7 @@ export const conversionRateFor = (
 export const presentScan = (
   document: MenuScanDocument,
   venueName: string | null,
+  menuCountry: string | null = null,
 ): InteractiveMenu => ({
   venueName,
   sourceLanguage: document.sourceLanguage,
@@ -162,7 +163,7 @@ export const presentScan = (
       ...variant,
       // Additive BT evidence round-trips verbatim through the spread;
       // legacy rows carry no extras and keep their previous rendering.
-      price: variant.price === null ? null : interpretPrintedPrice(variant.price),
+      price: variant.price === null ? null : interpretPrintedPrice(variant.price, menuCountry),
       provenance: "Unverified menu extraction",
     })),
   })),

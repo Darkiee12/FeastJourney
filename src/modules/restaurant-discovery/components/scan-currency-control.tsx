@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 import {
   useExchangeRates,
@@ -34,17 +34,16 @@ export interface ScanCurrencyState {
   readonly rates: ReadonlyMap<string, ExchangeRate>;
   readonly rateDates: ReadonlyArray<string>;
   readonly allSameCurrency: boolean;
-  readonly setEnabled: (enabled: boolean) => void;
   readonly choose: (code: string) => void;
 }
 
 export function useScanCurrency(sources?: ReadonlyArray<string | null>): ScanCurrencyState {
   const preference = usePreferredCurrency();
-  // Unchecked = hidden conversions only. The saved preference (member
-  // account or guest localStorage) is never cleared by this toggle.
-  const [suspended, setSuspended] = useState(false);
+  // Hiding/showing is gone: picking a currency converts everywhere at once,
+  // clearing the picker hides conversions. The saved preference (member
+  // account or guest localStorage) is never touched except through choose().
   const target = preference.currency;
-  const enabled = target !== "" && !suspended;
+  const enabled = target !== "";
 
   const bases = (sources ?? [])
     .filter((code): code is string => code !== null && isCurrency(code) && code !== target)
@@ -78,11 +77,9 @@ export function useScanCurrency(sources?: ReadonlyArray<string | null>): ScanCur
     rates: enabled ? rates : new Map(),
     rateDates,
     allSameCurrency,
-    setEnabled: (next: boolean) => setSuspended(!next),
     choose: (code: string) => {
       if (!isCurrency(code)) return;
 
-      setSuspended(false);
       preference.change(code);
     },
   };
@@ -138,17 +135,6 @@ export function ScanCurrencyControl({
         unavailableNote={currency.catalogUnavailable ? copy.ratesUnavailable : undefined}
         onChange={(code) => currency.choose(code)}
       />
-      {currency.target === "" ? null : (
-        <button
-          type="button"
-          className="scan-currency-change"
-          aria-pressed={currency.enabled}
-          aria-describedby={labelId}
-          onClick={() => currency.setEnabled(!currency.enabled)}
-        >
-          {copy.showInMyCurrency}
-        </button>
-      )}
       <p aria-live="polite" className="scan-currency-status">
         {currency.enabled && currency.allSameCurrency
           ? copy.alreadyDisplayedIn.replace("{currency}", currency.target)

@@ -25,9 +25,11 @@ export function ScanEditor({
   onChange,
   initialItemId,
   locale = document.targetLanguage,
+  menuCountry,
 }: {
   readonly initialItemId?: string | null | undefined;
   readonly locale?: string;
+  readonly menuCountry?: string | null | undefined;
   readonly document: MenuScanDocument;
   readonly onChange: (document: MenuScanDocument) => void;
 }) {
@@ -64,6 +66,7 @@ export function ScanEditor({
             locale={locale}
             translationLanguage={document.targetLanguage}
             sourceLanguage={document.sourceLanguage ?? "und"}
+            menuCountry={menuCountry}
             onUpdate={updateItem}
             onRemove={() =>
               onChange({
