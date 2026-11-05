@@ -62,7 +62,11 @@ import {
   writeStoredPlace,
   type UserPosition,
 } from "@/modules/restaurant-discovery/location-storage";
-import { CITY_PRESETS, DEFAULT_MAP_CENTER } from "@/modules/restaurant-discovery/map-bounds";
+import {
+  CITY_PRESETS,
+  DEFAULT_MAP_CENTER,
+  type CityPreset,
+} from "@/modules/restaurant-discovery/map-bounds";
 import { selectMenuHighlights } from "@/modules/restaurant-discovery/menu-presentation";
 import { panelForRoute, type RestaurantPanel } from "@/modules/restaurant-discovery/panel-state";
 import { getRestaurantReviewSummaryFn } from "@/modules/restaurant-discovery/restaurant-reviews.functions";
@@ -333,6 +337,71 @@ function researchScopeFor(search: RestaurantSearch, copy: RestaurantCopy): Resea
   if (preset.id === "hanoi") return { city: copy.browseCityHanoi, country: presetCountry };
 
   return { city: "Bangalore", country: presetCountry };
+}
+
+/** Map-handoff scope from a priced Food Journey recommendation link. The
+ *  link carries dish identity plus scope only — never exact coordinates
+ *  (privacy). The map resolves it to a real geographic query once, on
+ *  mount; later pans belong to the user and never re-read these params.
+ *  An unknown city id resolves null so the existing explicit location
+ *  flow takes over instead of guessing. */
+type HandoffScope =
+  | { readonly kind: "radius"; readonly radiusMeters: number }
+  | { readonly kind: "city"; readonly preset: CityPreset };
+
+function handoffScopeFor(search: RestaurantSearch): HandoffScope | null {
+  if (search.scope === undefined) return null;
+
+  if (search.scope === "city") {
+    if (search.cityPlaceId === undefined) return null;
+
+    const preset =
+      CITY_PRESETS.find((entry) => entry.id === search.cityPlaceId) ??
+      findPresetByCityLabel(search.cityLabel);
+
+    if (preset === undefined) return null;
+
+    return { kind: "city", preset };
+  }
+
+  // City scope uses the preset viewport bounds (a proper geographic scope
+  // query, unbounded by the 50km radius API cap); radius scope stays a
+  // center+radius circle, always within that cap.
+  return { kind: "radius", radiusMeters: (search.radiusKm ?? 10) * 1000 };
+}
+
+/**
+ * Registry-label bridge for city handoff scope. The price lookup emits
+ * place-registry decimal ids + canonical labels; the map owns string preset
+ * ids. Normalized label matching bridges the two without inventing
+ * boundaries. Returns undefined for unknown labels so the explicit location
+ * flow takes over instead of guessing.
+ */
+const PRESET_CITY_LABELS: ReadonlyMap<string, string> = new Map([
+  ["ho chi minh city", "hcmc"],
+  ["hanoi", "hanoi"],
+  ["bengaluru", "bangalore"],
+  ["bangalore", "bangalore"],
+  ["los angeles", "los-angeles"],
+]);
+
+function findPresetByCityLabel(cityLabel: string | undefined): CityPreset | undefined {
+  if (cityLabel === undefined) return undefined;
+
+  const presetId = PRESET_CITY_LABELS.get(cityLabel.trim().toLowerCase());
+
+  if (presetId === undefined) return undefined;
+
+  return CITY_PRESETS.find((entry) => entry.id === presetId);
+}
+
+/** Camera zoom framing a radius circle: 10km street level, wider after. */
+function radiusZoom(radiusMeters: number): number {
+  if (radiusMeters <= 10000) return 11;
+
+  if (radiusMeters <= 20000) return 10;
+
+  return 9;
 }
 
 /** Hint line for the page-inline missing-evidence blocks. The caller only
@@ -723,6 +792,88 @@ export function RestaurantSearchPage() {
         setSuppressFit(true);
         setFrame({ key: `restore-${Date.now()}`, ...saved });
       }
+
+      return;
+    }
+
+    // Scoped recommendation handoff (dish + scope, no coordinates): resolve
+    // the URL scope to a geographic query once. The dish filter rides along
+    // untouched via the spread; the scope params are consumed (stripped) so
+    // later pans and filter edits never re-read them.
+    const handoff = handoffScopeFor(s);
+
+    if (handoff !== null) {
+      if (handoff.kind === "city") {
+        const preset = handoff.preset;
+
+        writeStoredPlace({ kind: "city", id: preset.id });
+        setFrame({
+          key: `handoff-city-${preset.id}-${Date.now()}`,
+          longitude: preset.longitude,
+          latitude: preset.latitude,
+          zoom: preset.zoom,
+        });
+        void navigate({
+          replace: true,
+          search: {
+            ...s,
+            area: "",
+            longitude: undefined,
+            latitude: undefined,
+            west: preset.west,
+            south: preset.south,
+            east: preset.east,
+            north: preset.north,
+            sort: s.sort === "nearest" ? "recommended" : s.sort,
+            scope: undefined,
+            radiusKm: undefined,
+            cityPlaceId: undefined,
+          },
+        });
+
+        return;
+      }
+
+      const radiusMeters = handoff.radiusMeters;
+
+      void queryGeolocationPermission().then((permission) => {
+        if (permission !== "granted") {
+          setChooserAuto(true);
+
+          return;
+        }
+
+        void requestUserPosition()
+          .then((position) => {
+            setUserPos(position);
+            setFrame({
+              key: `handoff-user-${Date.now()}`,
+              longitude: position.longitude,
+              latitude: position.latitude,
+              zoom: radiusZoom(radiusMeters),
+            });
+            void navigate({
+              replace: true,
+              search: {
+                ...firstSearch.current,
+                area: "",
+                longitude: position.longitude,
+                latitude: position.latitude,
+                west: undefined,
+                east: undefined,
+                south: undefined,
+                north: undefined,
+                radius: radiusMeters,
+                scope: undefined,
+                radiusKm: undefined,
+                cityPlaceId: undefined,
+              },
+            });
+          })
+          .catch(() => {
+            setChooserAuto(true);
+          });
+      });
 
       return;
     }
