@@ -7,6 +7,14 @@ import {
   restaurantPhotoUrl,
 } from "@/modules/restaurant-discovery/components/restaurant-photos";
 import {
+  type NearbyDishPrice,
+  type NearbyDishPriceLookup,
+  type NearbyPriceChannel,
+  NEARBY_PRICE_RADII_KM,
+  type NearbyPriceRadiusKm,
+  type NearbyPriceScope,
+} from "@/modules/restaurant-discovery/nearby-price";
+import {
   restaurantSearchSchema,
   venuePhotoPreviewSchema,
 } from "@/modules/restaurant-discovery/restaurant.schema";
@@ -23,11 +31,13 @@ import menuDishCandidates from "@/modules/restaurant-discovery/server/repository
 import sectionsQuery from "@/modules/restaurant-discovery/server/repository/sql/menu-edit-sections.sql";
 import localizationsQuery from "@/modules/restaurant-discovery/server/repository/sql/menu-localizations-by-venue.sql";
 import menu from "@/modules/restaurant-discovery/server/repository/sql/menu.sql";
+import nearbyDishPrices from "@/modules/restaurant-discovery/server/repository/sql/nearby-dish-prices.sql";
 import photoPublishedByVenueIds from "@/modules/restaurant-discovery/server/repository/sql/photo-published-by-venue-ids.sql";
 import searchArea from "@/modules/restaurant-discovery/server/repository/sql/search-area.sql";
 import searchDish from "@/modules/restaurant-discovery/server/repository/sql/search-dish.sql";
 import searchName from "@/modules/restaurant-discovery/server/repository/sql/search-name.sql";
 import venue from "@/modules/restaurant-discovery/server/repository/sql/venue-detail.sql";
+import { describeCause } from "@/server/database/errors";
 import { runQuery } from "@/server/database/query";
 import type { ExchangeRate } from "@/shared/money";
 
@@ -358,4 +368,402 @@ export const listVenuePhotoPreviews = Effect.fn("restaurants.venuePhotoPreviews"
   }
 
   return [...photosByVenue].map(([venueId, photos]) => ({ venueId, photos }));
+});
+
+/** Database failure while resolving nearby prices. Never escapes to the transport: the lookup maps it to per-dish `unavailable` outcomes. */
+export class NearbyPriceUnavailable extends Data.TaggedError("NearbyPriceUnavailable")<{
+  readonly operation: string;
+  readonly cause: string;
+}> {}
+
+/** One candidate row from the batched nearby-price pool, inferred from the query. */
+export type NearbyDishPriceRow = (typeof nearbyDishPrices)["~reylo"]["element"];
+
+/** Decimal-string transport form of stored bigint dish/place identities. */
+const DECIMAL_ID = /^[1-9][0-9]{0,18}$/;
+
+/** Candidate radii in meters, narrowest first, derived from the shared contract. */
+const NEARBY_PRICE_RADIUS_METERS: ReadonlyArray<{
+  readonly radiusKm: NearbyPriceRadiusKm;
+  readonly meters: number;
+}> = NEARBY_PRICE_RADII_KM.map((radiusKm) => ({ radiusKm, meters: radiusKm * 1000 }));
+
+const NEARBY_PRICE_OPERATION = "restaurants/nearby-dish-prices";
+
+/** Channels with price eligibility. */
+const NEARBY_PRICE_CHANNELS: ReadonlySet<NearbyPriceChannel> = new Set([
+  "dine_in",
+  "takeaway",
+  "delivery",
+]);
+
+/** A priced candidate with every field the priced contract requires. */
+type PricedNearbyRow = NearbyDishPriceRow & {
+  readonly venue_id: string;
+  readonly venue_name: string;
+  readonly longitude: number;
+  readonly latitude: number;
+  readonly distance_meters: number;
+  readonly item_id: string;
+  readonly variant_id: string;
+  readonly variant_name: string;
+  readonly amount: string;
+  readonly currency: string;
+  readonly tax_treatment: string;
+  readonly price_observed_at: string | Date;
+  readonly price_valid_until: string | Date;
+};
+
+const isSupportedFix = (
+  value: number | null | undefined,
+  min: number,
+  max: number,
+): value is number => {
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  return Number.isFinite(value) && value >= min && value <= max;
+};
+
+/** Reylo infers timestamps as string or Date depending on the driver; the contract needs ISO strings. */
+const toIsoString = (value: string | Date): string =>
+  value instanceof Date ? value.toISOString() : value;
+
+const stripLeadingZeros = (value: string): string => {
+  const stripped = value.replace(/^0+/, "");
+
+  return stripped === "" ? "0" : stripped;
+};
+
+/** Exact decimal comparison for NUMERIC-inferred amount strings (no float rounding). */
+const compareAmounts = (left: string, right: string): number => {
+  const [leftInt = "", leftFrac = ""] = left.split(".");
+  const [rightInt = "", rightFrac = ""] = right.split(".");
+
+  const leftNorm = stripLeadingZeros(leftInt);
+  const rightNorm = stripLeadingZeros(rightInt);
+
+  if (leftNorm.length !== rightNorm.length) {
+    return leftNorm.length < rightNorm.length ? -1 : 1;
+  }
+
+  if (leftNorm !== rightNorm) {
+    return leftNorm < rightNorm ? -1 : 1;
+  }
+
+  if (leftFrac !== rightFrac) {
+    return leftFrac < rightFrac ? -1 : 1;
+  }
+
+  return 0;
+};
+
+const isPricedCandidate = (row: NearbyDishPriceRow): row is PricedNearbyRow =>
+  row.price_eligible === true &&
+  row.venue_id !== null &&
+  row.venue_name !== null &&
+  row.longitude !== null &&
+  row.latitude !== null &&
+  row.distance_meters !== null &&
+  row.item_id !== null &&
+  row.variant_id !== null &&
+  row.variant_name !== null &&
+  row.amount !== null &&
+  row.currency !== null &&
+  row.tax_treatment !== null &&
+  row.price_observed_at !== null &&
+  row.price_valid_until !== null;
+
+/**
+ * Cheapest eligible row wins the "starting price" ("from X"); ties break by
+ * distance, then variant identity, so repeated lookups are stable. Callers
+ * pass a non-empty scope; an empty scope degrades to serving-without-price
+ * instead of throwing.
+ */
+const toPricedOutcome = (
+  dishId: string,
+  scope: NearbyPriceScope,
+  scopeServingVenues: number,
+  candidates: ReadonlyArray<PricedNearbyRow>,
+  channel: NearbyDishPriceLookup["channel"],
+): NearbyDishPrice => {
+  const first = candidates[0];
+
+  if (first === undefined) {
+    return {
+      dishId,
+      outcome: "serving-without-price",
+      scope,
+      venueCount: scopeServingVenues,
+      reason: "Approved serving evidence exists here but no current listed price was found",
+    };
+  }
+
+  let starting = first;
+
+  for (const candidate of candidates.slice(1)) {
+    const order = compareAmounts(candidate.amount, starting.amount);
+
+    if (
+      order < 0 ||
+      (order === 0 &&
+        (candidate.distance_meters < starting.distance_meters ||
+          (candidate.distance_meters === starting.distance_meters &&
+            candidate.variant_id < starting.variant_id)))
+    ) {
+      starting = candidate;
+    }
+  }
+
+  const comparable = candidates.filter(
+    (row) =>
+      row.comparison_key !== null &&
+      row.comparison_key === starting.comparison_key &&
+      row.currency === starting.currency,
+  );
+
+  const best = comparable.reduce<PricedNearbyRow | null>(
+    (max, row) => (max === null || compareAmounts(row.amount, max.amount) > 0 ? row : max),
+    null,
+  );
+
+  return {
+    dishId,
+    outcome: "priced",
+    scope,
+    venueCount: scopeServingVenues,
+    pricedVenueCount: candidates.length,
+    price: {
+      amount: starting.amount,
+      currency: starting.currency,
+      kind: "listed",
+      channel,
+      taxTreatment: starting.tax_treatment,
+      observedAt: toIsoString(starting.price_observed_at),
+      validUntil: toIsoString(starting.price_valid_until),
+    },
+    variant: {
+      itemId: starting.item_id,
+      variantId: starting.variant_id,
+      name: starting.variant_name,
+    },
+    venue: {
+      venueId: starting.venue_id,
+      branchName: starting.venue_name,
+      latitude: starting.latitude,
+      longitude: starting.longitude,
+    },
+    range:
+      comparable.length >= 3 && best !== null
+        ? {
+            min: { amount: starting.amount, currency: starting.currency },
+            max: { amount: best.amount, currency: best.currency },
+            venueCount: comparable.length,
+          }
+        : undefined,
+  };
+};
+
+const toNearbyDishPrice = (
+  dishId: string,
+  dishRows: ReadonlyArray<NearbyDishPriceRow>,
+  input: NearbyDishPriceLookup,
+): NearbyDishPrice => {
+  const priced: Array<PricedNearbyRow> = [];
+  const serving: Array<NearbyDishPriceRow> = [];
+
+  for (const row of dishRows) {
+    if (row.venue_id === null || row.distance_meters === null) continue;
+    serving.push(row);
+
+    if (isPricedCandidate(row)) priced.push(row);
+  }
+
+  for (const { radiusKm, meters } of NEARBY_PRICE_RADIUS_METERS) {
+    const inScope = priced.filter((row) => row.distance_meters <= meters);
+
+    if (inScope.length > 0) {
+      const servingVenues = serving.filter(
+        (row) => row.distance_meters !== null && row.distance_meters <= meters,
+      ).length;
+
+      return toPricedOutcome(
+        dishId,
+        { kind: "radius", radiusKm },
+        servingVenues,
+        inScope,
+        input.channel,
+      );
+    }
+  }
+
+  const cityRow = dishRows[0];
+  const cityPlaceId = input.cityPlaceId ?? null;
+
+  if (
+    cityRow !== undefined &&
+    cityRow.city_resolved &&
+    cityPlaceId !== null &&
+    cityRow.city_label !== null
+  ) {
+    const scope: NearbyPriceScope = {
+      kind: "city",
+      cityPlaceId,
+      cityLabel: cityRow.city_label,
+      classification: "verified-city-membership",
+    };
+
+    const inCity = priced.filter((row) => row.in_city === true);
+
+    if (inCity.length > 0) {
+      const servingVenues = serving.filter((row) => row.in_city === true).length;
+
+      return toPricedOutcome(dishId, scope, servingVenues, inCity, input.channel);
+    }
+
+    const cityServing = serving.filter((row) => row.in_city === true).length;
+
+    if (cityServing > 0) {
+      return {
+        dishId,
+        outcome: "serving-without-price",
+        scope,
+        venueCount: cityServing,
+        reason:
+          "Approved serving evidence exists in this city but no current listed dine-in price was found",
+      };
+    }
+  }
+
+  for (const { radiusKm, meters } of NEARBY_PRICE_RADIUS_METERS) {
+    const served = serving.filter(
+      (row) => row.distance_meters !== null && row.distance_meters <= meters,
+    ).length;
+
+    if (served > 0) {
+      return {
+        dishId,
+        outcome: "serving-without-price",
+        scope: { kind: "radius", radiusKm },
+        venueCount: served,
+        reason:
+          "Approved serving evidence exists nearby but no current listed dine-in price was found",
+      };
+    }
+  }
+
+  if (serving.length > 0) {
+    return {
+      dishId,
+      outcome: "serving-without-price",
+      venueCount: serving.length,
+      reason: "Approved serving evidence exists outside the nearby radii",
+    };
+  }
+
+  let reason = "No approved serving evidence within 40km";
+
+  if (cityPlaceId !== null) {
+    if (cityRow !== undefined && cityRow.city_resolved) {
+      reason = "No approved serving evidence within 40km or the requested city";
+    } else {
+      reason = "No approved serving evidence within 40km; the requested city could not be verified";
+    }
+  }
+
+  return { dishId, outcome: "no-serving", reason };
+};
+
+/**
+ * Batched nearby price lookup: one candidate pool for every requested dish
+ * at one origin, results in input order. Each dish independently resolves
+ * its first eligible scope (10km, then 20km, then 40km, then the requested
+ * city); a price needs a listed, current-enough observation backed by
+ * approved serving evidence. A range needs three or more comparable venues
+ * (same portion comparability key and currency), otherwise the outcome
+ * carries the single starting price. Database failures become per-dish
+ * `unavailable` outcomes through the typed NearbyPriceUnavailable channel;
+ * a missing or invalid fix becomes `unsupported-location` without a read.
+ */
+export const lookupNearbyDishPrices = Effect.fn("restaurants.lookupNearbyDishPrices")(function* (
+  input: NearbyDishPriceLookup,
+) {
+  const { dishIds, latitude, longitude, channel } = input;
+
+  for (const dishId of dishIds) {
+    if (!DECIMAL_ID.test(dishId)) {
+      return yield* new RestaurantInputError({ reason: `Invalid dish id: ${dishId}` });
+    }
+  }
+
+  if (!NEARBY_PRICE_CHANNELS.has(channel)) {
+    return yield* new RestaurantInputError({ reason: `Unsupported channel: ${channel}` });
+  }
+
+  const cityPlaceId = input.cityPlaceId ?? null;
+
+  if (cityPlaceId !== null && !DECIMAL_ID.test(cityPlaceId)) {
+    return yield* new RestaurantInputError({ reason: `Invalid city place id: ${cityPlaceId}` });
+  }
+
+  if (!isSupportedFix(latitude, -90, 90) || !isSupportedFix(longitude, -180, 180)) {
+    return dishIds.map((dishId): NearbyDishPrice => ({
+      dishId,
+      outcome: "unsupported-location",
+      reason: "Nearby prices need a valid latitude/longitude fix",
+    }));
+  }
+
+  if (dishIds.length === 0) return [];
+
+  const rows = yield* Effect.catchTag(
+    runQuery(NEARBY_PRICE_OPERATION, (sql) =>
+      nearbyDishPrices.run(sql, {
+        dish_ids: dishIds.map((dishId) => BigInt(dishId)),
+        longitude,
+        latitude,
+        channel,
+        city_place_id: cityPlaceId === null ? null : BigInt(cityPlaceId),
+      }),
+    ).pipe(
+      Effect.mapError(
+        (cause) =>
+          new NearbyPriceUnavailable({
+            operation: NEARBY_PRICE_OPERATION,
+            cause: describeCause(cause),
+          }),
+      ),
+    ),
+    "NearbyPriceUnavailable",
+    (failure) =>
+      Effect.as(
+        Effect.logWarning("Nearby dish prices unavailable", {
+          operation: failure.operation,
+          cause: failure.cause,
+        }),
+        null,
+      ),
+  );
+
+  if (rows === null) {
+    return input.dishIds.map((dishId): NearbyDishPrice => ({
+      dishId,
+      outcome: "unavailable",
+      reason: "Dish prices are temporarily unavailable",
+    }));
+  }
+
+  const rowsByDish = new Map<string, Array<NearbyDishPriceRow>>();
+
+  for (const row of rows) {
+    if (row.dish_id === null) continue;
+    const list = rowsByDish.get(row.dish_id) ?? [];
+    list.push(row);
+    rowsByDish.set(row.dish_id, list);
+  }
+
+  return input.dishIds.map((dishId) =>
+    toNearbyDishPrice(dishId, rowsByDish.get(dishId) ?? [], input),
+  );
 });

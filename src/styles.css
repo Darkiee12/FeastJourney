@@ -16,7 +16,6 @@
 @import "./components/dish/dish-page.css";
 @import "./components/personal-pages.css";
 @import "./modules/muse-copilot/muse-overhaul.css";
-@import "./modules/restaurant-discovery/components/scan-overhaul.css";
 
 @theme {
   --color-brand-blue: #2563eb;

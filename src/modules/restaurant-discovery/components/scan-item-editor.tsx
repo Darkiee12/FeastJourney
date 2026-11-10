@@ -27,21 +27,25 @@ export type ScanItem = MenuScanDocument["items"][number];
 export function ScanItemEditor({
   item,
   locale,
+  translationLanguage = locale,
   sourceLanguage,
+  menuCountry,
   onUpdate,
   onRemove,
 }: {
   readonly item: ScanItem;
   readonly locale: string;
+  readonly translationLanguage?: string;
   readonly sourceLanguage: string;
+  readonly menuCountry?: string | null | undefined;
   readonly onUpdate: (item: ScanItem) => void;
   readonly onRemove: () => void;
 }) {
   const copy = menuCopy(locale);
 
   return (
-    <details className="scan-editor-item" key={item.id}>
-      <summary lang={sourceLanguage}>{item.originalName}</summary>
+    <section className="scan-editor-item" key={item.id}>
+      <h3 lang={sourceLanguage}>{item.originalName}</h3>
       <label htmlFor={`edit-name-${item.id}`}>{copy.originalName}</label>
       <input
         id={`edit-name-${item.id}`}
@@ -55,7 +59,7 @@ export function ScanItemEditor({
       <input
         id={`edit-translation-${item.id}`}
         maxLength={300}
-        lang={locale}
+        lang={translationLanguage}
         value={item.translatedName ?? ""}
         onChange={(event) =>
           onUpdate({
@@ -64,40 +68,47 @@ export function ScanItemEditor({
           })
         }
       />
-      <label htmlFor={`edit-description-${item.id}`}>{copy.originalDescription}</label>
-      <textarea
-        id={`edit-description-${item.id}`}
-        maxLength={3000}
-        lang={sourceLanguage}
-        value={item.originalDescription ?? ""}
-        onChange={(event) =>
-          onUpdate({
-            ...item,
-            originalDescription: event.target.value === "" ? null : event.target.value,
-          })
-        }
-      />
-      <label htmlFor={`edit-description-translation-${item.id}`}>
-        {copy.translatedDescription}
-      </label>
-      <textarea
-        id={`edit-description-translation-${item.id}`}
-        maxLength={3000}
-        lang={locale}
-        value={item.translatedDescription ?? ""}
-        onChange={(event) =>
-          onUpdate({
-            ...item,
-            translatedDescription: event.target.value === "" ? null : event.target.value,
-          })
-        }
-      />
+      <details>
+        <summary>
+          {copy.originalDescription} / {copy.translatedDescription}
+        </summary>
+        <label htmlFor={`edit-description-${item.id}`}>{copy.originalDescription}</label>
+        <textarea
+          id={`edit-description-${item.id}`}
+          maxLength={3000}
+          lang={sourceLanguage}
+          value={item.originalDescription ?? ""}
+          onChange={(event) =>
+            onUpdate({
+              ...item,
+              originalDescription: event.target.value === "" ? null : event.target.value,
+            })
+          }
+        />
+        <label htmlFor={`edit-description-translation-${item.id}`}>
+          {copy.translatedDescription}
+        </label>
+        <textarea
+          id={`edit-description-translation-${item.id}`}
+          maxLength={3000}
+          lang={translationLanguage}
+          value={item.translatedDescription ?? ""}
+          onChange={(event) =>
+            onUpdate({
+              ...item,
+              translatedDescription: event.target.value === "" ? null : event.target.value,
+            })
+          }
+        />
+      </details>
       {item.variants.map((variant) => (
         <VariantEditor
           key={variant.id}
           variant={variant}
           locale={locale}
+          translationLanguage={translationLanguage}
           sourceLanguage={sourceLanguage}
+          menuCountry={menuCountry}
           onChange={(next: ScanVariant) =>
             onUpdate({
               ...item,
@@ -148,7 +159,7 @@ export function ScanItemEditor({
       <button type="button" onClick={onRemove}>
         {copy.removeDish}
       </button>
-    </details>
+    </section>
   );
 }
 

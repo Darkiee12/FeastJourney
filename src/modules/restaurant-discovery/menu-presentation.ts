@@ -8,6 +8,7 @@ import {
   type CurrencyProvenanceCode,
   type PriceAssociationCode,
 } from "@/modules/restaurant-discovery/menu-price-evidence";
+import { interpretPrintedPrice } from "@/modules/restaurant-discovery/menu-price-interpretation";
 import type { MenuScanDocument } from "@/modules/restaurant-discovery/menu-scan.schema";
 import { localizationSourceFingerprint } from "@/modules/restaurant-discovery/menu-source-hash";
 import type { MenuOffering } from "@/modules/restaurant-discovery/server/operations/discovery";
@@ -47,6 +48,7 @@ export interface InteractiveMenu {
       readonly translatedLabelProvenance?: MenuTextProvenance | undefined;
       readonly price: {
         readonly rawText: string;
+        readonly unit?: string | null | undefined;
         readonly amount: string | null;
         readonly currency: string | null;
         readonly taxTreatment: string;
@@ -105,7 +107,7 @@ export const priceAssociationOf = (
     readonly associationNote?: string | null | undefined;
   } | null,
 ): PriceAssociation => {
-  if (price === null || price.amount === null) return "unavailable";
+  if (price === null) return "unavailable";
 
   return priceAssociationToCode(
     priceAssociationFromCode(price.association, price.associationNote ?? null),
@@ -145,6 +147,7 @@ export const conversionRateFor = (
 export const presentScan = (
   document: MenuScanDocument,
   venueName: string | null,
+  menuCountry: string | null = null,
 ): InteractiveMenu => ({
   venueName,
   sourceLanguage: document.sourceLanguage,
@@ -153,25 +156,14 @@ export const presentScan = (
   provenance: "private_scan",
   items: document.items.map((item) => ({
     ...item,
-    section: null,
+    section: item.section ?? null,
     assetIds: item.sourceReferences.map((reference) => reference.assetId),
     dishId: null,
     variants: item.variants.map((variant) => ({
       ...variant,
       // Additive BT evidence round-trips verbatim through the spread;
       // legacy rows carry no extras and keep their previous rendering.
-      price:
-        variant.price === null
-          ? null
-          : {
-              rawText: variant.price.rawText,
-              amount: variant.price.amount,
-              currency: variant.price.currency,
-              currencyProvenance: variant.price.currencyProvenance,
-              association: variant.price.association,
-              associationNote: variant.price.associationNote,
-              taxTreatment: variant.price.taxTreatment,
-            },
+      price: variant.price === null ? null : interpretPrintedPrice(variant.price, menuCountry),
       provenance: "Unverified menu extraction",
     })),
   })),
@@ -786,7 +778,9 @@ export function menuSubtotal(
       line.lineAmount === null ||
       price === null ||
       price.currency === null ||
-      !isCurrency(price.currency)
+      !isCurrency(price.currency) ||
+      priceAssociationOf(price) !== "clear" ||
+      priceTrustOf(price) === "unknown"
     ) {
       return MenuSubtotal.Unavailable({
         reason: "Some prices or currencies are unknown. Confirm with the waiter.",

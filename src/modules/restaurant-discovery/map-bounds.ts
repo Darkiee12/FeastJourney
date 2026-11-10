@@ -69,4 +69,14 @@ export const CITY_PRESETS: ReadonlyArray<CityPreset> = [
     east: 77.78,
     north: 13.15,
   },
+  {
+    id: "los-angeles",
+    longitude: -118.2437,
+    latitude: 34.0522,
+    zoom: 11,
+    west: -118.7,
+    south: 33.65,
+    east: -117.7,
+    north: 34.35,
+  },
 ];

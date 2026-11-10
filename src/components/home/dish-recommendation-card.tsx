@@ -6,10 +6,15 @@ import { dishRestaurantsSearch } from "@/components/dish/dish-actions";
 import { dishCarouselTitle, toCarouselPublishedImage } from "@/components/dish/dish-carousel";
 import { DishMedia } from "@/components/dish/dish-media";
 import { cleanReasonForDisplay, SelectedDishReason } from "@/components/home/recommend/quiz-status";
+import type { NearbyDishPrice } from "@/modules/food-discovery/server/operations/nearby-price-lookup";
 import type {
   RankedDishSummary,
   RankingProvenance,
 } from "@/modules/food-discovery/server/operations/recommendation-service";
+import {
+  useExchangeRates,
+  usePreferredCurrency,
+} from "@/modules/restaurant-discovery/components/currency-tools";
 import {
   SaveDishButton,
   statusForDish,
@@ -18,6 +23,8 @@ import {
 } from "@/modules/user/components/save-dish-button";
 import type { SessionState } from "@/modules/user/session.functions";
 import type { Locale, Messages } from "@/shared/i18n";
+import { convertAmount, formatMoney, isAmount, isCurrency } from "@/shared/money";
+import type { ExchangeRate } from "@/shared/money";
 
 /**
  * Card-level provenance: the single explicit reason a card may or may not
@@ -158,6 +165,185 @@ export function MuseReasonBlock({
 }
 
 /**
+ * Map deep link for a priced nearby dish. Reuses the `dishRestaurantsSearch`
+ * base (dish id + fromDish back-link) and appends the serving scope the
+ * lookup actually served, so the map opens on the same evidence — radius in
+ * km for the near-you lane, or the canonical city when the lookup resolved
+ * city scope. The restaurant search route consumes
+ * `scope`/`radiusKm`/`cityPlaceId`/`cityLabel` (cityLabel bridges the
+ * place-registry id to the map's preset ids). Rendered as a plain anchor
+ * carrying the same query string the typed route validates.
+ */
+export const nearbyMapUrl = (
+  dishId: string,
+  dishSlug: string,
+  scope: NearbyDishPrice["scope"],
+): string => {
+  const params = new URLSearchParams({
+    dish: dishId,
+    fromDish: dishSlug,
+    channel: "dine_in",
+  });
+
+  if (scope?.kind === "city") {
+    params.set("scope", "city");
+    params.set("cityPlaceId", scope.cityPlaceId);
+    params.set("cityLabel", scope.cityLabel);
+  } else {
+    params.set("scope", "radius");
+    params.set("radiusKm", scope?.kind === "radius" ? String(scope.radiusKm) : "10");
+  }
+
+  return `/restaurants?${params.toString()}`;
+};
+
+/** Observed prices older than this render a subdued freshness note. */
+export const STALE_OBSERVED_DAYS = 30;
+
+const MS_PER_DAY = 86_400_000;
+
+/** Unparseable dates never claim staleness — absence of evidence is not age. */
+export const isStaleObservedAt = (observedAt: string, nowMs: number = Date.now()): boolean => {
+  const observedMs = Date.parse(observedAt);
+
+  if (!Number.isFinite(observedMs)) {
+    return false;
+  }
+
+  return nowMs - observedMs > STALE_OBSERVED_DAYS * MS_PER_DAY;
+};
+
+/**
+ * Glanceable nearby-price line for precise ("Near me") recommendations:
+ * "From $X · Within 10 km · Find on map". Renders ONLY for priced outcomes
+ * with a valid listed amount/currency — every other outcome (serving without
+ * price, no serving, unavailable, unsupported location), lookup failures, and
+ * invalid money render nothing, so the card stays usable and never claims a
+ * restaurant does or does not exist. Under three priced venues shows the
+ * starting price only; a qualifying range (≥3 comparable venues) shows the
+ * min–max span. Preferred-currency equivalents ride the exact money helpers
+ * and render only when rates resolve; otherwise the original stands alone.
+ */
+export function NearbyPriceLine({
+  dishId,
+  dishSlug,
+  lang,
+  price,
+}: {
+  readonly dishId: string;
+  readonly dishSlug: string;
+  readonly lang: Locale;
+  readonly price: NearbyDishPrice;
+}) {
+  const preference = usePreferredCurrency();
+  const money = price.outcome === "priced" ? (price.price ?? null) : null;
+  const bases = money === null ? [] : [money.currency];
+  const { rates } = useExchangeRates(bases, preference.currency);
+
+  if (money === null || !isAmount(money.amount) || !isCurrency(money.currency)) {
+    return null;
+  }
+
+  const rate = rates.get(money.currency) ?? null;
+  let converted: string | null = null;
+
+  if (rate !== null && rate.quote !== money.currency) {
+    try {
+      converted = convertAmount(money.amount, money.currency, rate.quote, rate);
+    } catch {
+      converted = null;
+    }
+  }
+
+  const range = price.range ?? null;
+
+  const showRange =
+    range !== null &&
+    range.venueCount >= 3 &&
+    isAmount(range.min.amount) &&
+    isCurrency(range.min.currency) &&
+    isAmount(range.max.amount) &&
+    isCurrency(range.max.currency);
+
+  const fromLabel = lang === "vi" ? "Từ" : "From";
+  const scopeLabel = scopeLabelFor(price, lang);
+  const variantLabel = price.variant?.name ?? null;
+  const stale = isStaleObservedAt(money.observedAt);
+  const staleLabel = lang === "vi" ? "Giá có thể đã cũ" : "May be out of date";
+  const mapLabel = lang === "vi" ? "Xem bản đồ" : "Find on map";
+
+  let mainText = `${fromLabel} ${formatMoney(money.amount, money.currency, lang)}`;
+
+  if (showRange) {
+    mainText = `${fromLabel} ${formatMoney(range.min.amount, range.min.currency, lang)}–${formatMoney(range.max.amount, range.max.currency, lang)}`;
+  }
+
+  const rangeConverted =
+    showRange && rate !== null ? rangeToConverted(range.min, range.max, rate) : null;
+
+  return (
+    <p className="mt-1 text-xs leading-relaxed break-words text-muted">
+      <span className="font-bold text-ink tabular-nums">{mainText}</span>
+      {converted !== null && rate !== null ? (
+        <span className="tabular-nums">
+          {" "}
+          ≈ {converted} {rate.quote}
+        </span>
+      ) : null}
+      {showRange && rangeConverted !== null && rate !== null ? (
+        <span className="tabular-nums">
+          {" "}
+          ≈ {rangeConverted} {rate.quote}
+        </span>
+      ) : null}
+      {variantLabel !== null ? <span> · {variantLabel}</span> : null}
+      {scopeLabel !== null ? <span> · {scopeLabel}</span> : null}
+      {stale ? <span title={money.observedAt}> · {staleLabel}</span> : null} ·{" "}
+      <a
+        href={nearbyMapUrl(dishId, dishSlug, price.scope)}
+        className="font-bold text-food-orange-strong underline decoration-food-orange/60 underline-offset-2 hover:text-food-orange-dark"
+      >
+        {mapLabel}
+      </a>
+    </p>
+  );
+}
+
+const scopeLabelFor = (price: NearbyDishPrice, lang: Locale): string | null => {
+  const scope = price.scope ?? null;
+
+  if (scope === null) {
+    return null;
+  }
+
+  if (scope.kind === "city") {
+    return scope.cityLabel;
+  }
+
+  return lang === "vi" ? `Trong ${scope.radiusKm} km` : `Within ${scope.radiusKm} km`;
+};
+
+const rangeToConverted = (
+  min: { readonly amount: string; readonly currency: string },
+  max: { readonly amount: string; readonly currency: string },
+  rate: ExchangeRate,
+): string | null => {
+  if (min.currency !== rate.base || max.currency !== rate.base) {
+    return null;
+  }
+
+  if (rate.quote === rate.base) {
+    return null;
+  }
+
+  try {
+    return `${convertAmount(min.amount, min.currency, rate.quote, rate)}–${convertAmount(max.amount, max.currency, rate.quote, rate)}`;
+  } catch {
+    return null;
+  }
+};
+
+/**
  * Compact action footer shared by every recommendation card. Dish name keeps
  * the full content width above; this row only carries secondary actions:
  * Save (existing member/guest favorite flow, unchanged), Find places
@@ -242,6 +428,7 @@ export function DishRecommendationCard({
   dish,
   favoriteStatus,
   lang,
+  nearbyPrice,
   presentation = "full",
   provenance,
   returnTo,
@@ -251,6 +438,13 @@ export function DishRecommendationCard({
   readonly dish: RankedDishSummary;
   readonly favoriteStatus: FavoriteStatusQuery;
   readonly lang: Locale;
+  /**
+   * Optional nearby-price enrichment for precise ("Near me") runs.
+   * Rendered through `NearbyPriceLine`, which shows nothing for unpriced
+   * outcomes and lookup failures — omitting the prop keeps the card
+   * exactly as before.
+   */
+  readonly nearbyPrice?: NearbyDishPrice | undefined;
   readonly presentation?: DishRecommendationPresentation | undefined;
   readonly provenance: CardProvenance;
   readonly returnTo: string;
@@ -344,6 +538,14 @@ export function DishRecommendationCard({
                 {description}
               </p>
             ) : null}
+            {nearbyPrice === undefined ? null : (
+              <NearbyPriceLine
+                dishId={dish.id}
+                dishSlug={dish.slug}
+                lang={lang}
+                price={nearbyPrice}
+              />
+            )}
           </div>
         </div>
         <div className="border-t border-border-soft px-3 py-2.5">
@@ -420,6 +622,9 @@ export function DishRecommendationCard({
             {description}
           </p>
         ) : null}
+        {nearbyPrice === undefined ? null : (
+          <NearbyPriceLine dishId={dish.id} dishSlug={dish.slug} lang={lang} price={nearbyPrice} />
+        )}
         {dish.categorySlugs.length > 0 ? (
           <ul className="flex flex-wrap gap-1.5">
             {dish.categorySlugs.map((category) => (

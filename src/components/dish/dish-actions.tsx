@@ -27,7 +27,34 @@ export interface DishRestaurantsSearch {
   readonly lang: Locale;
   readonly dish: string;
   readonly fromDish: string;
+  /** Sales channel the handoff price was computed for. Absent on the
+   *  legacy helper, which predates scoped handoffs. */
+  readonly channel?: DishSearchChannel | undefined;
+  /** Map-handoff scope kind. Absent on the legacy helper. */
+  readonly scope?: DishSearchScopeKind | undefined;
+  /** Radius in km for `radius` scope. Contract values: 10, 20, 40. */
+  readonly radiusKm?: DishRadiusKm | undefined;
+  /** City preset id for `city` scope (see restaurant-discovery
+   *  `CITY_PRESETS`). Never exact coordinates (privacy). */
+  readonly cityPlaceId?: string | undefined;
 }
+
+export type DishSearchScopeKind = "radius" | "city";
+
+export type DishRadiusKm = 10 | 20 | 40;
+
+export type DishSearchChannel = "dine_in" | "takeaway" | "delivery";
+
+/**
+ * Map-handoff scope for a priced Food Journey recommendation: the rail
+ * links "Find on map" with dish identity plus the scope the price was
+ * computed for — a radius around the user or a city. Exact coordinates
+ * never travel in the URL; the restaurant map resolves the scope to a
+ * geographic query on mount.
+ */
+export type DishSearchScope =
+  | { readonly kind: "radius"; readonly radiusKm: DishRadiusKm }
+  | { readonly kind: "city"; readonly cityPlaceId: string };
 
 export const dishRestaurantsSearch = (
   dishId: string,
@@ -38,6 +65,40 @@ export const dishRestaurantsSearch = (
   fromDish: dishSlug,
   lang,
 });
+
+/**
+ * Scoped restaurant search for a priced recommendation handoff: dish
+ * identity plus the price scope and channel, matching the `/restaurants`
+ * `dish`/`fromDish`/`scope`/`radiusKm`/`cityPlaceId`/`channel` URL
+ * contract. The legacy helper stays byte-identical for existing callers.
+ */
+export const dishRestaurantsSearchWithScope = (
+  dishId: string,
+  dishSlug: string,
+  lang: Locale,
+  scope: DishSearchScope,
+  channel: DishSearchChannel = "dine_in",
+): DishRestaurantsSearch => {
+  if (scope.kind === "radius") {
+    return {
+      dish: dishId,
+      fromDish: dishSlug,
+      lang,
+      channel,
+      scope: scope.kind,
+      radiusKm: scope.radiusKm,
+    };
+  }
+
+  return {
+    dish: dishId,
+    fromDish: dishSlug,
+    lang,
+    channel,
+    scope: scope.kind,
+    cityPlaceId: scope.cityPlaceId,
+  };
+};
 
 export interface DishActionsProps {
   /** Decimal dish id string; passed through as the `dish` search filter. */

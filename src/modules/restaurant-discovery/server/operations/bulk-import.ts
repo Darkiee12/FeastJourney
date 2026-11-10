@@ -92,6 +92,14 @@ export const COVERAGE_REGIONS: ReadonlyArray<CoverageRegion> = [
     minLatitude: 12.75,
     maxLatitude: 13.3,
   },
+  {
+    name: "Los Angeles",
+    countryCode: "US",
+    minLongitude: -118.7,
+    maxLongitude: -117.7,
+    minLatitude: 33.65,
+    maxLatitude: 34.35,
+  },
 ];
 
 export const COVERAGE_BOUNDS: CoverageRegion = PRIMARY_REGION;

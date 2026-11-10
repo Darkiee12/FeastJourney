@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { Cause, Effect, Exit } from "effect";
 import { z } from "zod";
 
-import { type MenuExtraction } from "@/modules/restaurant-discovery/menu-scan.schema";
+import { type StrictMenuExtraction } from "@/modules/restaurant-discovery/menu-scan.schema";
 import { serverEnv } from "@/server/env";
 import { resolveMenuScanConfig, type MenuScanConfig } from "@/server/integrations/menu-scan-config";
 import {
@@ -25,7 +25,7 @@ const input: MenuExtractionInput = {
   requestId: "synthetic-menu-contract-test",
 };
 
-const extraction: MenuExtraction = {
+const extraction: StrictMenuExtraction = {
   sourceLanguage: "vi",
   menuTitle: "Thực đơn",
   orderIntroduction: {
@@ -34,6 +34,7 @@ const extraction: MenuExtraction = {
   },
   items: [
     {
+      section: null,
       originalName: "Phở bò",
       translatedName: "Beef phở",
       originalDescription: null,
@@ -46,6 +47,7 @@ const extraction: MenuExtraction = {
           translatedLabel: "Large bowl",
           price: {
             rawText: "65.000đ",
+            unit: null,
             amount: "65000",
             currency: "VND",
             currencyProvenance: "printed",
@@ -73,7 +75,7 @@ function config(overrides: Partial<MenuScanConfig> = {}): MenuScanConfig {
   return { ...resolved, ...overrides };
 }
 
-function responseFor(document: MenuExtraction = extraction): Response {
+function responseFor(document: StrictMenuExtraction = extraction): Response {
   return Response.json({
     choices: [
       {
@@ -480,17 +482,18 @@ describe("Muse menu prompt tightening and abstention", () => {
     expect(developer).toContain("Phở bò");
     expect(developer).toContain("Phở gà");
     expect(developer).toContain("never copy a price across items");
-    expect(developer).toContain("thousands separator");
-    expect(developer).toContain("amount null and currency null");
-    expect(developer).toContain("Uncertainty states:");
+    expect(developer).toContain("A lone separator");
+    expect(developer).toContain("Numeric interpretation and currency identity are independent");
+    expect(developer).toContain("Ambiguous separators leave amount null");
     expect(developer).toContain("items:[]");
   });
 
   test("two-column small/large prices pass through with their printed associations", async () => {
-    const columnDocument: MenuExtraction = {
+    const columnDocument: StrictMenuExtraction = {
       ...extraction,
       items: [
         {
+          section: null,
           originalName: "Phở bò",
           translatedName: "Beef phở",
           originalDescription: null,
@@ -503,6 +506,7 @@ describe("Muse menu prompt tightening and abstention", () => {
               translatedLabel: "Small",
               price: {
                 rawText: "65.000đ",
+                unit: null,
                 amount: "65000",
                 currency: "VND",
                 currencyProvenance: "printed",
@@ -516,6 +520,7 @@ describe("Muse menu prompt tightening and abstention", () => {
               translatedLabel: "Large",
               price: {
                 rawText: "80.000đ",
+                unit: null,
                 amount: "80000",
                 currency: "VND",
                 currencyProvenance: "printed",
@@ -529,6 +534,7 @@ describe("Muse menu prompt tightening and abstention", () => {
           uncertainties: [],
         },
         {
+          section: null,
           originalName: "Phở gà",
           translatedName: "Chicken phở",
           originalDescription: null,
@@ -541,6 +547,7 @@ describe("Muse menu prompt tightening and abstention", () => {
               translatedLabel: "Small",
               price: {
                 rawText: "60.000đ",
+                unit: null,
                 amount: "60000",
                 currency: "VND",
                 currencyProvenance: "printed",
@@ -554,6 +561,7 @@ describe("Muse menu prompt tightening and abstention", () => {
               translatedLabel: "Large",
               price: {
                 rawText: "75.000đ",
+                unit: null,
                 amount: "75000",
                 currency: "VND",
                 currencyProvenance: "printed",
@@ -575,7 +583,7 @@ describe("Muse menu prompt tightening and abstention", () => {
   });
 
   test("separator-ambiguous prices abstain with null amount, null currency, and uncertainties", async () => {
-    const document: MenuExtraction = {
+    const document: StrictMenuExtraction = {
       ...extraction,
       items: extraction.items.map((item) => ({
         ...item,
@@ -583,6 +591,7 @@ describe("Muse menu prompt tightening and abstention", () => {
           ...variant,
           price: {
             rawText: "1,250",
+            unit: null,
             amount: null,
             currency: null,
             currencyProvenance: "unknown",

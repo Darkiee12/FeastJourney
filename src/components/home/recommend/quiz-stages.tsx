@@ -33,6 +33,7 @@ import {
   type PreciseStatus,
 } from "@/components/home/recommend/use-precise-location";
 import { nearestCityFn, searchCitiesFn } from "@/modules/food-discovery/food.functions";
+import type { RecommendationLocation } from "@/modules/food-discovery/food.schema";
 import {
   type MealOccasion,
   type RecommendationMood,
@@ -149,6 +150,30 @@ export const moodLabelFor = (mood: RecommendationMood, copy: Messages): string =
 
 const countryNameFor = (code: string, options: ReadonlyArray<CountryOption>): string | undefined =>
   options.find((option) => option.code === code)?.label;
+
+/**
+ * Precise-only gate for nearby-price enrichment. Returns the visitor
+ * coordinates ONLY when the submitted recommendation location is a precise
+ * fix — country, city, destination, worldwide, and absent locations yield
+ * null, so enrichment can never start for them and their behavior is
+ * untouched. Coordinates stay ephemeral client memory with the same
+ * lifetime as the quiz draft; the caller passes them straight to the price
+ * bridge and never persists or logs them.
+ */
+export interface PreciseLookupOrigin {
+  readonly latitude: number;
+  readonly longitude: number;
+}
+
+export const preciseLookupOriginFor = (
+  location: RecommendationLocation | undefined,
+): PreciseLookupOrigin | null => {
+  if (location === undefined || location.kind !== "precise") {
+    return null;
+  }
+
+  return { latitude: location.latitude, longitude: location.longitude };
+};
 
 export interface PreciseControl {
   readonly status: PreciseStatus;
